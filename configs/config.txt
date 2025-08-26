@@ -55,11 +55,13 @@ S2_INFLATION=1.1
 QOS_S3_SHORT=normal
 QOS_S3_LONG=vlong
 MEM_SHORT=500M
-MEM_LONG=1GB
-MAFFT_OPT_BIG=--maxiterate 1000 --localpair
-MAFFT_OPT_SMALL=--maxiterate 1000 --localpair
-TREE_METHOD_BIG=iqtree2
-TREE_METHOD_SMALL=iqtree2
+MEM_LONG=1G
+#MAFFT_OPT_BIG=--maxiterate 1000 --localpair
+#MAFFT_OPT_SMALL=--maxiterate 1000 --localpair
+MAFFT_OPT_BIG=""
+MAFFT_OPT_SMALL=""
+TREE_METHOD_BIG=fasttree
+TREE_METHOD_SMALL=fasttree
 
 #Generax
 QOS_S5=long
