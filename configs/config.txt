@@ -1,0 +1,69 @@
+#############################################
+GENEFAM_INFO=genefam.csv 
+INFASTA=data/input.fasta
+REFNAMES=data/Mmus_gene_names.csv
+REFSPECIES=Mmus
+PROJECT=phy
+SPECIES_TREE=data/species_tree.newick
+#############################################
+# S1 - hmmmsearch 
+# S2 - clustering 
+# S3 - alignment & phylogeny
+#############################################
+
+#Pipeline params
+NCPU=8
+# number of cores per alignment-phylogeny job
+
+QOS_S1=test
+QOS_S2=short
+MEM_S1=300M
+MEM_S2=500M
+MIN_SEQ=5 
+
+#Time specifications
+TIME_S1=00:10:00
+TIME_S2=00:30:00
+TIME_S3=00:01:00
+TIME_S3_SHORT=1:00:00
+TIME_S3_LONG=12:00:00
+
+
+# min number of sequences in HG
+MAX_SEQ=300 
+# separate between small groups
+MAX_N=1500 
+# maximum number of sequences in the cluster to trigger reclustering 
+
+# Directories
+iOUTDIR=results
+LOG_DIR=logs
+SEARCH_DIR=results/search
+CLUSTER_DIR=results/clusters
+TREE_DIR=results/gene_trees
+ALIGN_DIR=results/align
+GENERAX_DIR=results/generax
+
+# S1 (HMM search) settings
+PFAMDB=/users/asebe/xgraubove/data/pfam/Pfam-A.hmm
+DOMAIN_EXPAND=30
+# S2 (Sequence clustering) settings 
+S2_NCPU=2
+S2_INFLATION=1.1
+
+# Phylogeny job params
+QOS_S3_SHORT=normal
+QOS_S3_LONG=vlong
+MEM_SHORT=500M
+MEM_LONG=1GB
+MAFFT_OPT_BIG=--maxiterate 1000 --localpair
+MAFFT_OPT_SMALL=--maxiterate 1000 --localpair
+TREE_METHOD_BIG=iqtree2
+TREE_METHOD_SMALL=iqtree2
+
+#Generax
+QOS_S5=long
+MEM_S5=10G
+TIME_S5=1:00:00
+GENERAX_TMP=tmp/generax_configs
+GENERAX_MAXSPR=7
