@@ -1,3 +1,5 @@
 tmp/*
 results/*
 hmms/*
+logs/*
+data/input*
