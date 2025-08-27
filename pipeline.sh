@@ -58,22 +58,21 @@ mkdir -p $TREE_DIR
 mkdir -p $ALIGN_DIR
 echo -e '\n\n\n'
 
-
 for L in $(grep -v '#' $GENEFAM_INFO  | awk '{print $NF"."$1}'); do
 
     PREF=$(echo $L | cut -f 1 -d .)
     FAMILY=$(echo $L | cut -f 2 -d .)
     echo "${PREF}-${FAMILY}"
     
-    OUTFILE=${SEARCH_DIR}/${PREF}.${FAMILY}.domains.csv
+    OUTFILE=${SEARCH_DIR}/${PREF}.${FAMILY}.genes.list
     
     if [ ! -f $OUTFILE ]; then
         # s01 HMM search 
-        job_out=$(sbatch --time=${TIME_S1} --qos=${QOS_S1} --mem=${MEM_S1} --job-name=${PROJECT}s1.${PREF}.${FAMILY} --output=$LOG_DIR/s1/%x.%j.out --error=$LOG_DIR/s1/%x.%j.out workflow/s01_search.sh ${FAMILY}  ${GENEFAM_INFO} ${INFASTA} $SEARCH_DIR)
+        job_out=$(sbatch --time=${TIME_S1} --qos=${QOS_S1} --mem=${MEM_S1} --job-name=${PROJECT}.s1.${PREF}.${FAMILY} --output=$LOG_DIR/s1/%x.%j.out --error=$LOG_DIR/s1/%x.%j.out workflow/s01_search.sh ${FAMILY}  ${GENEFAM_INFO} ${INFASTA} $SEARCH_DIR)
         jid=$(echo $job_out | awk '{print $4}')
         echo "Submitted ${jid}: ${PROJECT}s1.${PREF}.${FAMILY}"
         # s02 Clustering 
-        job_out=$(sbatch --qos=${QOS_S2} --time=${TIME_S2} --dependency=afterok:$jid --mem=${MEM_S2} --job-name=${PROJECT}s2.${PREF}.${FAMILY} --output=$LOG_DIR/s2/%x.%j.out --error=$LOG_DIR/s2/%x.%j.out workflow/s02_cluster.sh ${SEARCH_DIR}/${PREF}.${FAMILY}.domains.fasta ${CLUSTER_DIR}/${PREF}.${FAMILY}_cluster.tsv $MAX_N)
+        job_out=$(sbatch --qos=${QOS_S2} --time=${TIME_S2} --dependency=afterok:$jid --mem=${MEM_S2} --job-name=${PROJECT}.s2.${PREF}.${FAMILY} --output=$LOG_DIR/s2/%x.%j.out --error=$LOG_DIR/s2/%x.%j.out workflow/s02_cluster.sh ${SEARCH_DIR}/${PREF}.${FAMILY}.domains.fasta ${CLUSTER_DIR}/${PREF}.${FAMILY}_cluster.tsv $MAX_N)
         jid=$(echo $job_out | awk '{print $4}')
         echo "Submitted ${jid}: ${PROJECT}s2.${PREF}.${FAMILY}"
         # launch a job (launcher) that will launch 2 arrays
@@ -90,7 +89,7 @@ for L in $(grep -v '#' $GENEFAM_INFO  | awk '{print $NF"."$1}'); do
             workflow/s03_phylogeny.sh $PREF $FAMILY $MIN_SEQ $MAX_SEQ $NCPU)
         jid=$(echo $job_out | awk '{print $4}')
         echo "Submitted ${jid}: ${PROJECT}s3.${PREF}.${FAMILY}"
-    else
-        echo "Found ${OUTFILE}. Skipping ...."
+   # else
+        #echo "Found ${OUTFILE}. Skipping ...."
     fi   
 done

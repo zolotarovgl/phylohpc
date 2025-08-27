@@ -7,16 +7,18 @@ if [ "$#" -ne 4 ]; then
     exit 1
 fi
 
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') $0 start"
+source workflow/functions.sh
+CONFIG=configs/config.txt
+read_config $CONFIG
+
 FAMILY=$1 # Family from genefam file, e.g., Insulin
 GENEFAM_INFO=$2
 INFASTA=$3
 OUTDIR=$4
 
 #
-echo "$(date '+%Y-%m-%d %H:%M:%S') $0 start"
-source workflow/functions.sh
-CONFIG=configs/config.txt
-read_config $CONFIG
 
 NCPU=10
 # Run the Python script
