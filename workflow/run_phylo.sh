@@ -67,6 +67,6 @@ fi
     echo "Tree done."
 fi
     echo "${LOGGING} python phylogeny/main.py possvm -t $TREE_FILE --refsps $REFSPECIES -r $REFNAMES -o ${OUT_PREFIX}"
-    python phylogeny/main.py possvm -t $TREE_FILE --refsps $REFSPECIES -r $REFNAMES -o ${OUT_PREFIX}. 
+    python phylogeny/main.py possvm -t $TREE_FILE --refsps $REFSPECIES -r $REFNAMES -o ${OUT_PREFIX}"." 
 fi
 echo "${LOGGING} Phylogeny done."

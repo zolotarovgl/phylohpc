@@ -23,17 +23,17 @@ read_config() {
     #echo "------------------"
 }
 
-
 check_file_exists() {
     local file="$1"
-
     if [[ ! -f "$file" ]]; then
-        echo "Error: File '$file' does not exist."
-        exit 1
+        echo "Warning: File '$file' does not exist."
+        return 1
     else
         echo "$file exists"
+        return 0
     fi
 }
+
 
 get_ram() {
     sacct --format=JobID,MaxRSS%9 -j "$1"
