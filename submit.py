@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--mem", default="1G", help="Memory")
     parser.add_argument("--time", default="1:00:00", help="Walltime")
     parser.add_argument("-n", "--dry-run", action="store_true", help="Dry run: only print the sbatch command")
+    parser.add_argument("--mafft",default = "--maxiterate 1000 --localpair", help = "MAFFT settings")
     args = parser.parse_args()
 
     config = parse_bash_config(args.configfile)
@@ -54,7 +55,7 @@ def main():
         out_fasta = f"{ALIGN_DIR}/{PREF}.{FAMILY}.{HG}.aln.fasta"
         if not os.path.isfile(in_fasta):
             sys.exit(f"Error: file {in_fasta} does not exist")
-        wrap = f'python phylogeny/main.py align -f {in_fasta} -o {out_fasta} -c {args.cpus} -m "--maxiterate 1000 --localpair"'
+        wrap = f'python phylogeny/main.py align -f {in_fasta} -o {out_fasta} -c {args.cpus} -m "{args.mafft}"'
 
     elif args.mode == "possvm":
         tree_file = f"{TREE_DIR}/{PREF}.{FAMILY}.{HG}.treefile"
