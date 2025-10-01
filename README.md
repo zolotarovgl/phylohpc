@@ -1,5 +1,12 @@
-# Configuration  
 
+# Installation  
+
+```bash
+git clone --recurse-submodules https://github.com/zolotarovgl/phylohpc.git
+```
+
+
+# Configuration  
 
 `configs/config.txt` - a config file with pipeline settings.   
 `species_list` - the list of species prefixes to use for the pipeline  
@@ -22,4 +29,11 @@ bash pipeline.sh
 
 - add GeneRax 
 - add GeneRax explainer   
-- add updated species tree and an example one 
+- add updated species tree and an example one
+
+
+
+# Changes   
+
+
+ 

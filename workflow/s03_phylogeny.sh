@@ -72,7 +72,7 @@ awk -v PREF=$PREFIX -v FAMILY=$FAMILY '{print PREF"."FAMILY"."$1}' tmp/clusterin
 N=$(wc -l < tmp/clustering/${PREFIX}.${FAMILY}.clusters_big.prefs)
 echo "Submitting ${N} big jobs for ${PREFIX}.${FAMILY}"
 # Usage: run_phylo_array.sh <INPUT_LIST> [OUTDIR] [REFNAMES] [REFSPECIES] [NCPU] [TREE_METHOD] 
-sbatch --job-name=s3.${PREFIX}.${FAMILY}.big \
+sbatch --job-name=${PROJECT}.s3.${PREFIX}.${FAMILY}.big \
        --output=logs/arrays/s3.${PREFIX}.${FAMILY}.big_%A_%a.out \
        --error=logs/arrays/s3.${PREFIX}.${FAMILY}.big_%A_%a.err \
        --array=1-$N \
@@ -88,7 +88,7 @@ awk -v PREF=$PREFIX -v FAMILY=$FAMILY '{print PREF"."FAMILY"."$1}' tmp/clusterin
 # run job array on a file prefix 
 N=$(wc -l < tmp/clustering/${PREFIX}.${FAMILY}.clusters_small.prefs)
 echo "Submitting ${N} small jobs for ${PREFIX}.${FAMILY}"
-sbatch --job-name=s3.${PREFIX}.${FAMILY}.small \
+sbatch --job-name=${PROJECT}.s3.${PREFIX}.${FAMILY}.small \
        --output=logs/arrays/s3.${PREFIX}.${FAMILY}.small_%A_%a.out \
        --error=logs/arrays/s3.${PREFIX}.${FAMILY}.small_%A_%a.err \
        --array=1-$N \
