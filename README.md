@@ -21,12 +21,19 @@ bash workflow/prepare_fasta.sh species_list data/input.fasta
 ```
 
 
+The following command will launch the pipeline (first pass). 
 ```bash
 bash pipeline.sh   
 ```
+Some jobs will inevitably fail do to the amount of allocated resources. Thus, the status of each homology group should be checked:
+```bash
+bash workflow/get_hg_status.sh
+``` 
+`[HG]\t[clustering][alignment][phylogeny][possvm]`
 
 # TODOs:   
 
+- don't run for the HGs without the species of interest!  
 - add GeneRax 
 - add GeneRax explainer   
 - add updated species tree and an example one
