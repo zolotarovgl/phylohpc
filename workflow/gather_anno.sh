@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 
-# defaults
 SEARCH_DIR="results/search"
 TREE_DIR="results/gene_trees"
 ID=""
 OUTFILE=""
 
-# parse named args
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --id) ID="$2"; shift 2;;
@@ -17,17 +15,31 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$ID" || -z "$OUTFILE" ]]; then
-    echo "Usage: $0 --id ID --outfile OUTFILE [--search-dir DIR] [--tree-dir DIR]"
+if [[ -z "$ID" ]]; then
+    echo "Usage: $0 --id ID [--outfile OUTFILE] [--search-dir DIR] [--tree-dir DIR]"
     exit 1
 fi
 
 cat "${TREE_DIR}"/*groups.csv | grep "$ID" > tmp_anno
 cat "${SEARCH_DIR}"/*.genes.list | grep "$ID" | sort | uniq > ids_todo
 
-> gene2class; for FILE in $(ls ${SEARCH_DIR}/*.genes.list); do PREF=$(basename $FILE | sed 's/.genes.list//'); grep $ID $FILE | awk -v PREF=$PREF '{print $1"\t"PREF}'; done >> gene2class
+#> gene2class
+#for FILE in ${SEARCH_DIR}/*.genes.list; do
+#    PREF=$(basename "$FILE" | sed 's/.genes.list//')
+#    grep "$ID" "$FILE" | awk -v PREF=$PREF '{print $1"\t"PREF}'
+#done >> gene2class
+#RESULT=$(awk 'NR==FNR{dict[$1]=$2"\t"$3"\t"$4;next}{if($1 in dict) print $1"\t"dict[$1]; else print $1"\tUnclassified"}' tmp_anno ids_todo | awk 'BEGIN{OFS="\t"}FNR==NR{d[$1]=$2;next}{if($2=="Unclassified"){$2=d[$1]":Unclassified"};print $0}' gene2class -)
 
-awk 'NR==FNR{dict[$1]=$2"\t"$3"\t"$4;next}{if($1 in dict) print $1"\t"dict[$1]; else print $1"\tUnclassified"}' tmp_anno ids_todo | awk 'BEGIN{OFS="\t"}FNR==NR{d[$1]=$2;next}{if($2=="Unclassified"){$2=d[$1]":Unclassified"};print $0}' gene2class - > "$OUTFILE"
 
-rm gene2class tmp_anno ids_todo
+bash workflow/get_gene2cluster.sh configs/config.txt pep2hg
+RESULT=$(awk 'NR==FNR{dict[$1]=$2"\t"$3"\t"$4;next}{if($1 in dict) print $1"\t"dict[$1]; else print $1"\tUnclassified"}' tmp_anno ids_todo | awk 'BEGIN{OFS="\t"}FNR==NR{d[$1]=$2;next}{if($2=="Unclassified"){$2=d[$1]":Unclassified"};print $0}' pep2hg -)
+
+if [[ -n "$OUTFILE" ]]; then
+    echo "$RESULT" > "$OUTFILE"
+else
+    echo "$RESULT"
+fi
+
+rm pep2hg tmp_anno ids_todo
 exit 0
+
