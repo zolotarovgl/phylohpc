@@ -17,7 +17,7 @@ NCPU=4
 
 QOS_S1=test
 QOS_S2=short
-MEM_S1=300M
+MEM_S1=1G
 MEM_S2=2Gb
 MIN_SEQ=5 
 
@@ -46,15 +46,15 @@ GENERAX_DIR=results/generax
 
 # S1 (HMM search) settings
 PFAMDB=/users/asebe/xgraubove/data/pfam/Pfam-A.hmm
-DOMAIN_EXPAND=30
+DOMAIN_EXPAND=50
 # S2 (Sequence clustering) settings 
-S2_NCPU=2
+S2_NCPU=8
 S2_INFLATION=1.1
 
 # Phylogeny job params
 QOS_S3_SHORT=normal
 QOS_S3_LONG=vlong
-MEM_SHORT=500M
+MEM_SHORT=1G
 MEM_LONG=1G
 MAFFT_OPT_BIG=--maxiterate 1000 --localpair
 MAFFT_OPT_SMALL=--maxiterate 1000 --localpair
