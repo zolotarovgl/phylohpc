@@ -34,7 +34,6 @@ bash workflow/get_hg_status.sh
 # TODOs:   
 
 - make sure the phylogenies are rerun (updated) not overwritten  
-- gather anno should account for the families without clusterings 
 - better annotation gathering with the ortholog support etc
 - inflation parameter should be specified in the genefam file
 - don't run for the HGs without the species of interest!  
@@ -42,6 +41,7 @@ bash workflow/get_hg_status.sh
 - add GeneRax explainer   
 - add updated species tree and an example one
 - ~~make sure to NOT run possvm on the phylogenies that did not finish - relaunch instead~~ 
+- ~~gather anno should account for the families without clusterings~~
 
 
 
