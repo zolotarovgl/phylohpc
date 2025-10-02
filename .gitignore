@@ -3,3 +3,6 @@ results/*
 hmms/*
 logs/*
 data/input*
+slurm*
+*.tab
+*_list

@@ -1,9 +1,9 @@
 #############################################
 GENEFAM_INFO=genefam.csv 
 INFASTA=data/input.fasta
-REFNAMES=data/Dmel_gene_names.csv
-REFSPECIES=Dmel
-PROJECT=PAR
+REFNAMES=data/Mmus_gene_names.csv
+REFSPECIES=Mmus
+PROJECT=CLA
 SPECIES_TREE=data/species_tree.newick
 #############################################
 # S1 - hmmmsearch 
@@ -18,7 +18,7 @@ NCPU=4
 QOS_S1=test
 QOS_S2=short
 MEM_S1=1G
-MEM_S2=2Gb
+MEM_S2=1G
 MIN_SEQ=5 
 
 #Time specifications
