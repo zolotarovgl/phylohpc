@@ -45,7 +45,8 @@ ALIGN_DIR=results/align
 GENERAX_DIR=results/generax
 
 # S1 (HMM search) settings
-PFAMDB=/users/asebe/xgraubove/data/pfam/Pfam-A.hmm
+#PFAMDB=/users/asebe/xgraubove/data/pfam/Pfam-A.hmm
+PFAM_DB=/users/asebe/xgraubove/data/pfam/Pfam-A.hmm
 DOMAIN_EXPAND=50
 # S2 (Sequence clustering) settings 
 S2_NCPU=8

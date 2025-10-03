@@ -47,6 +47,15 @@ bash workflow/get_hg_status.sh
 
 # Changes   
 
+The following HMM models no longer seem to be a part of the PFAM-A: removed
+```
+dsrm_Ferlin
+GKAPp
+KAT11
+NCam-PTHR12231
+RIMSbp-PTHR14234
+Synaptotagmin-PTHR10024
+```
 
 
 # Useful commands 
@@ -54,13 +63,10 @@ bash workflow/get_hg_status.sh
 ## Family status 
 
 ```bash
-for PREF in $(cat genefam.csv | awk '{print $NF"."$1}'); do ./workflow/check_family.sh $PREF | grep -v '#'; done | awk '{print $1"\t"$2$3}' > fam_status.tab
-cat fam_status.tab | cut -f 2 | sort | uniq -c
-
+source ./workflow/functions.sh
+check_all_families genefam.csv
 
 ```
-
-
 
 ```bash
 ./workflow/get_hg_status.sh  > hg_status.tab

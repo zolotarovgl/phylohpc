@@ -61,7 +61,7 @@ DEAD	DEAD	1.1	3	GA	RBP	rbp
 Dishevelled	Dishevelled,Dsh_C	1.1	3	GA	Signalling	sig
 DOT1	DOT1	1.1	3	GA	chromatin	chr
 Doublesex_DM	DM,Dmrt1	1.1	3	GA	TF	tfs
-Dysferlin	dsrm_Ferlin,DysFN,FerA	1.4	3	GA	neural	neu
+Dysferlin	DysFN,FerA,FerB	1.4	3	GA	neural	neu
 E2F_TDP	DP,E2F_CC-MB,E2F_TDP	1.1	3	GA	TF	tfs
 EF-hand	EF-hand_2,EF-hand_3	1.1	3	GA	adhesion	adh
 EIN3	EIN3	1.1	3	GA	TF	tfs
@@ -86,7 +86,6 @@ Fungal_ZF	Fungal_trans,Zn_clus	1.1	3	GA	TF	tfs
 GATA	GATA	1.1	3	GA	TF	tfs
 GCM	GCM	1.1	3	GA	TF	tfs
 GCR1	GCR1_C	1.1	3	GA	TF	tfs
-GKAP	GKAPp	1.1	3	0.01	neural	neu
 GNAT_acetyltr_2	GNAT_acetyltr_2	1.1	3	GA	chromatin	chr
 GPCRglut	7tm_3	1.5	3	GA	Signalling	sig
 GPCRrhod	7tm_1	1.6	3	GA	Signalling	sig
@@ -117,7 +116,6 @@ Integrin_beta	Integrin_beta,Integrin_B_tail,Integrin_b_cyt	1.1	3	GA	adhesion	adh
 Ion_trans	Ion_trans	1.25	3	GA	ionchannel	ion
 IRF	IRF	1.1	3	GA	TF	tfs
 IRK	IRK	1.2	3	GA	ionchannel	ion
-KAT11	KAT11	1.1	3	GA	chromatin	chr
 KH	KH_1,KH_2,KH_4,KH_5,KH_6,KH_7,KH_8,KH_9,MOEP19	1.2	3	GA	RBP	rbp
 Kinesin	Kinesin	1.1	3	GA	Microtubules	tub
 LAG1_CSL	BTD,LAG1-DNAbind	1.1	3	GA	TF	tfs
@@ -145,7 +143,6 @@ Myosin	Myosin_head	1.1	3	GA	Muscle	mus
 Na_Ca_ex	Na_Ca_ex	1.2	3	GA	ionchannel	ion
 NAM_NAC	NAM	1.1	3	GA	TF	tfs
 NAP	NAP	1.1	3	GA	chromatin	chr
-NCam	NCam-PTHR12231	1.5	3	1E-30	neural	neu
 Ndt80_PhoG	NDT80_PhoG	1.1	3	GA	TF	tfs
 Neur_chan_memb	Neur_chan_memb	1.25	3	GA	ionchannel	ion
 NFX1_ZF	zf-NF-X1	1.1	3	GA	TF	tfs
@@ -195,7 +192,6 @@ RGS	RGS,Axin_b-cat_bind	1.1	3	GA	Signalling	sig
 RHD_Rel	RHD_DNA_bind	1.1	3	GA	TF	tfs
 RhoGEF	RhoGEF	1.3	3	GA	neural	neu
 Rieske	Rieske	1.1	3	GA	sterol	xxx
-RIMSbp	RIMSbp-PTHR14234	1.1	3	GA	neural	neu
 RNAb	RNA_binding	1.2	3	GA	RBP	rbp
 RRM	RRM,RRM_1,RRM_2,RRM_3,RRM_4,RRM_5,RRM_7,RRM_8,RRM_9,BRAP2,DbpA,Nup35_RRM,Nup35_RRM_2,RL,RNA_bind,RRM_occluded,RRM_Rrp7,RSRP,YlmH_RBD	1.4	3	GA	RBP	rbp
 Rtt106	Rtt106	1.1	3	GA	chromatin	chr
@@ -248,7 +244,6 @@ Synaphin	Synaphin	1.1	3	GA	neural	neu
 Synapsin	Synapsin	1.1	3	GA	neural	neu
 Synapsin	Synapsin,Synapsin_C	1.1	3	GA	neural	neu
 Synaptobrevin	Synaptobrevin	1.1	3	GA	neural	neu
-Synaptotagmin	Synaptotagmin-PTHR10024	1.2	3	1E-09	neural	neu
 Syndecan	Syndecan	1.1	3	GA	neural	neu
 SynGAP	DUF3498	1.1	3	GA	neural	neu
 Syntaxin	Syntaxin	1.1	3	GA	neural	neu
