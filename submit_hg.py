@@ -164,6 +164,8 @@ def main():
                 args.mem = new_mem
             elif job_state == "CANCELLED":
                 print(f"Job was cancelled -> re-submitting")
+            elif job_state == "FAILED":
+                print(f"Job has failed -> re-submitted")
             else:
                 sys.exit()
 

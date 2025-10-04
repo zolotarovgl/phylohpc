@@ -45,21 +45,6 @@ bash workflow/get_hg_status.sh
 
 
 
-# Changes   
-
-The following HMM models no longer seem to be a part of the PFAM-A: removed
-```
-# missing HMM files:
-for ID in $(awk '{print $2}' genefam.csv  | sed 's/,/\n/g' | sort | uniq ); do
-hmmfetch $PFAMDB $ID > out.hmm 2> err.log
-if [ $? -ne 0 ]; then
-    echo "Error fetching $ID"
-fi
-done
-```
-
-
-
 # Useful commands 
 
 
@@ -69,7 +54,7 @@ done
 This allows to increase the resources, if the job has timed out or OOM:  `--mem_increase`, `--time_increase`  
 
 
-Example: submit alignment and phylogeny jobs:
+For example, to submit alignment and phylogeny jobs:
 
 ```bash
 # run only for HGs with Clacla
@@ -88,6 +73,13 @@ done < tmp/torun
 
 ./workflow/get_hg_status.sh > hg_status.tab
 cat hg_status.tab | grep 1100 | cut -f 1  | grep -w -f ids > tmp/torun
+
+# remove gap-only sequences
+for ID in $(cat tmp/torun); do
+echo $ID
+clean_fasta results/align/${ID}.aln.fasta tmp_fa 20; mv tmp_fa results/align/${ID}.aln.fasta
+done
+
 TIME=01:00:00
 MEM=500M
 NCPU=4
@@ -97,29 +89,43 @@ while IFS="." read -r PREF FAMILY HG; do
 done < tmp/torun
 ```
 
+## Run possvm for the hgs wth finished phylogenies 
 
+```bash
+sbatch --output=output.log --error=error.log --mem=1G --time=01:00:00 workflow/run_possvm_all.sh 
+```
 
 
 ## Family status 
 
+Check the pipeline status of the families defined in `genefam.csv`:  
+
+
 ```bash
 source ./workflow/functions.sh
 check_all_families genefam.csv
-
 ```
+
+Submit clustering jobs for the families with missing clusterings:
 
 ```bash
-./workflow/get_hg_status.sh  > hg_status.tab
-comm <(cat hg_status.tab | grep 1110 | cut -f 1 | sort | uniq) tree_done -12 > tmp/torun
+bash workflow/submit_family.sh configs/config.txt sig.GPCRrhod --mem_s1 500M --mem_s2 30G  --dry
+```  
 
-read_config configs/config.txt
-for ID in $(cat tmp/torun); do 
-PREF=${ID%%.*}
-FAMILY=${ID#*.};FAMILY=${FAMILY%%.*}
-HG=${ID##*.}
-echo $PREF $FAMILY $HG
-TREE_FILE=${TREE_DIR}/${PREF}.${FAMILY}.${HG}.treefile
-python phylogeny/main.py possvm -t $TREE_FILE --refsps $REFSPECIES -r $REFNAMES -o ${PREF}.${FAMILY}.${HG}"."
-done 
-```
+
+
+
+
  
+# Changes   
+
+The following HMM models no longer seem to be a part of the PFAM-A: removed
+```
+# missing HMM files:
+for ID in $(awk '{print $2}' genefam.csv  | sed 's/,/\n/g' | sort | uniq ); do
+hmmfetch $PFAMDB $ID > out.hmm 2> err.log
+if [ $? -ne 0 ]; then
+    echo "Error fetching $ID"
+fi
+done
+```

@@ -6,3 +6,4 @@ data/input*
 slurm*
 *.tab
 *_list
+*.json

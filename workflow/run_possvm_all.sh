@@ -1,7 +1,8 @@
+#!/bin/sh
 source workflow/functions.sh
 read_config configs/config.txt
 # logs with finished trees 
-grep -l 'Consensus tree written to' ${TREE_DIR}/tfs.*.log | xargs -n1 basename |  sed 's/.log//g'  | sort | uniq  > tmp/tree_done
+grep -l 'Analysis results written to' ${TREE_DIR}/*.log | xargs -n1 basename |  sed 's/.log//g'  | sort | uniq  > tmp/tree_done
 # logs with all trees
 find ${TREE_DIR}/ -name '*log' | xargs -n1 basename |  sed 's/.log//g'  | sort | uniq > tmp/tree_all
 
