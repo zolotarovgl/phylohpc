@@ -18,9 +18,7 @@ GENEFAM_INFO=$2
 INFASTA=$3
 OUTDIR=$4
 
-#
 
-NCPU=10
 # Run the Python script
 mkdir -p $OUTDIR
 echo "python phylogeny/main.py hmmsearch -f $INFASTA -g $GENEFAM_INFO $FAMILY -o $OUTDIR --pfam_db $PFAMDB --domain_expand 30"

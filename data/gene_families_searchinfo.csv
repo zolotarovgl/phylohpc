@@ -61,7 +61,7 @@ DEAD	DEAD	1.1	3	GA	RBP	rbp
 Dishevelled	Dishevelled,Dsh_C	1.1	3	GA	Signalling	sig
 DOT1	DOT1	1.1	3	GA	chromatin	chr
 Doublesex_DM	DM,Dmrt1	1.1	3	GA	TF	tfs
-Dysferlin	DysFN,FerA,FerB	1.4	3	GA	neural	neu
+Dysferlin	FerA,FerB	1.4	3	GA	neural	neu
 E2F_TDP	DP,E2F_CC-MB,E2F_TDP	1.1	3	GA	TF	tfs
 EF-hand	EF-hand_2,EF-hand_3	1.1	3	GA	adhesion	adh
 EIN3	EIN3	1.1	3	GA	TF	tfs
@@ -184,7 +184,7 @@ Pyridoxal_deC	Pyridoxal_deC	1.1	3	GA	neural	neu
 Qpct	Peptidase_M28	1.1	3	GA	neuropeptides	npe
 RAB3GAP2_N	RAB3GAP2_N	1.1	3	GA	neural	neu
 RabphilinRIM	FYVE_2	1.1	3	GA	neural	neu
-Rad21Rec8	 ,Rad21_Rec8_N	1.1	3	GA	structural	xxx
+Rad21Rec    Rad21_Rec8_N	1.1	3	GA	structural	xxx
 RasGAP	RasGAP	1.1	3	GA	neural	neu
 Ras	Ras	1.3	3	GA	neural	neu
 RFX	RFX_DNA_binding	1.1	3	GA	TF	tfs
@@ -297,3 +297,4 @@ Tektin	Tektin	1.1	3	GA	cilia	cil
 sHIPPO	SHIPPO-rpt	1.1	3	GA	cilia	cil
 Dynein	Dynein_heavy,Dynein_C	1.1	3	GA	cilia	cil
 Axdynein	Ax_dynein_light	1.1	3	GA	cilia	cil
+Lamin	Filament,LTD	1.1	3	GA	cilia	cil
