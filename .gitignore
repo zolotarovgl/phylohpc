@@ -7,3 +7,4 @@ slurm*
 *.tab
 *_list
 *.json
+*.log

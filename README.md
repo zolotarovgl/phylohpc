@@ -59,16 +59,17 @@ For example, to submit alignment and phylogeny jobs:
 ```bash
 # run only for HGs with Clacla
 grep -l '>Clacla' results/clusters/*fasta | xargs -n1 basename | sed 's/.fasta//g' | sort | uniq > ids
-./workflow/get_hg_status.sh > hg_status.tab
-cat hg_status.tab | grep -w -f ids  | grep 1000 | cut -f 1  > tmp/torun
+#./workflow/get_hg_status.sh > hg_status.tab
+for ID in $(cat ids); do ./workflow/check_status.sh $ID; done | grep -v '#' | awk '{print $1"\t"$2$3$4$5}' > hg_status.tab
+cat hg_status.tab  | grep 1000 | cut -f 1  > tmp/torun
+
 
 # submit alignment jobs:
 TIME=00:30:00
 MEM=500M
 NCPU=4
-JSON=aln.info.json
 while IFS="." read -r PREF FAMILY HG; do
-    python submit_hg.py configs/config.txt --time $TIME --cpus $NCPU --mem $MEM --mode align --pref $PREF --family $FAMILY --hg $HG --mafft ""  --json $JSON 
+    python submit_hg.py configs/config.txt --time $TIME --cpus $NCPU --mem $MEM --mode align --pref $PREF --family $FAMILY --hg $HG --mafft ""  --json aln.info.json
 done < tmp/torun
 
 ./workflow/get_hg_status.sh > hg_status.tab
@@ -80,14 +81,20 @@ echo $ID
 clean_fasta results/align/${ID}.aln.fasta tmp_fa 20; mv tmp_fa results/align/${ID}.aln.fasta
 done
 
-TIME=01:00:00
+TIME=1-00:00:00
 MEM=500M
-NCPU=4
-JSON=phy.info.json
+NCPU=6
 while IFS="." read -r PREF FAMILY HG; do
-    python submit_hg.py configs/config.txt --time $TIME --cpus $NCPU --mem $MEM --mode phylogeny --pref $PREF --family $FAMILY --hg $HG  --json $JSON
+    python submit_hg.py configs/config.txt --time $TIME --cpus $NCPU --mem $MEM --mode phylogeny --pref $PREF --family $FAMILY --hg $HG  --json phy.info.json
 done < tmp/torun
 ```
+
+## Check phylogeny jobs status:
+
+```bash
+for ID in $(cat phy.info.json  | grep jobid | cut -f 2 -d :  | sed -E 's/ |"|,//g'); do sacct -j $ID | awk 'NR==3' ; done
+```
+
 
 ## Run possvm for the hgs wth finished phylogenies 
 
@@ -113,7 +120,24 @@ bash workflow/submit_family.sh configs/config.txt sig.GPCRrhod --mem_s1 500M --m
 ```  
 
 
+# Gather annotations per species
 
+```bash
+ID=Clacla
+mkdir -p annotations/${ID}/
+bash workflow/gather_anno.sh --id $ID > annotations/$ID/$ID.all.tab
+cat annotations/Clacla/Clacla.all.tab  | cut -f 2 | cut -f 1 -d . | sort | uniq -c  | sort -rn
+
+
+F=annotations/$ID/$ID.all.tab
+cat $F | awk -F'\t' 'BEGIN{print "#Prefix\tTotal\tClassified\tPerc_Classified"}{split($2,a,".");PREF=a[1];counter[PREF]+=1;if($2!~/Unclass/){class[PREF]+=1}}END{for(k in counter){print k"\t"counter[k]"\t"class[k]"\t"class[k]/counter[k]}}' 
+
+for PREF in $(cat $F | cut -f 2 | cut -f 1 -d . | sort | uniq -c  | sort -rn  | awk '$1>=5 {print $2}'); do 
+echo $PREF
+cat $F | awk -v PREF=$PREF '{split($2,a,".")}{if(a[1]==PREF){print $0}}' > annotations/${ID}/${ID}.${PREF}.tab
+done
+
+```
 
 
  

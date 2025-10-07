@@ -151,7 +151,7 @@ def main():
             #print("Job info:")
             jobid = data[key]['jobid']
             info = check_job(jobid)
-            #print(info)
+            print(info)
             job_state = info.get("state")
             if "CANCELLED" in job_state:
                 job_state = "CANCELLED"
@@ -166,6 +166,12 @@ def main():
                 print(f"Job was cancelled -> re-submitting")
             elif job_state == "FAILED":
                 print(f"Job has failed -> re-submitted")
+            elif job_state == "TIMEOUT":
+                print(info)
+                prev_time = info['elapsed']
+                new_time = args.time
+                new_time = "7-00:00:00"
+                print(f"Timeout, increasing time: {prev_time} -> {new_time} ")
             else:
                 sys.exit()
 
