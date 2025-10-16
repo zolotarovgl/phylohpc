@@ -3,7 +3,11 @@
 
 ```bash
 git clone --recurse-submodules https://github.com/zolotarovgl/phylohpc.git
+cd phylohpc
+mamba env create -f workflow/environment.yaml
 ```
+
+
 
 
 # Configuration  

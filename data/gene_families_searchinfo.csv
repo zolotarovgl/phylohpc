@@ -248,6 +248,7 @@ Syndecan	Syndecan	1.1	3	GA	neural	neu
 SynGAP	DUF3498	1.1	3	GA	neural	neu
 Syntaxin	Syntaxin	1.1	3	GA	neural	neu
 Anoctamin	Anoctamin,Anoct_dimer	1.1	3	GA	neural	neu
+GLUD	ELFV_dehydrog_N,ELFV_dehydrog	1.1	3	GA	neural	neu
 T-box	T-box	1.1	3	GA	TF	tfs
 TBP	TBP	1.1	3	GA	TF	tfs
 TCP	TCP	1.1	3	GA	TF	tfs
@@ -269,6 +270,7 @@ Tubulin	Tubulin,Tubulin_C	1.1	3	GA	Muscle	mus
 TUDOR	TUDOR	1.1	3	GA	chromatin	chr
 Unc13	Membr_traf_MHD	1.1	3	GA	neural	neu
 VGCC_alpha2	VGCC_alpha2	1.2	3	GA	ionchannel	ion
+VDAC	Porin_3	1.1	3	GA	ionchannel	ion
 Vhr1	Vhr1	1.1	3	GA	TF	tfs
 Whirly	Whirly	1.1	3	GA	TF	tfs
 wnt	wnt	1.1	3	GA	Signalling	sig
