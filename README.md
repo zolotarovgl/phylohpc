@@ -46,15 +46,15 @@ MEM_S5=10G
 TIME_S5=1:00:00
 ```
 
-    - `S1` - search step   
-    - `S2` - clustering step   
-    - `S3` - alignment and phylogeny. The job itself is a job that submits 2 job arrays - long and short. The long job array is intended for big gene families. The difference between the big and short family is determined by the following line in the config:  
+- `S1` - search step   
+- `S2` - clustering step   
+- `S3` - alignment and phylogeny. The job itself is a job that submits 2 job arrays - long and short. The long job array is intended for big gene families. The difference between the big and short family is determined by the following line in the config:   
 
 ```bash
 # separate between small groups
 MAX_SEQ=300
 ``` 
-    - `S5` - GeneRax 
+- `S5` - GeneRax 
 
 
 
