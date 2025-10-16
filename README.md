@@ -57,12 +57,20 @@ MAX_SEQ=300
 - `S5` - GeneRax 
 
 
+Since many jobs for the big homology groups may fail, the status of each homology group should be checked:  
 
-Thus, the status of each homology group should be checked:
 ```bash
-bash workflow/get_hg_status.sh
+./workflow/check_status.sh tfs.T-box.HG1
+#prefix cluster align   tree    possvm
+tfs.T-box.HG1   1       1       1       1
 ``` 
-`[HG]\t[clustering][alignment][phylogeny][possvm]`
+
+or for all HGs at once:  
+
+```bash
+./workflow/get_hg_status.sh
+```
+
 
 # TODOs:   
 
