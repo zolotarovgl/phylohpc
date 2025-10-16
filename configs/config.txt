@@ -29,11 +29,10 @@ TIME_S3_SHORT=1:00:00
 TIME_S3_LONG=12:00:00
 
 
-# min number of sequences in HG
-MAX_SEQ=300 
 # separate between small groups
-MAX_N=1500 
+MAX_SEQ=300 
 # maximum number of sequences in the cluster to trigger reclustering 
+MAX_N=1500 
 
 # Directories
 OUTDIR=results

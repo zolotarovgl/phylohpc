@@ -17,8 +17,8 @@ mamba env create -f workflow/environment.yaml
 
 # Phylogeny pipeline   
 
-The following command will run the phylogeny pipeine for the families defined in `genefam.csv`:  
 
+Pull species' proteomes from Xavi's database. If you don't know who Xavi is, then you'd have to prepare a joint protomes fasta yourself: 
 ```bash 
 # prepare input files:
 bash workflow/prepare_fasta.sh species_list data/input.fasta
@@ -29,7 +29,36 @@ The following command will launch the pipeline (first pass).
 ```bash
 bash pipeline.sh   
 ```
-Some jobs will inevitably fail do to the amount of allocated resources. Thus, the status of each homology group should be checked:
+Some jobs will inevitably fail do to the amount of allocated resources.
+The resources are specified in the `configs/config.txt`. For instance:  
+
+```
+MEM_S1=1G
+MEM_S2=1G
+TIME_S1=00:10:00
+TIME_S2=00:30:00
+TIME_S3=00:01:00
+TIME_S3_SHORT=1:00:00
+TIME_S3_LONG=12:00:00
+MEM_SHORT=1G
+MEM_LONG=1G
+MEM_S5=10G
+TIME_S5=1:00:00
+```
+
+    - `S1` - search step   
+    - `S2` - clustering step   
+    - `S3` - alignment and phylogeny. The job itself is a job that submits 2 job arrays - long and short. The long job array is intended for big gene families. The difference between the big and short family is determined by the following line in the config:  
+
+```bash
+# separate between small groups
+MAX_SEQ=300
+``` 
+    - `S5` - GeneRax 
+
+
+
+Thus, the status of each homology group should be checked:
 ```bash
 bash workflow/get_hg_status.sh
 ``` 
