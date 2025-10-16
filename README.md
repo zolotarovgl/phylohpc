@@ -29,6 +29,16 @@ The following command will launch the pipeline (first pass).
 ```bash
 bash pipeline.sh   
 ```
+
+To check the jobs:  
+
+```bash
+source workflow/slurm_functions.sh
+list_current_jobs
+list_all_jobs
+```
+
+
 Some jobs will inevitably fail do to the amount of allocated resources.
 The resources are specified in the `configs/config.txt`. For instance:  
 

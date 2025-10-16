@@ -184,7 +184,7 @@ Pyridoxal_deC	Pyridoxal_deC	1.1	3	GA	neural	neu
 Qpct	Peptidase_M28	1.1	3	GA	neuropeptides	npe
 RAB3GAP2_N	RAB3GAP2_N	1.1	3	GA	neural	neu
 RabphilinRIM	FYVE_2	1.1	3	GA	neural	neu
-Rad21Rec    Rad21_Rec8_N	1.1	3	GA	structural	xxx
+Rad21Rec	Rad21_Rec8_N	1.1	3	GA	structural	xxx
 RasGAP	RasGAP	1.1	3	GA	neural	neu
 Ras	Ras	1.3	3	GA	neural	neu
 RFX	RFX_DNA_binding	1.1	3	GA	TF	tfs
