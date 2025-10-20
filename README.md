@@ -191,6 +191,30 @@ done
 ```
 
 
+# GeneRax   
+
+
+Prune the tree (it may include more species and GeneRax will complain)
+```bash
+# fix the species tree for generax
+python workflow/prune_tree.py data/species_tree.newick species_list  data/species_tree.newick
+```
+
+```bash
+module load OpenMPI/4.1.5-GCC-12.3.0
+PREF=tfs 
+FAMILY=T-box
+HG=HG1
+
+python phylogeny/main.py generax --alignment results/align/${PREF}.${FAMILY}.${HG}.aln.fasta --gene_tree results/gene_trees/${PREF}.${FAMILY}.${HG}.treefile --species_tree species_tree.newick --iqtree_file results/gene_trees/${PREF}.${FAMILY}.${HG}.iqtree --name ${PREF}.${FAMILY}.${HG} --output_dir boo --name boo 
+```
+
+GeneRax submission example:  
+```bash
+python submit_hg.py --pref tfs --family T-box --hg HG1  --mode generax configs/config.txt
+```
+
+
  
 # Changes   
 

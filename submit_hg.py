@@ -93,7 +93,7 @@ def main():
     parser.add_argument("--pref", required=True, help="Prefix (PREF)")
     parser.add_argument("--family", required=True, help="Gene family (FAMILY)")
     parser.add_argument("--hg", required=True, help="HG identifier")
-    parser.add_argument("--mode", choices=["align","phylogeny","possvm"], required=True, help="Which step to run")
+    parser.add_argument("--mode", choices=["align","phylogeny","possvm","generax"], required=True, help="Which step to run")
     parser.add_argument("--cpus", type=int, default=4, help="CPUs per task")
     parser.add_argument("--mem", default="1G", help="Memory")
     parser.add_argument("--mem_increase", default=10240, help="Memory increase step, Mb. Default: 10240")
@@ -109,7 +109,8 @@ def main():
     TREE_METHOD_BIG = config.get("TREE_METHOD_BIG","iqtree")
     REFSPECIES = config.get("REFSPECIES")
     REFNAMES = config.get("REFNAMES")
-
+    SPECIES_TREE = config.get("SPECIES_TREE")
+    
     PREF, FAMILY, HG = args.pref, args.family, args.hg
     jobname = ".".join([args.mode,PREF,FAMILY,HG])
 
@@ -133,7 +134,14 @@ def main():
             sys.exit("Error: REFSPECIES and REFNAMES must be set in the config file for poss mode")
         out_prefix = f"{PREF}.{FAMILY}.{HG}."
         wrap = f"python phylogeny/main.py possvm -t {tree_file} --refsps {REFSPECIES} -r {REFNAMES} -o {out_prefix}"
-
+    elif args.mode == "generax":
+        if not os.path.isfile(SPECIES_TREE):
+            sys.exit(f"Error: species tree not found! {SPECIES_TREE}")
+        out_tree = f"results/generax/{PREF}.${FAMILY}.{HG}.treefile"
+        aln_file = f"{ALIGN_DIR}/{PREF}.{FAMILY}.{HG}.aln.fasta"
+        gene_tree = f"{TREE_DIR}/{PREF}.{FAMILY}.{HG}.treefile"
+        output_dir = f"results/generax/{PREF}.${FAMILY}.{HG}"
+        wrap = f"python phylogeny/main.py generax --alignment {aln_file} --gene_tree {gene_tree} --species_tree {SPECIES_TREE} --output_dir {output_dir} --subs_model LG -c 1 --name {PREF}.{FAMILY}.{HG} --outfile {out_tree} -c {args.cpus}"
    
     # check if the pref.fam.hg has been ran before and increase the resources
     if args.json:
