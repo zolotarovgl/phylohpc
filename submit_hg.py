@@ -140,7 +140,7 @@ def main():
         out_tree = f"results/generax/{PREF}.${FAMILY}.{HG}.treefile"
         aln_file = f"{ALIGN_DIR}/{PREF}.{FAMILY}.{HG}.aln.fasta"
         gene_tree = f"{TREE_DIR}/{PREF}.{FAMILY}.{HG}.treefile"
-        output_dir = f"results/generax/{PREF}.${FAMILY}.{HG}"
+        output_dir = f"results/generax/{PREF}.{FAMILY}.{HG}"
         wrap = f"python phylogeny/main.py generax --alignment {aln_file} --gene_tree {gene_tree} --species_tree {SPECIES_TREE} --output_dir {output_dir} --subs_model LG -c 1 --name {PREF}.{FAMILY}.{HG} --outfile {out_tree} -c {args.cpus}"
    
     # check if the pref.fam.hg has been ran before and increase the resources
