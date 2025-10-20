@@ -98,7 +98,7 @@ def main():
     parser.add_argument("--mem", default="1G", help="Memory")
     parser.add_argument("--mem_increase", default=10240, help="Memory increase step, Mb. Default: 10240")
     parser.add_argument("--time", default="1:00:00", help="Walltime")
-    parser.add_argument("-n", "--dry-run", action="store_true", help="Dry run: only print the sbatch command")
+    parser.add_argument("-n", "--dry_run", action="store_true", help="Dry run: only print the sbatch command")
     parser.add_argument("--mafft", default="--maxiterate 1000 --localpair", help="MAFFT settings")
     parser.add_argument("--json", help="Optional JSON file to store job IDs")
     args = parser.parse_args()
@@ -135,9 +135,14 @@ def main():
         out_prefix = f"{PREF}.{FAMILY}.{HG}."
         wrap = f"python phylogeny/main.py possvm -t {tree_file} --refsps {REFSPECIES} -r {REFNAMES} -o {out_prefix}"
     elif args.mode == "generax":
+        time = config.get("TIME_S5")
+        mem = config.get("MEM_S5")
+        print(f'Generax:\nTime: {time}\nMem: {mem}')
+        args.time = time
+        args.mem = mem
         if not os.path.isfile(SPECIES_TREE):
             sys.exit(f"Error: species tree not found! {SPECIES_TREE}")
-        out_tree = f"results/generax/{PREF}.${FAMILY}.{HG}.treefile"
+        out_tree = f"results/generax/{PREF}.{FAMILY}.{HG}.treefile"
         aln_file = f"{ALIGN_DIR}/{PREF}.{FAMILY}.{HG}.aln.fasta"
         gene_tree = f"{TREE_DIR}/{PREF}.{FAMILY}.{HG}.treefile"
         output_dir = f"results/generax/{PREF}.{FAMILY}.{HG}"
@@ -179,6 +184,7 @@ def main():
                 prev_time = info['elapsed']
                 new_time = args.time
                 new_time = "7-00:00:00"
+                args.time = new_time
                 print(f"Timeout, increasing time: {prev_time} -> {new_time} ")
             else:
                 sys.exit()
@@ -187,19 +193,20 @@ def main():
     #print(" ".join(cmd))
     
     if args.dry_run:
-        return
-
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    if res.returncode != 0:
-        sys.exit(f"sbatch failed:\n{res.stderr}")
-    output = res.stdout.strip()
-    jobid = None
-    for token in output.split():
-        if token.isdigit():
-            jobid = token
-            break
-    if not jobid:
-        sys.exit(f"Could not parse job ID from sbatch output:\n{output}")
+        print('dry run is set!')
+        print(args.dry_run)
+    else:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            sys.exit(f"sbatch failed:\n{res.stderr}")
+        output = res.stdout.strip()
+        jobid = None
+        for token in output.split():
+            if token.isdigit():
+                jobid = token
+                break
+        if not jobid:
+            sys.exit(f"Could not parse job ID from sbatch output:\n{output}")
 
     # Update the json
     if args.json and not args.dry_run:

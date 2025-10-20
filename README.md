@@ -201,6 +201,17 @@ python workflow/prune_tree.py data/species_tree.newick species_list  data/specie
 ```
 
 ```bash
+comm <(cat hg_status.tab | grep 1111 | grep -E 'Fork|T-box|Homeo' | cut -f 1 | sort | uniq) <(ls results/generax/*treefile | xargs -n1 basename | sed 's/.treefile//g') -3 > tmp/gr.torun
+N=$(cat tmp/gr.torun  | wc -l | awk '{print $1}')
+echo "${N} jobs to run"
+while IFS=. read -r PREF FAMILY HG; do
+    #echo "PREF=$PREF FAMILY=$FAMILY HG=$HG"
+    python submit_hg.py --pref tfs --family Forkhead --hg HG1  -n --mode generax configs/config.txt --json gen.info.json  --dry_run
+done < tmp/gr.torun
+```
+
+
+```bash
 module load OpenMPI/4.1.5-GCC-12.3.0
 PREF=tfs 
 FAMILY=T-box
