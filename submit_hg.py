@@ -222,8 +222,8 @@ def main():
         with open(args.json,"w") as jf:
             json.dump(data, jf, indent=2)
 
-
-    print(f"Submitted batch job {jobid}")
+    
+    print(f"Submitted batch job {jobid}\nLog: {log_out.replace('%j',jobid)}")
 
 if __name__ == "__main__":
     main()
