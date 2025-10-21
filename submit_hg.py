@@ -110,9 +110,12 @@ def main():
     REFSPECIES = config.get("REFSPECIES")
     REFNAMES = config.get("REFNAMES")
     SPECIES_TREE = config.get("SPECIES_TREE")
+    LOG_DIR=config.get("LOG_DIR")
     
     PREF, FAMILY, HG = args.pref, args.family, args.hg
     jobname = ".".join([args.mode,PREF,FAMILY,HG])
+    log_out = f"{LOG_DIR}/{jobname}_%j.out"
+    log_err = f"{LOG_DIR}/{jobname}_%j.err" 
 
     if args.mode == "phylogeny":
         in_fasta = f"{ALIGN_DIR}/{PREF}.{FAMILY}.{HG}.aln.fasta"
@@ -137,7 +140,7 @@ def main():
     elif args.mode == "generax":
         time = config.get("TIME_S5")
         mem = config.get("MEM_S5")
-        print(f'Generax:\nTime: {time}\nMem: {mem}')
+        print(f'Generax: {args.pref}.{args.family}.{args.hg}\nTime: {time}\nMem: {mem}')
         args.time = time
         args.mem = mem
         if not os.path.isfile(SPECIES_TREE):
@@ -157,14 +160,9 @@ def main():
             data = {}
         key = f"{PREF}.{FAMILY}.{HG}"
         if key in data:
-            # job handling rules 
-            #print(f"WARNING: Entry for {key} already exists in {args.json}: ")
-            #print(f"{args.json}: ")
-            #print(data[key])
-            #print("Job info:")
             jobid = data[key]['jobid']
             info = check_job(jobid)
-            print(info)
+            #print(info)
             job_state = info.get("state")
             if "CANCELLED" in job_state:
                 job_state = "CANCELLED"
@@ -180,21 +178,24 @@ def main():
             elif job_state == "FAILED":
                 print(f"Job has failed -> re-submitted")
             elif job_state == "TIMEOUT":
-                print(info)
+                # TODO: added better time increases
                 prev_time = info['elapsed']
                 new_time = args.time
-                new_time = "7-00:00:00"
+                new_time = "1-00:00:00"
                 args.time = new_time
                 print(f"Timeout, increasing time: {prev_time} -> {new_time} ")
             else:
                 sys.exit()
+        else:
+            print(f"{key} not found {args.json}!")
 
-    cmd = ["sbatch", f"--job-name={jobname}", f"--cpus-per-task={args.cpus}", f"--mem={args.mem}", f"--time={args.time}", "--wrap", wrap]
+    cmd = ["sbatch", f"--job-name={jobname}",f"--output={log_out}",f"--error={log_err}", f"--cpus-per-task={args.cpus}", f"--mem={args.mem}", f"--time={args.time}", "--wrap", wrap]
     #print(" ".join(cmd))
     
     if args.dry_run:
-        print('dry run is set!')
-        print(args.dry_run)
+        print('Dry run (--dry_run) is set: printing the command and exiting!\n')
+        print(" ".join(cmd))
+        sys.exit(0)
     else:
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:

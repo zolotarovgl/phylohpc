@@ -201,14 +201,21 @@ python workflow/prune_tree.py data/species_tree.newick species_list  data/specie
 ```
 
 ```bash
-comm <(cat hg_status.tab | grep 1111 | grep -E 'Fork|T-box|Homeo' | cut -f 1 | sort | uniq) <(ls results/generax/*treefile | xargs -n1 basename | sed 's/.treefile//g') -3 > tmp/gr.torun
+comm <(cat hg_status.tab | grep 1111 | cut -f 1 | sort | uniq) <(ls results/generax/*treefile | xargs -n1 basename | sed 's/.treefile//g' | sort ) -3 > tmp/gr.torun
 N=$(cat tmp/gr.torun  | wc -l | awk '{print $1}')
 echo "${N} jobs to run"
 while IFS=. read -r PREF FAMILY HG; do
     #echo "PREF=$PREF FAMILY=$FAMILY HG=$HG"
-    python submit_hg.py --pref tfs --family Forkhead --hg HG1  -n --mode generax configs/config.txt --json gen.info.json  --dry_run
+    python submit_hg.py --pref $PREF --family $FAMILY --hg $HG --mode generax configs/config.txt --json gen.info.json
 done < tmp/gr.torun
 ```
+
+Run possvm for GeneRax results:  
+```bash
+bash post_generax.sh
+```
+
+
 
 
 ```bash
