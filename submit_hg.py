@@ -117,6 +117,15 @@ def main():
     log_out = f"{LOG_DIR}/{jobname}_%j.out"
     log_err = f"{LOG_DIR}/{jobname}_%j.err" 
 
+    do_resubmit_cancelled = True # whether to re-submit cancelled jobs
+    do_submit = False
+    do_update = True
+    time_step = "3:00:00"
+    if args.mode == 'generax':
+        args.time = "12:00:00"
+        time_step = "1-0:00:00"
+
+
     if args.mode == "phylogeny":
         in_fasta = f"{ALIGN_DIR}/{PREF}.{FAMILY}.{HG}.aln.fasta"
         out_prefix = f"{TREE_DIR}/{PREF}.{FAMILY}.{HG}"
@@ -140,7 +149,7 @@ def main():
     elif args.mode == "generax":
         time = config.get("TIME_S5")
         mem = config.get("MEM_S5")
-        print(f'Generax: {args.pref}.{args.family}.{args.hg}\nTime: {time}\nMem: {mem}')
+        #print(f'Generax: {args.pref}.{args.family}.{args.hg}\nTime: {time}\nMem: {mem}')
         args.time = time
         args.mem = mem
         if not os.path.isfile(SPECIES_TREE):
@@ -162,41 +171,74 @@ def main():
         if key in data:
             jobid = data[key]['jobid']
             info = check_job(jobid)
-            #print(info)
             job_state = info.get("state")
+            # Decide what to do 
             if "CANCELLED" in job_state:
                 job_state = "CANCELLED"
-            print(f"{key} {jobid} {job_state}")
             # check if job died due to out of memory
             if info.get("exitcode") == "0:125" or info.get("state") == "OUT_OF_MEMORY":
                 prev_mem = data[key]['mem']
                 new_mem = increase_mem(data[key].get("mem", args.mem),int(args.mem_increase))
-                print(f"OOM, increasing memory: {prev_mem}  -> {new_mem}")
+                print(f"{key}: OOM, increasing memory: {prev_mem}  -> {new_mem}")
                 args.mem = new_mem
+                do_submit = True
             elif job_state == "CANCELLED":
-                print(f"Job was cancelled -> re-submitting")
+                print(f"{key}: Job was cancelled -> re-submitting if do_resubmit_cancelled ({do_resubmit_cancelled})")
+                do_submit = do_resubmit_cancelled
+                do_update = False
             elif job_state == "FAILED":
-                print(f"Job has failed -> re-submitted")
+                print(f"{key}: Job has failed -> re-submitted")
+                do_submit = True
             elif job_state == "TIMEOUT":
-                # TODO: added better time increases
+                from datetime import timedelta 
+                def increase_time(base, step):
+                    def parse(t):
+                        if '-' in t:
+                            d, hms = t.split('-')
+                            days = int(d)
+                        else:
+                            days = 0
+                            hms = t
+                        h, m, s = map(int, hms.split(':'))
+                        return timedelta(days=days, hours=h, minutes=m, seconds=s)
+                    def fmt(td):
+                        d = td.days
+                        h, rem = divmod(td.seconds, 3600)
+                        m, s = divmod(rem, 60)
+                        return f"{d}-{h:02}:{m:02}:{s:02}" if d else f"{h:02}:{m:02}:{s:02}"
+                    return fmt(parse(base) + parse(step))
+
                 prev_time = info['elapsed']
-                new_time = args.time
-                new_time = "1-00:00:00"
+                new_time = increase_time(prev_time,time_step)
+                print(f"{key}: Timeout, increasing time: {prev_time} by {time_step} -> {new_time} ")
                 args.time = new_time
-                print(f"Timeout, increasing time: {prev_time} -> {new_time} ")
+                do_submit = True
+            elif job_state == "RUNNING":
+                print(f"{key}: Job {jobid} is running")
+                do_submit = False
+                do_update = True
+            elif job_state == "COMPLETED":
+                print(f"Job has been completed already.")
+                do_submit = False
+                do_update = True
             else:
+                # just update the state if running 
+                print(f'ERROR: Unknown previous job ({jobid}) state {job_state}')
                 sys.exit()
         else:
             print(f"{key} not found {args.json}!")
-
+            do_submit = True
+    else:
+        print(f"No --json provided! Submitting ...")
+        do_submit = True
     cmd = ["sbatch", f"--job-name={jobname}",f"--output={log_out}",f"--error={log_err}", f"--cpus-per-task={args.cpus}", f"--mem={args.mem}", f"--time={args.time}", "--wrap", wrap]
-    #print(" ".join(cmd))
-    
+   # print(f"do_submit: {do_submit}\ndo_update: {do_update}") 
+
     if args.dry_run:
         print('Dry run (--dry_run) is set: printing the command and exiting!\n')
-        print(" ".join(cmd))
+        #print(" ".join(cmd))
         sys.exit(0)
-    else:
+    if do_submit:
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             sys.exit(f"sbatch failed:\n{res.stderr}")
@@ -208,22 +250,24 @@ def main():
                 break
         if not jobid:
             sys.exit(f"Could not parse job ID from sbatch output:\n{output}")
-
+        print(f"Submitted batch job {jobid}\nLog: {log_out.replace('%j',jobid)}")
+        
     # Update the json
-    if args.json and not args.dry_run:
+    if args.json and do_update and jobid:
+        job_state = check_job(jobid).get("state")
         data[key] = {
             "jobid": jobid,
             "mode": args.mode,
             "command": wrap,
             "cpus": args.cpus,
             "mem": args.mem,
-            "time": args.time
+            "time": args.time,
+            "state": job_state
         }
         with open(args.json,"w") as jf:
             json.dump(data, jf, indent=2)
 
     
-    print(f"Submitted batch job {jobid}\nLog: {log_out.replace('%j',jobid)}")
 
 if __name__ == "__main__":
     main()

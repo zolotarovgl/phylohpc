@@ -200,6 +200,8 @@ Prune the tree (it may include more species and GeneRax will complain)
 python workflow/prune_tree.py data/species_tree.newick species_list  data/species_tree.newick
 ```
 
+
+Example: submit generax jobs for the HGs with finished phylogenies and possvm:  
 ```bash
 comm <(cat hg_status.tab | grep 1111 | cut -f 1 | sort | uniq) <(ls results/generax/*treefile | xargs -n1 basename | sed 's/.treefile//g' | sort ) -3 > tmp/gr.torun
 N=$(cat tmp/gr.torun  | wc -l | awk '{print $1}')
