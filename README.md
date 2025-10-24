@@ -81,9 +81,17 @@ or for all HGs at once:
 ./workflow/get_hg_status.sh
 ```
 
+```bash
+python check_info.py --json gen.info.json --output status.tab
+```
+
+
 
 # TODOs:   
 
+
+- status and state in json files - DONE   
+- files checks in additin to the job states    
 - make sure the phylogenies are rerun (updated) not overwritten  
 - inflation parameter should be specified in the genefam file
 - don't run for the HGs without the species of interest!  

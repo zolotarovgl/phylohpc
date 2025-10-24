@@ -101,6 +101,7 @@ def main():
     parser.add_argument("-n", "--dry_run", action="store_true", help="Dry run: only print the sbatch command")
     parser.add_argument("--mafft", default="--maxiterate 1000 --localpair", help="MAFFT settings")
     parser.add_argument("--json", help="Optional JSON file to store job IDs")
+    parser.add_argument("--time_step", default = "03:00:00",help="Time increase step.")
     args = parser.parse_args()
 
     config = parse_bash_config(args.configfile)
@@ -120,10 +121,7 @@ def main():
     do_resubmit_cancelled = True # whether to re-submit cancelled jobs
     do_submit = False
     do_update = True
-    time_step = "3:00:00"
-    if args.mode == 'generax':
-        args.time = "12:00:00"
-        time_step = "1-0:00:00"
+    time_step = args.time_step
 
 
     if args.mode == "phylogeny":
@@ -149,7 +147,10 @@ def main():
     elif args.mode == "generax":
         time = config.get("TIME_S5")
         mem = config.get("MEM_S5")
+        time_step = "1-0:00:00"
         #print(f'Generax: {args.pref}.{args.family}.{args.hg}\nTime: {time}\nMem: {mem}')
+        
+        time = "1-0:00:00"
         args.time = time
         args.mem = mem
         if not os.path.isfile(SPECIES_TREE):
@@ -250,7 +251,7 @@ def main():
                 break
         if not jobid:
             sys.exit(f"Could not parse job ID from sbatch output:\n{output}")
-        print(f"Submitted batch job {jobid}\nLog: {log_out.replace('%j',jobid)}")
+        print(f"Submitted batch job {jobid}\nTime: {args.time}, Mem: {args.mem}\nLog: {log_out.replace('%j',jobid)}")
         
     # Update the json
     if args.json and do_update and jobid:
@@ -262,7 +263,8 @@ def main():
             "cpus": args.cpus,
             "mem": args.mem,
             "time": args.time,
-            "state": job_state
+            "state": job_state,
+            "status": job_state
         }
         with open(args.json,"w") as jf:
             json.dump(data, jf, indent=2)
