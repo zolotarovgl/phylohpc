@@ -80,7 +80,7 @@ def count_lines(path):
 ########################################
 # Search job results   
 ########################################
-parser = argparse.ArgumentParser(description="A python wrapper to check families")
+parser = argparse.ArgumentParser(description="Check the status of families")
 parser.add_argument("configfile", help="Bash-style config file with KEY=VALUE lines")
 parser.add_argument("--genefam", required=True, help="Path to gene family definition file")
 parser.add_argument("--json", help="Optional JSON file to store the info")

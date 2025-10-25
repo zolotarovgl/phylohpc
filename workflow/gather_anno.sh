@@ -2,6 +2,7 @@
 
 SEARCH_DIR="results/search"
 TREE_DIR="results/gene_trees"
+TREE_DIR="results/generax"
 ID=""
 OUTFILE=""
 
