@@ -181,22 +181,13 @@ bash workflow/submit_family.sh configs/config.txt sig.GPCRrhod --mem_s1 500M --m
 
 # Gather annotations per species
 
+For instance, to get tfs annotations (leave the argument `--prefix` out to get all of the annotations):  
+
+
 ```bash
-ID=Clacla
-mkdir -p annotations/${ID}/
-bash workflow/gather_anno.sh --id $ID > annotations/$ID/$ID.all.tab
-cat annotations/Clacla/Clacla.all.tab  | cut -f 2 | cut -f 1 -d . | sort | uniq -c  | sort -rn
-
-
-F=annotations/$ID/$ID.all.tab
-cat $F | awk -F'\t' 'BEGIN{print "#Prefix\tTotal\tClassified\tPerc_Classified"}{split($2,a,".");PREF=a[1];counter[PREF]+=1;if($2!~/Unclass/){class[PREF]+=1}}END{for(k in counter){print k"\t"counter[k]"\t"class[k]"\t"class[k]/counter[k]}}' 
-
-for PREF in $(cat $F | cut -f 2 | cut -f 1 -d . | sort | uniq -c  | sort -rn  | awk '$1>=5 {print $2}'); do 
-echo $PREF
-cat $F | awk -v PREF=$PREF '{split($2,a,".")}{if(a[1]==PREF){print $0}}' > annotations/${ID}/${ID}.${PREF}.tab
-done
-
+python gather_anno.py --config configs/config.txt --id Tadh --prefix tfs --tree-dir results/generax/ --outfile Tadh.tfs.tab 
 ```
+
 
 
 # GeneRax   

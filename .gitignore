@@ -9,3 +9,7 @@ slurm*
 *.json
 *.log
 species_list
+*.json
+*.tab
+genefam.csv
+workflow/__pycache__/
