@@ -119,14 +119,18 @@ out_fn = args.output
 update = True
 verbose = True
 
+if not os.path.isfile(json_fn):
+    print(f"WARNING: JSON file {json_fn} doesn't exist!")
+    data = {}
+else:
+    with open(json_fn) as f:
+        data = json.load(f)
 
-with open(json_fn) as f:
-    data = json.load(f)
 
 if hg:
     print("Provided HG string. Will check the job and update the status")
-    if verbose:
-        print(f'{hg}')
+    #if verbose:
+    #    print(f'{hg}')
     if hg in data.keys():
         info = data[hg]
         jobid = info['jobid']
@@ -164,8 +168,7 @@ if hg:
         else:
             print(f'ERROR: unknown job status for {jobid}!')
     else:
-        print(f'ERROR: {hg} not found in {json_fn}!')
-        quit()
+        print(f'WARNING: {hg} not found in {json_fn}!')
     quit()
 
 

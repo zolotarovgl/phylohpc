@@ -14,15 +14,43 @@ mamba env create -f workflow/environment.yaml
 
 `configs/config.txt` - a config file with pipeline settings.   
 `species_list` - the list of species prefixes to use for the pipeline  
+Optinally, you would also like to have the `data/species_tree.newick` and `data/input.fasta` (if you are using custom proteomes)  
 
-# Phylogeny pipeline   
 
 
+# Prepare data      
 Pull species' proteomes from Xavi's database. If you don't know who Xavi is, then you'd have to prepare a joint protomes fasta yourself: 
 ```bash 
 # prepare input files:
 bash workflow/prepare_fasta.sh species_list data/input.fasta
 ```
+
+# Pipeline    
+
+The pipeline itself has 2 steps:   
+
+
+1. Family level - search and clustering    
+2. HG level - alignment, trimming, phylogeny, POSSVM + optional GeneRax optimization step   
+
+
+## Gene families    
+
+
+
+Check the status of the families jobs
+
+```bash  
+# Example
+mkdir -p info # a folder to store JSON info files 
+python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json
+
+```
+
+
+
+
+# [DEPRECIATED]  
 
 
 The following command will launch the pipeline (first pass). 
@@ -75,13 +103,11 @@ Since many jobs for the big homology groups may fail, the status of each homolog
 tfs.T-box.HG1   1       1       1       1
 ``` 
 
-or for all HGs at once:  
 
-```bash
-./workflow/get_hg_status.sh
-```
 
+Check info of all HGs at once:  
 ```bash
+python check_info.py --json gen.info.json --hg neu.Pentaxin.HG1
 python check_info.py --json gen.info.json --output status.tab
 ```
 
@@ -90,14 +116,15 @@ python check_info.py --json gen.info.json --output status.tab
 # TODOs:   
 
 
-- status and state in json files - DONE   
-- files checks in additin to the job states    
+- family submission python wrapper  
+- files checks in addition to the job states - overwrite the status based on this       
 - make sure the phylogenies are rerun (updated) not overwritten  
 - inflation parameter should be specified in the genefam file
 - don't run for the HGs without the species of interest!  
-- add GeneRax 
-- add GeneRax explainer   
-- add updated species tree and an example one
+- ~~add GeneRax~~ 
+- ~~add GeneRax explainer~~   
+- ~~add updated species tree and an example one~~
+- ~~status and state in json files ~~
 - ~~make sure to NOT run possvm on the phylogenies that did not finish - relaunch instead~~ 
 - ~~gather anno should account for the families without clusterings~~
 - ~~better annotation gathering with the ortholog support etc~~

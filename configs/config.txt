@@ -17,7 +17,7 @@ NCPU=4
 
 QOS_S1=test
 QOS_S2=short
-MEM_S1=1G
+MEM_S1=200M
 MEM_S2=1G
 MIN_SEQ=5 
 
