@@ -34,17 +34,27 @@ The pipeline itself has 2 steps:
 2. HG level - alignment, trimming, phylogeny, POSSVM + optional GeneRax optimization step   
 
 
-## Gene families    
+## Step1. Gene families    
 
 
 
 Check the status of the families jobs
 
 ```bash  
-# Example
 mkdir -p info # a folder to store JSON info files 
-python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json
+python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json  --output family_status.tab 
+# Now run with --resubmit to re-submit the missing families 
+python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json  --output family_status.tab --resubmit
+```
 
+## Step2. Homology groups    
+
+
+
+Check the status of the families jobs
+
+```bash  
+t.b.a
 ```
 
 
