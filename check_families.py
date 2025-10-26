@@ -186,7 +186,7 @@ if stdout:
 # do not re-submit the jobs that are running 
 ########################################
 # the submit family will submit 2 jobs at the same time 
-from submit_family import submit_family
+from workflow.submit_family import submit_family
 resubmit = args.resubmit
 
 

@@ -17,7 +17,7 @@ OUTFILE = args.outfile
 verbose = False
 
 
-from workflow.helper import parse_bash_config
+from helper import parse_bash_config
 config_fn = 'configs/config.txt'
 config = parse_bash_config(config_fn)
 if not SEARCH_DIR:

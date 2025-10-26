@@ -13,3 +13,4 @@ species_list
 *.tab
 genefam.csv
 workflow/__pycache__/
+pep2hg

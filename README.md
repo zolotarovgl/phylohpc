@@ -57,6 +57,31 @@ Check the status of the families jobs
 t.b.a
 ```
 
+## Step3. Gather annotations per species
+
+For instance, to get tfs annotations (leave the argument `--prefix` out to get all of the annotations):  
+
+
+```bash
+python workflow/gather_anno.py --config configs/config.txt --id Tadh --prefix tfs --tree-dir results/generax/ --outfile Tadh.tfs.tab 
+```
+
+
+# TODOs:   
+
+- improve hg submission logic  
+- make sure the phylogenies are rerun (updated) not overwritten  
+- inflation parameter should be specified in the genefam file
+- don't run for the HGs without the species of interest - HG filtering step  
+- ~~family submission python wrapper~~  
+- ~~add GeneRax~~ 
+- ~~add GeneRax explainer~~   
+- ~~add updated species tree and an example one~~
+- ~~status and state in json files~~  
+- ~~make sure to NOT run possvm on the phylogenies that did not finish - relaunch instead~~ 
+- ~~gather anno should account for the families without clusterings~~
+- ~~better annotation gathering with the ortholog support etc~~
+- ~~files checks in addition to the job states - overwrite the status based on this~~       
 
 
 
@@ -122,22 +147,6 @@ python check_info.py --json gen.info.json --output status.tab
 ```
 
 
-
-# TODOs:   
-
-
-- family submission python wrapper  
-- files checks in addition to the job states - overwrite the status based on this       
-- make sure the phylogenies are rerun (updated) not overwritten  
-- inflation parameter should be specified in the genefam file
-- don't run for the HGs without the species of interest!  
-- ~~add GeneRax~~ 
-- ~~add GeneRax explainer~~   
-- ~~add updated species tree and an example one~~
-- ~~status and state in json files ~~
-- ~~make sure to NOT run possvm on the phylogenies that did not finish - relaunch instead~~ 
-- ~~gather anno should account for the families without clusterings~~
-- ~~better annotation gathering with the ortholog support etc~~
 
 
 
@@ -216,14 +225,7 @@ bash workflow/submit_family.sh configs/config.txt sig.GPCRrhod --mem_s1 500M --m
 ```  
 
 
-# Gather annotations per species
 
-For instance, to get tfs annotations (leave the argument `--prefix` out to get all of the annotations):  
-
-
-```bash
-python gather_anno.py --config configs/config.txt --id Tadh --prefix tfs --tree-dir results/generax/ --outfile Tadh.tfs.tab 
-```
 
 
 
