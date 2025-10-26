@@ -51,12 +51,14 @@ def parse_genefam(fn,append_prefix = True):
 
 def check_job(jobid):
     def parse_mem(val):
-        if val.endswith("K"): return int(val[:-1]) / 1024
-        if val.endswith("M"): return int(val[:-1])
-        if val.endswith("G"): return int(val[:-1]) * 1024
-        if val.endswith("T"): return int(val[:-1]) * 1024 * 1024
-        try: return float(val)
-        except: return 0
+        if val.endswith("K"): return float(val[:-1]) / 1024
+        if val.endswith("M"): return float(val[:-1])
+        if val.endswith("G"): return float(val[:-1]) * 1024
+        if val.endswith("T"): return float(val[:-1]) * 1024 * 1024
+        try:
+            return float(val)
+        except:
+            return 0
 
     status = subprocess.run(["squeue","-j",jobid,"-h","-o","%T"],capture_output=True,text=True)
     if status.stdout.strip():

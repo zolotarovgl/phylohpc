@@ -102,8 +102,6 @@ def check_families(family = None,json_info = None,json_fn = None,genefam_dict = 
                     state_new = json_info[family][k]['job']['state']  
                     if state_new != state_prev:
                         update_counter += 1
-        # update job info if present 
-        #if 'job' in json_info['family']
     if verbose:
         print(f'Added {new_counter} new familes')
         print(f'Updated {update_counter} job states')
@@ -128,7 +126,7 @@ parser.add_argument("--family",default = None, help="Optional family name(s) to 
 parser.add_argument("--stdout", action="store_true", help="Print family statuses to stdout")
 parser.add_argument("--resubmit", action="store_true", help="Whether to re-submit failed family jobs")
 parser.add_argument("--dry", action="store_true", help="Re-submission dry mode: print the commands and exit")
-parser.add_argument("--max_iter", default = int(2), help="Maximum number of times to try to submit a job")
+parser.add_argument("--max_iter", default = int(10), help="Maximum number of times to try to submit a job")
 args = parser.parse_args()
 
 
@@ -157,7 +155,9 @@ json_info = check_families(family = args.family,json_info = json_info,json_fn = 
 
 states = {}
 for k,v in json_info.items():
-    states.update({k : "".join([str(v['search']['status']),str(v['cluster']['status'])])})
+    if k in genefam_dict.keys():
+        states.update({k : "".join([str(v['search']['status']),str(v['cluster']['status'])])})
+
 
 if out_fn:
     with open(out_fn, "w") as f:
@@ -182,18 +182,23 @@ if stdout:
 
 ########################################
 # Resubmit jobs
-# Make sure to always update json file 
-# do not re-submit the jobs that are running 
+# Add an increase  in memory!
 ########################################
 # the submit family will submit 2 jobs at the same time 
 from workflow.submit_family import submit_family
 resubmit = args.resubmit
 
 
-if resubmit:
-    print("""# Job re-submission""")
-    fams = [k for k,v in states.items() if v in ['00','01','10']]
 
+
+
+
+
+if resubmit:
+    print("""\n# Family jobs re-submission\n""")
+    fams = [k for k,v in states.items() if v in ['00','01','10']]
+    if args.family:
+        fams = [x for x in fams if x in args.family.split(',')]
     if len(fams)>0:
         print(f'{len(fams)} families to re-submit')
     else:
@@ -207,8 +212,9 @@ if resubmit:
         for job_type, v  in json_info[fam].items():
             job_state = None
             if 'job' in v.keys():
-                if 'state' in v['job'].keys():
-                    job_state = v['job']['state']
+                if 'jobid' in v['job'].keys():
+                    job_state = check_job(v['job']['jobid'])['state']
+                
             job_states.update({job_type : job_state})
         return(job_states)
 
@@ -239,21 +245,47 @@ if resubmit:
         for k,v in file_states.items():
             d.update({k : {'job' : job_states[k], 'file' : file_states[k]}})
 
-        # decide on a final state:
+        # decide on a final state (what to do):
         dd = {}
+        increase_mem_dict = {}
+        increase_time_dict = {}
         for k,v in d.items():
+            increase_mem = False
+            increase_time = False
+            job_state = v['job']
+            if "CANCEL" in job_state:
+                job_state = "CANCELLED"
             if v['file'] == 1:
-                file_state = 1
-            elif v['file'] == 0 and v['job'] in ["RUNNING","PENDING"]:
-                js = v['job']
-                print(f'WARNING: {fam:} {k}: job sat is {js} - Skipping')
-                file_state = 1
+                final_state = 1
+            if not job_state:
+                final_state = 0
+            elif job_state in ["RUNNING","PENDING"]:
+                js = check_job(v['job'])
+                print(f'WARNING: {fam:} {k}: job state is {job_state} - Skipping')
+                final_state = 1
+            elif job_state in ["OUT_OF_MEMORY"]:
+                # increase the memory!
+                #print(f'Increasing memory')
+                increase_mem = True
+                final_state = 0
+            elif job_state in ["TIMEOUT"]:
+                # increase the memory!
+                #print(f'Increasing time')
+                increase_time = True
+                final_state = 0
+            elif job_state == 'COMPLETED':
+                final_state = 1
+            elif job_state in ["FAILED","CANCELLED"]:
+                final_state = 0
             else:
-                file_state = 0
-            dd.update({k : str(file_state)})
+                print(f'ERROR: what to do with this state? {job_state}')
+                quit()
+            
+            dd.update({k : str(final_state)})
+            increase_mem_dict.update({k : increase_mem})
+            increase_time_dict.update({k : increase_time})
 
         state = "".join([str(x) for x in dd.values()])
-        
         
         if state == '00':
             mode = 'both'
@@ -270,25 +302,104 @@ if resubmit:
         # IMPORTANT: check if there jobs that are already running for this family!
 
         # Check if the number of iterations has been exceeded:
+        n_iter = {}
         if 'iter' in json_info[fam]['search'].keys():
-            iter = json_info[fam]['search']['iter']
-        elif 'iter' in json_info[fam]['cluster'].keys():
-            iter = json_info[fam]['cluster']['iter']
-        else: 
-            iter = 0
-        if iter > max_iter:
-            print(f'{fam}: Can not submit the job: iter {iter} > max_iter {max_iter}')
+            search_iter = json_info[fam]['search']['iter']
         else:
-            job_ids = submit_family(config_fn = c_fn,pref = pref,family = family,mode = mode,time_s1=None, time_s2=None, mem_s1=None, mem_s2=None,dry = dry,verbose = verbose)  
+            search_iter = 0
+        
+        if 'iter' in json_info[fam]['cluster'].keys():
+            cluster_iter = json_info[fam]['cluster']['iter']
+        else: 
+            cluster_iter  = 0
+        iters = [search_iter,cluster_iter]
+        if max(iters) >= max_iter:         
+            print(f'\n{fam}: ERROR: Can not submit the job: maximum number of iterations reached (iter: {max(iters)}, max_iter: {max_iter})\nExplore the log files to figure out why the job has been failing!\n')
+
+        else:
+           
+            def increase_mem(mem_str,step = 1024):
+                # step - increase memory by this amount in Mb
+                s = mem_str.strip().upper().rstrip("B")  # handle Mb, MB, etc.
+                if s.endswith("G"):
+                    val = int(s[:-1]) + 1
+                    return f"{val}G"
+                elif s.endswith("M"):
+                    val = int(s[:-1]) + step
+                    return f"{val}M"
+                else:
+                    # assume in MB if no suffix
+                    val = int(s) + step
+                    return f"{val}M"
+
+            # just make the dictionary with resourcnes
+            res_dict = {'search' : {'mem' : config['MEM_S1'], 'time' : config['TIME_S1']},'cluster' : {'mem' : config['MEM_S2'], 'time' : config['TIME_S2']}}
+            for job_type in res_dict.keys():
+                if increase_mem_dict[job_type]:
+                    if json_info[fam][job_type]['job']['reqmem']:
+                        mem_prev = json_info[fam][job_type]['job']['reqmem']
+                    else:
+                        mem_prev = '100M'
+                    mem_new = increase_mem(mem_prev)
+                    res_dict[job_type].update(mem = mem_new)
+                if increase_time_dict[job_type]:
+                    time_step = '01:00:00'
+                    def increase_time(time,time_step):
+                        from datetime import timedelta 
+                        def increase_time(base, step):
+                            def parse(t):
+                                if '-' in t:
+                                    d, hms = t.split('-')
+                                    days = int(d)
+                                else:
+                                    days = 0
+                                    hms = t
+                                h, m, s = map(int, hms.split(':'))
+                                return timedelta(days=days, hours=h, minutes=m, seconds=s)
+                            def fmt(td):
+                                d = td.days
+                                h, rem = divmod(td.seconds, 3600)
+                                m, s = divmod(rem, 60)
+                                return f"{d}-{h:02}:{m:02}:{s:02}" if d else f"{h:02}:{m:02}:{s:02}"
+                            return fmt(parse(base) + parse(step))
+                    
+                    prev_time = json_info[fam][job_type]['job']['timelimit']
+                    new_time = increase_time(prev_time,time_step)
+                    #print(f"{fam}: Timeout, increasing time: {prev_time} by {time_step} -> {new_time} ")
+                    res_dict[job_type].update(mem = new_time)
+
+
+            #job_ids = submit_family(config_fn = c_fn,pref = pref,family = family,mode = mode,time_s1=res_dict['search']['time'], res_dict['cluster']['time'], mem_s1=res_dict['search']['mem'], mem_s2=res_dict['cluster']['mem'],dry = dry,verbose = verbose)  
+            job_ids = submit_family(
+                config_fn=c_fn,
+                pref=pref,
+                family=family,
+                mode=mode,
+                time_s1=res_dict['search']['time'],
+                time_s2=res_dict['cluster']['time'],
+                mem_s1=res_dict['search']['mem'],
+                mem_s2=res_dict['cluster']['mem'],
+                dry=dry,
+                verbose=verbose
+            )
             submit_counter += 1  
+
+            if mode == 'both':
+                search_iter += 1
+                cluster_iter += 1
+            elif mode == 'search':
+                search_iter += 1
+            elif mode == 'cluster':
+                cluster_iter += 1
+
+            iters = {'search' : search_iter, 'cluster' : cluster_iter}
+            
             for k,v in job_ids.items():
                 job_state = check_job(v)
-                if not 'iter' in json_info[fam][k].keys():
-                    json_info[fam][k].update({'iter' : 1})
-                else:
-                    json_info[fam][k].update({'iter' : int(json_info[fam][k]['iter']+1)})
-                # update job info
-                json_info[str(fam)][str(k)]['job'] = check_job(v)
+                json_info[fam][k].update({'iter' : iters[k] })
+                json_info[str(fam)][k]['job'] = check_job(v)
+                
+                    
 
     print(f'Submitted {submit_counter} new jobs!')
 
