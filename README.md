@@ -47,6 +47,8 @@ python check_families.py configs/config.txt --genefam genefam.csv --json info/fa
 python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json  --output family_status.tab --resubmit
 ```
 
+Note: some of the jobs will fail multiple times. Check them out!  
+
 ## Step2. Homology groups    
 
 
