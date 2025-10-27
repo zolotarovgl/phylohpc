@@ -49,6 +49,19 @@ def parse_genefam(fn,append_prefix = True):
     return(genefam)
 
 
+
+def read_json(json_fn):
+    if not os.path.isfile(json_fn):
+        print(f"WARNING: JSON file {json_fn} doesn't exist!")
+        data = {}
+    elif os.path.getsize(json_fn) == 0:
+        print(f"WARNING: JSON file {json_fn} is empty!")
+        data = {}
+    else:
+        with open(json_fn) as f:
+            data = json.load(f)
+    return(data)
+
 def check_job(jobid):
     def parse_mem(val):
         if val.endswith("K"): return float(val[:-1]) / 1024

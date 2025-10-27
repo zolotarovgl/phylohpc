@@ -3,16 +3,16 @@ import argparse, subprocess, os, sys
 from workflow.helper import parse_bash_config
 
 def read_json(json_fn):
-    if not os.path.isfile(json_fn):
-        print(f"WARNING: JSON file {json_fn} doesn't exist!")
-        data = {}
-    elif os.path.getsize(json_fn) == 0:
-        print(f"WARNING: JSON file {json_fn} is empty!")
-        data = {}
-    else:
-        with open(json_fn) as f:
-            data = json.load(f)
-    return(data)
+	if not os.path.isfile(json_fn):
+		print(f"WARNING: JSON file {json_fn} doesn't exist!")
+		data = {}
+	elif os.path.getsize(json_fn) == 0:
+		print(f"WARNING: JSON file {json_fn} is empty!")
+		data = {}
+	else:
+		with open(json_fn) as f:
+			data = json.load(f)
+	return(data)
 
 def run_cmd(cmd, dry=False,verbose = True):
 	if verbose:
@@ -100,7 +100,7 @@ def submit_cluster(pref,family,config,after_jid = None,time = None,mem = None,ve
 	return(jid)
 
 
-def submit_family(config_fn, pref, family, mode = 'both', time_s1=None, time_s2=None, mem_s1=None, mem_s2=None, dry=False,verbose = True):
+def submit_family(config_fn, pref, family, mode = 'both', time_dict=None, mem_dict = None, dry=False,verbose = True):
 	# submit the jobs for families 
 	config = parse_bash_config(config_fn)
 	#print(f'Submit family mode: {mode}')
@@ -115,14 +115,27 @@ def submit_family(config_fn, pref, family, mode = 'both', time_s1=None, time_s2=
 	GENEFAM_INFO = config.get("GENEFAM_INFO")
 	INFASTA = config.get("INFASTA")
 	MAX_N = config.get("MAX_N", "")
+
+	mem_s1 = mem_s2 = time_s1 = time_s2 = None
+	if time_dict:
+		time_s1 = time_dict['search']
+		time_s2 = time_dict['cluster']
+
+	if mem_dict:
+		mem_s1 = mem_dict['search']
+		mem_s2 = mem_dict['cluster']
+			 
+
 	TIME_S1 = time_s1 or config.get("TIME_S1", "01:00:00")
 	TIME_S2 = time_s2 or config.get("TIME_S2", "01:00:00")
 	MEM_S1 = mem_s1 or config.get("MEM_S1", "4G")
 	MEM_S2 = mem_s2 or config.get("MEM_S2", "8G")
+
 	if mode == 'both':
+		raise(NotImplementedError())
 		# Submit as dependent jobs
 		#print(f"Search: {pref}.{family}")
-		jid1 = submit_search(pref,family,config,time = TIME_S1,mem = MEM_S1,verbose = verbose)
+		jid1 = submit_search(pref,family,config,time = TIME_S1,mem = MEM_S1,verbose = verbose, dry = dry)
 		#print(f"Submitted {jid1}")
 		#print(f"Cluster: {pref}.{family}")
 		jid2 = submit_cluster(pref = pref, family = family,config = config,time = TIME_S2,mem = MEM_S2,after_jid = jid1,verbose = False,dry = dry)
@@ -131,7 +144,7 @@ def submit_family(config_fn, pref, family, mode = 'both', time_s1=None, time_s2=
 		
 	elif mode == 'search':
 		print(f"Search: {pref}.{family}")
-		jid = submit_search(pref,family,config,time = TIME_S1,mem = MEM_S1,verbose = verbose)
+		jid = submit_search(pref,family,config,time = TIME_S1,mem = MEM_S1,verbose = verbose, dry = dry)
 		#print(f"Submitted {jid}")
 		return({'search': jid})
 	
