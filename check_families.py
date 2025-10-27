@@ -427,7 +427,7 @@ if resubmit:
                     
                         
 
-        print(f'Submitted {submit_counter} new jobs!')
+    print(f'Submitted {submit_counter} new jobs!')
 
     if update_json and json_fn:
         with open(json_fn, 'w') as f:

@@ -132,7 +132,6 @@ def submit_family(config_fn, pref, family, mode = 'both', time_dict=None, mem_di
 	MEM_S2 = mem_s2 or config.get("MEM_S2", "8G")
 
 	if mode == 'both':
-		raise(NotImplementedError())
 		# Submit as dependent jobs
 		#print(f"Search: {pref}.{family}")
 		jid1 = submit_search(pref,family,config,time = TIME_S1,mem = MEM_S1,verbose = verbose, dry = dry)
