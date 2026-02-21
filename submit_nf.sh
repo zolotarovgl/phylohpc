@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --no-requeue
-#SBATCH --mem=6G
+#SBATCH --mem=1G
 #SBATCH -p genoa64
 #SBATCH --qos=pipelines
 
@@ -18,6 +18,6 @@ module load Java
 
 export NXF_JVM_ARGS="-Xms2g -Xmx5g"
 
-nextflow run -ansi-log false "$@" & pid=$!
+nextflow run -resume -ansi-log false "$@" & pid=$!
 wait $pid
 exit 0

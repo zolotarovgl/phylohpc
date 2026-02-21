@@ -1,10 +1,9 @@
 
 
-## Step1 - prepare the inputs   
-
+## Step1 - prepare the inputs from the species list
 
 ```bash
-bash workflow/prepare_fasta.sh species_list_small data/input.fasta
+bash workflow/prepare_fasta.sh species_list data/input.fasta
 ```
 
 
@@ -40,15 +39,18 @@ Nextflow pipeline:
 
 
 ```bash
- grep -l '>Clacla' results/clusters/*fasta | xargs -n1 basename | sed 's/.fasta//g' | sort | uniq > ids.txt 
+# create a list of PREF.FAMILY.HG to run the pipeline for - SOI (species of interest, and minimum sequence count)
+mkdir -p tmp
+grep -l '>Clacla' results/clusters/*fasta | xargs -n1 basename | sed 's/.fasta//g' > tmp/hg_soi
+for f in results/clusters/*fasta; do      printf "%s\t%s\n" "$(basename "$f" | sed 's/.fasta//g')" "$(grep -c '>' "$f")"; done > tmp/hg_count
+cat tmp/hg_count | awk 'FNR==NR{d[$1]=$2;next}d[$1]>=30{print $1}' - tmp/hg_soi > ids.txt
 ```
 
-```bash
-module load Java
-```
+__Remove gap-only sequnces from the fasta__ 
 
 ```bash
-sbatch submit_nf.sh main.nf -profile slurm -w /no_backup/asebe/gzolotarov/work/
+mamba activate phylo 
+sbatch submit_nf.sh step2.nf -profile slurm -w /no_backup/asebe/gzolotarov/work/
 ```
 
 

@@ -31,16 +31,32 @@ Channel
 
 process ALIGN {
 
+
 	tag "$id"
 
 	publishDir "${projectDir}/results/align", mode: 'copy'
 
 	cpus 8
-	memory { 500.MB + (task.attempt - 1) * 1.GB }
-	time { 30.min + (task.attempt - 1) * 1.h }
 
-	errorStrategy 'retry'
-	maxRetries 5
+	memory {
+		task.exitStatus in [137,143] ?
+			500.MB + (task.attempt - 1) * 1.GB :
+			500.MB
+	}
+
+	time {
+		task.exitStatus in [143] ?
+			30.min + (task.attempt - 1) * 1.h :
+			30.min
+	}
+
+	errorStrategy {
+		if( task.exitStatus in [137,143] )
+			return 'retry'
+		else
+			return 'ignore'
+	}
+	maxRetries 5	
 
 	input:
 	tuple val(id), path(fasta)
@@ -62,15 +78,33 @@ process ALIGN {
 
 process PHYLOGENY {
 
+
+
 	tag "$id"
 
 	publishDir "${projectDir}/results/gene_trees", mode: 'copy'
-
+	
 	cpus 4
-	memory { 500.MB + (task.attempt - 1) * 1.GB }
-	time { 1.h + (task.attempt - 1) * 2.h }
 
-	errorStrategy 'retry'
+	memory {
+		task.exitStatus == 137 ?
+			500.MB + (task.attempt - 1) * 1.GB :
+			500.MB
+	}
+
+	time {
+		task.exitStatus == 143 ?
+			1.h + (task.attempt - 1) * 2.h :
+			1.h
+	}
+
+
+	errorStrategy {
+		if( task.exitStatus in [137,143] )
+			return 'retry'
+		else
+			return 'ignore'
+	}
 	maxRetries 3
 
 	input:
@@ -88,7 +122,6 @@ process PHYLOGENY {
 		--method ${params.TREE_METHOD}
 	"""
 }
-
 process POSSVM {
 
 	tag "$id"
