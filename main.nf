@@ -35,9 +35,9 @@ process ALIGN {
 
 	publishDir "${projectDir}/results/align", mode: 'copy'
 
-	cpus 1
-	memory { 300.MB * task.attempt }
-	time   { 10.min  * task.attempt }
+	cpus 8
+	memory { 500.MB + (task.attempt - 1) * 1.GB }
+	time { 30.min + (task.attempt - 1) * 1.h }
 
 	errorStrategy 'retry'
 	maxRetries 5
@@ -55,6 +55,8 @@ process ALIGN {
 		-o ${id}.aln.fasta \
 		-c ${task.cpus} \
 		-m ""
+	python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
+	mv ${id}.aln.fasta_tmp ${id}.aln.fasta
 	"""
 }
 
@@ -64,9 +66,9 @@ process PHYLOGENY {
 
 	publishDir "${projectDir}/results/gene_trees", mode: 'copy'
 
-	cpus 1
-	memory { 1.GB * task.attempt }
-	time   { 1.h * task.attempt }
+	cpus 4
+	memory { 500.MB + (task.attempt - 1) * 1.GB }
+	time { 1.h + (task.attempt - 1) * 2.h }
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -94,7 +96,7 @@ process POSSVM {
 	publishDir "${projectDir}/results/possvm", mode: 'copy'
 
 	cpus 1
-	memory { 100.MB * task.attempt }
+	memory { 500.MB * task.attempt }
 	time   { 5.min  * task.attempt }
 
 	errorStrategy 'retry'

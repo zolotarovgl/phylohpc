@@ -1,4 +1,5 @@
 
+
 # Installation  
 
 ```bash
@@ -30,7 +31,8 @@ bash workflow/prepare_fasta.sh species_list data/input.fasta
 The pipeline itself has 2 steps:   
 
 
-1. Family level - search and clustering    
+1. Family level - search and clustering:
+	- `check_families.py` - checks and submits the family jobs 
 2. HG level - alignment, trimming, phylogeny, POSSVM + optional GeneRax optimization step   
 
 
@@ -46,17 +48,21 @@ python check_families.py configs/config.txt --genefam genefam.csv --json info/fa
 # Now run with --resubmit to re-submit the missing families 
 python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json  --output family_status.tab --resubmit
 ```
+This will submit the search and clusterings 
+
+
 
 Note: some of the jobs will fail multiple times. Check them out!  
+
 
 ## Step2. Homology groups    
 
 
-
-Check the status of the families jobs
+How to launch per-hg jobs? 
+Check the status of the HG jobs
 
 ```bash  
-t.b.a
+python submit_hg.py -h
 ```
 
 ## Step3. Gather annotations per species
