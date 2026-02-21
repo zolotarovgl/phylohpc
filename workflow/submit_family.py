@@ -74,6 +74,10 @@ def submit_cluster(pref,family,config,after_jid = None,time = None,mem = None,ve
 	MEM = mem or config.get("MEM_S2", "4G")
 
 	job_name = f"{PROJECT}.s2.{pref}.{family}"
+	
+	os.makedirs(CLUSTER_DIR, exist_ok=True)
+	os.makedirs(SEARCH_DIR, exist_ok=True)
+	os.makedirs(LOG_DIR, exist_ok=True)
 	cmd = [
 		"sbatch", f"--qos={QOS_S2}", f"--time={TIME}",
 		f"--mem={MEM}",
