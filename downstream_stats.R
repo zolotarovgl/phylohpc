@@ -83,6 +83,7 @@ minutes = (span_sec %% 3600) %/% 60
 print(min(d$submit_dt))
 print(max(d$submit_dt))
 sprintf("%d days %d hours %d minutes", days, hours, minutes)
+
 d$job_name = str_split(d$name,' ',simplify = T)[,1]
 d$peak_rss_mb = as.numeric(sub(" MB","", d$peak_rss))
 d$hg_id = gsub('\\(|\\)','',str_split(d$name,' ',simplify = T)[,2])
@@ -95,16 +96,7 @@ d$minutes = sapply(d$realtime, function(x){
 })
 d$n = as.integer(nseq[d$hg_id])
 df = d
-dim(df)
-table(df$job_name)
-
-# ALN
 d = df[df$exit == 0,]
-#d = d[d$job_name == "ALN",]
-#d$mafft = sapply(rownames(d),FUN = function(hash){
-#	grep('mafft',read_command_err(workdir,hash),value = TRUE)[2]
-#})
-# count the number of sequences in the input fastas 
 # Slurm stats
 res = .get_slurm_stats(ids = unique(d$native_id))
 d = merge(d, res, all.x=TRUE)
@@ -118,15 +110,31 @@ par(mfrow = c(1,2))
 boxplot(split(d$mem_perc,d$job_name),ylab = 'mem perc',outline = FALSE)
 boxplot(split(d$time_perc,d$job_name),ylab = 'time perc',outline = FALSE)
 dev.off()
-d%>%group_by(job_name)%>%summarize(
-	mem = sum(ReqMem_MB)/1024,time = sum(Timelimit_min)/60,
-	mem_perc = sum(mem_perc/n(),na.rm = TRUE),
-	time_perc = sum(time_perc/n(),na.rm = TRUE),
-	mem_waste = mem * (1-mem_perc),
-	time_waste = time * (1-time_perc))
-
-summary(d[d$job_name == 'ALN',]$peak_rss_mb)
+##########################################
+options(tibble.width = Inf)
+status = "COMPLETED"
+status = c("COMPLETED","CASHED")
+table(d$status)
+d[d$status %in% status,]%>%filter(!is.na(peak_rss_mb))%>%group_by(job_name)%>%summarize(
+	n = n(),
+	mem_requ = sum(ReqMem_MB)/1024,
+	mem_used = sum(peak_rss_mb)/1024,
+	time_requ = sum(Timelimit_min),
+	time_used = sum(minutes),
+	mem_perc = mem_used/mem_requ,
+	time_perc = time_used/time_requ,
+	mem_waste = mem_requ * (1-mem_perc),
+	time_waste = time_requ * (1-time_perc))%>%arrange(-mem_waste)
+summary(d[dd$job_name == 'ALN',]$peak_rss_mb)
 summary(d[d$job_name == 'ALN',]$ReqMem_MB)
+summary(d[d$job_name == 'PHY',]$minutes)
+# average of 3 minutes? is this real?
+d[d$job_name == 'PHY',]
+hash = '20/b7b09c'
+get_job_workdir(workdir,hash)
+table(d$status)
+# huge time waste for the phylogenies 
+
 # Median is 1Gb but it only uses around 300 
 # ALN job requests too much memory 	
 # I overask for the time clearly 
@@ -136,74 +144,80 @@ summary(d[d$job_name == 'ALN',]$ReqMem_MB)
 plotname = 'test.pdf'
 pdf(plotname,height = 5,width = 10)
 par(mfrow = c(1,2))
-plot(d$n,d$minutes,pch = 16,log = 'xy',xlab = '# sequences', ylab = 'Duration, min',font.main = 1,main = 'ALN')
-plot(d$n,d$peak_rss_mb,pch = 16,log = 'xy',xlab = '# sequences', ylab = 'Memory, MB',font.main = 1,main = 'ALN')
+for(job_name in c("ALN","PHY")){
+	p = d[d$job_name == job_name,]
+	plot(p$n,p$minutes,pch = 16,log = 'xy',xlab = '# sequences', ylab = 'Duration, min',font.main = 1,main = job_name)
+	plot(p$n,p$peak_rss_mb,pch = 16,log = 'xy',xlab = '# sequences', ylab = 'Memory, MB',font.main = 1,main = job_name)
+}
 dev.off()
 options(max.print = 100)
-d%>%filter(n>=1000)
-i = 1
-rownames(d) = d$hash
-
-table(is.na(d$mafft))
-
-list.files(get_job_workdir(workdir,hash),full = TRUE,pattern = 'command')
-# ok, in the fast mode, of course there are almost no resources requested 
 
 ####################################
-# Fraction of requested resources 
+# Predict runtimes
 ####################################
+# can we predicted the runtimes? 
 
-
-
-# mem
-b1 = d$peak_rss_mb/d$ReqMem_MB
-# time
-b2 = d$minutes/d$Timelimit_min
-
-
-plotname = 'test.pdf'
-pdf(plotname,height = 5,width = 5)
-par(mfrow = c(1,1))
-plot(density(b1[!is.na(b1)]),font.main = 1,main = 'ALN',ylab = 'Density',xlab = '% of requested memory used')
-plot(density(b2[!is.na(b2)]),font.main = 1,main = 'ALN',ylab = 'Density',xlab = '% of requested time')
-plot(b1*100,b2*100,pch = 16,xlab = '% mem',ylab = '% time')
+# Seqeunce lengths
+f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
+names(f) = gsub('.fasta','',basename(f))
+f = f[names(f) %in% d$hg_id]
+lens = lapply(f,FUN = function(x) nchar(readLines(x)[!grepl('>',readLines(x))]))
+len = sapply(lens,median)
+# average sequence lengths? 
+p = d[d$job_name == "ALN",]
+summary(p$minutes)
+p%>%arrange(-minutes)
+p$median_len = len[p$hg_id]
+m1 = lm(log(minutes) ~ log(n) + log(median_len), data=p)
+m2 = lm(log(minutes) ~ I(2*log(n)) + log(median_len), data=p)
+m3 = lm(log(minutes) ~ log(n) * log(median_len), data=p)
+AIC(m1, m2,m3)
+# interaction coefficients 
+summary(m3)
+pdf('test.pdf')
+plot(predict(m3), log(p$minutes),pch = 16)
+abline(0,1,col = 'blue')
 dev.off()
+# That's very good!
+summary(predict(m3))
+summary(exp(predict(m3)))
+# less than a minute? 
 
-####################################
-# PHY
-####################################
-table(df$job_name)
-d = df[df$job_name == 'PHY',]
 
-ids = unique(d$native_id)
-cmd = sprintf(
-	"sacct -j %s --format=JobIDRaw,ReqMem,Timelimit --noheader -P",
-	paste(ids, collapse=",")
-)
-res = read.table(
-	text = system(cmd, intern=TRUE),
-	sep="|",
-	stringsAsFactors=FALSE,
-	col.names=c("JobIDRaw","ReqMem","Timelimit")
-)
-res = res[res$ReqMem!="",]
-res$ReqMem_MB = as.numeric(sub("M","",sub("G","000",res$ReqMem)))
-d = merge(d, res, by.x="native_id", by.y="JobIDRaw", all.x=TRUE)
-d$Timelimit_min = as.numeric(substr(d$Timelimit,1,2))*60 +
-                  as.numeric(substr(d$Timelimit,4,5)) +
-                  as.numeric(substr(d$Timelimit,7,8))/60
-d$mem_perc = d$peak_rss_mb/d$ReqMem_MB
-d$time_perc = d$minutes/d$Timelimit_min
-
-# plots 
-plotname = 'test.pdf'
-pdf(plotname,height = 5,width = 5)
-plot(d$n,d$minutes,pch = 16,main = 'PHY',font.main = 1,log = 'xy',xlab = '# sequences',ylab = 'Time, min')
-plot(density(d$time_perc[!is.na(d$time_perc)]),xlab =  '% time')
-plot(density(d$mem_perc[!is.na(d$mem_perc)]),xlab =  '% time')
-plot(d$mem_perc,d$time_perc,xlab = 'mem perc',ylab = 'time perc',pch = 16)
+p = p[!is.na(p$peak_rss_mb),]
+m1 = lm(log(peak_rss_mb) ~ log(n) + log(median_len), data=p)
+m2 = lm(log(peak_rss_mb) ~ I(2*log(n)) + log(median_len), data=p)
+m3 = lm(log(peak_rss_mb) ~ log(n) * log(median_len), data=p)
+AIC(m1, m2,m3)
+# interaction coefficients 
+summary(m3)
+pdf('test.pdf')
+plot(predict(m3), log(p$peak_rss_mb),pch = 16)
+abline(0,1,col = 'blue')
 dev.off()
-d$peak_rss
+# That's very good!
+summary(predict(m3))
+summary(exp(predict(m3)))
+# less than a minute? 
 
-summary(d$Timelimit_min)
-summary(d$minutes/d$Timelimit_min)
+#################################
+
+fit_aln_models = function(p, time_col="minutes", rss_col="peak_rss_mb", n_col="n", L_col="median_len"){
+	p = p[is.finite(p[[time_col]]) & p[[time_col]]>0 & is.finite(p[[rss_col]]) & p[[rss_col]]>0 & is.finite(p[[n_col]]) & p[[n_col]]>0 & is.finite(p[[L_col]]) & p[[L_col]]>0,]
+	p$ln_n = log(p[[n_col]])
+	p$ln_L = log(p[[L_col]])
+	p$ln_t = log(p[[time_col]])
+	p$ln_m = log(p[[rss_col]])
+	m_time = lm(ln_t ~ ln_n*ln_L, data=p)
+	m_mem  = lm(ln_m ~ ln_n*ln_L, data=p)
+	list(time=m_time, mem=m_mem)
+}
+predict_aln_resources = function(models, n, median_len, time_mult=1.5, mem_mult=1.5, min_time_min=5, min_mem_mb=512){
+	ln_n = log(n)
+	ln_L = log(median_len)
+	new = data.frame(ln_n=ln_n, ln_L=ln_L)
+	new$t_min = pmax(min_time_min, exp(predict(models$time, newdata=new)) * time_mult)
+	new$mem_mb = pmax(min_mem_mb, exp(predict(models$mem, newdata=new)) * mem_mult)
+	new$mem_gb = new$mem_mb/1024
+	new
+}

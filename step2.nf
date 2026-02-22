@@ -31,7 +31,7 @@ Channel
 
 process ALN {
 
-	maxForks 30
+	maxForks 50
 
 	tag "$id"
 
@@ -89,7 +89,7 @@ process ALN {
 
 process PHY {
 
-	maxForks 30
+	maxForks 50
 
 	tag "$id"
 
@@ -106,17 +106,19 @@ process PHY {
 	}
 
 	time {
-		def base = 30.min
+		def base = 5.min
 		if( task.attempt > 1 && task.previousTrace?.exitStatus == 143 )
 			return base + (task.attempt - 1) * 4.h
 		else
 			return base
 	}
 
-	errorStrategy {
-		task.exitStatus in [137,143,1] ? 'retry' : 'ignore'
+	errorStrategy = {
+		if( task.exitStatus in [137,143,1] && task.attempt <= 5 )
+			return 'retry'
+		else
+			return 'ignore'
 	}
-	errorStrategy 'ignore'
 	maxRetries 5
 	maxErrors -1
 
