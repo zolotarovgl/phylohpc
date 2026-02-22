@@ -1,9 +1,15 @@
 # TODOs
 
+- [ ] search and clustering pipeline   
 - [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
-
+- [ ] limit the iqtree run times 
+- [ ] generax + 2nd possvm 
+- [ ] mafft oom errors (code 1 instesad of 137)  
 
 # Pipeline 
+
+
+Nextflow is really much worse than I have imagined - it will keep all the intermediate data in the work directory and not file-driven. 
 
 ## step 0
 
@@ -31,4 +37,8 @@ WORKDIR=/no_backup/asebe/gzolotarov/work/
 sbatch submit_nf.sh step2.nf -profile slurm -w $WORKDIR
 ```
 
+
+# Resource usage 
+
+`dowstream_stats.R` - explores and plots resource usage. 
 

@@ -44,7 +44,7 @@ process ALN {
 		def prev_exit = task.attempt > 1 ? task.previousTrace?.exit : null
 
 		if( prev_exit in [1,137] )
-			return base + (task.attempt - 1) * 5.GB
+			return base + (task.attempt - 1) * 1.GB
 		else
 			return base
 	}
@@ -58,9 +58,17 @@ process ALN {
 		else
 			return base
 	}
-	errorStrategy 'retry'
-	maxRetries 5
 
+	errorStrategy = {
+		if( task.exitStatus in [137,143,1] && task.attempt <= 5 )
+			return 'retry'
+		else
+			return 'ignore'
+	}
+	maxRetries 5 
+	maxErrors -1
+
+	//Inputs 
 	input:
 	tuple val(id), path(fasta)
 
@@ -73,7 +81,7 @@ process ALN {
 		-f ${fasta} \
 		-o ${id}.aln.fasta \
 		-c ${task.cpus} \
-		-m ""
+		-m "--maxiterate 1000 --localpair"
 	python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
 	mv ${id}.aln.fasta_tmp ${id}.aln.fasta
 	"""
@@ -106,10 +114,11 @@ process PHY {
 	}
 
 	errorStrategy {
-		task.exitStatus in [137,143] ? 'retry' : 'ignore'
+		task.exitStatus in [137,143,1] ? 'retry' : 'ignore'
 	}
 	errorStrategy 'ignore'
 	maxRetries 5
+	maxErrors -1
 
 	input:
 	tuple val(id), path(aln)
@@ -126,6 +135,7 @@ process PHY {
 		--method ${params.TREE_METHOD}
 	"""
 }
+
 process PVM {
 
 	tag "$id"
