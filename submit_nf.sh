@@ -18,6 +18,10 @@ module load Java
 
 export NXF_JVM_ARGS="-Xms2g -Xmx5g"
 
-nextflow run -resume -ansi-log false "$@" & pid=$!
+nextflow run -resume -ansi-log false "$@" \
+	-with-report report.html \
+	-with-trace trace.txt \
+	-with-timeline timeline.html & pid=$!
+	
 wait $pid
 exit 0

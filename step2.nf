@@ -29,8 +29,9 @@ Channel
 	}
 	.set { hg_fastas }
 
-process ALIGN {
+process ALN {
 
+	maxForks 30
 
 	tag "$id"
 
@@ -39,24 +40,26 @@ process ALIGN {
 	cpus 8
 
 	memory {
-		task.exitStatus in [137,143] ?
-			500.MB + (task.attempt - 1) * 1.GB :
-			500.MB
+		def base = 500.MB
+		def prev_exit = task.attempt > 1 ? task.previousTrace?.exit : null
+
+		if( prev_exit in [1,137] )
+			return base + (task.attempt - 1) * 5.GB
+		else
+			return base
 	}
 
 	time {
-		task.exitStatus in [143] ?
-			30.min + (task.attempt - 1) * 1.h :
-			30.min
-	}
+		def base = 5.min
+		def prev_exit = task.attempt > 1 ? task.previousTrace?.exit : null
 
-	errorStrategy {
-		if( task.exitStatus in [137,143] )
-			return 'retry'
+		if( prev_exit == 143 )
+			return base + (task.attempt - 1) * 30.min
 		else
-			return 'ignore'
+			return base
 	}
-	maxRetries 5	
+	errorStrategy 'retry'
+	maxRetries 5
 
 	input:
 	tuple val(id), path(fasta)
@@ -76,9 +79,9 @@ process ALIGN {
 	"""
 }
 
-process PHYLOGENY {
+process PHY {
 
-
+	maxForks 30
 
 	tag "$id"
 
@@ -87,25 +90,26 @@ process PHYLOGENY {
 	cpus 4
 
 	memory {
-		task.exitStatus == 137 ?
-			500.MB + (task.attempt - 1) * 1.GB :
-			500.MB
+		def base = 300.MB
+		if( task.attempt > 1 && task.previousTrace?.exitStatus == 137 )
+			return base + (task.attempt - 1) * 500.MB
+		else
+			return base
 	}
 
 	time {
-		task.exitStatus == 143 ?
-			1.h + (task.attempt - 1) * 2.h :
-			1.h
+		def base = 30.min
+		if( task.attempt > 1 && task.previousTrace?.exitStatus == 143 )
+			return base + (task.attempt - 1) * 4.h
+		else
+			return base
 	}
-
 
 	errorStrategy {
-		if( task.exitStatus in [137,143] )
-			return 'retry'
-		else
-			return 'ignore'
+		task.exitStatus in [137,143] ? 'retry' : 'ignore'
 	}
-	maxRetries 3
+	errorStrategy 'ignore'
+	maxRetries 5
 
 	input:
 	tuple val(id), path(aln)
@@ -122,18 +126,32 @@ process PHYLOGENY {
 		--method ${params.TREE_METHOD}
 	"""
 }
-process POSSVM {
+process PVM {
 
 	tag "$id"
 
 	publishDir "${projectDir}/results/possvm", mode: 'copy'
 
 	cpus 1
-	memory { 500.MB * task.attempt }
-	time   { 5.min  * task.attempt }
+	memory {
+		def base = 300.MB
+		if( task.attempt > 1 && task.previousTrace?.exitStatus == 137 )
+			return base + (task.attempt - 1) * 500.MB
+		else
+			return base
+	}
+	time {
+		def base = 1.min
+		if( task.attempt > 1 && task.previousTrace?.exitStatus == 143 )
+			return base + (task.attempt - 1) * 5.min
+		else
+			return base
+	}
 
-	errorStrategy 'retry'
-	maxRetries 5
+
+	errorStrategy 'ignore'
+
+	maxRetries 3
 
 	input:
 	tuple val(id), path(tree), path(aln), path(refnames_file)
@@ -160,8 +178,8 @@ refnames_file = file(params.REFNAMES)
 workflow {
 
 	hg_fastas \
-		| ALIGN \
-		| PHYLOGENY \
+		| ALN \
+		| PHY \
 		| map { id, tree, aln -> tuple(id, tree, aln, refnames_file) } \
-		| POSSVM
+		| PVM
 }
