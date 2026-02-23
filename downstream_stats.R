@@ -61,13 +61,20 @@ read_command_err = function(workdir,hash){
 # Sequence counts
 #############################
 f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
-o = sapply(f,FUN = function(x){
+names(f) = gsub('.fasta','',basename(f))
+f = f[names(f) %in% d$hg_id]
+nseq = sapply(f,FUN = function(x){
 	system(sprintf('grep -c ">" %s',x),intern = TRUE)
 })
-names(o) = basename(names(o))
-table(is.na(d$realtime))
-names(o) = gsub(".fasta","",names(o))
-nseq = o
+names(nseq) = gsub(".fasta","",basename(names(nseq)))
+
+
+# Seqeunce lengths
+f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
+names(f) = gsub('.fasta','',basename(f))
+f = f[names(f) %in% d$hg_id]
+lens = lapply(f,FUN = function(x) nchar(readLines(x)[!grepl('>',readLines(x))]))
+len = sapply(lens,median)
 #############################
 # Work outputs
 #############################
@@ -80,10 +87,7 @@ span_sec = as.numeric(difftime(max(d$submit_dt), min(d$submit_dt), units="secs")
 days    = span_sec %/% 86400
 hours   = (span_sec %% 86400) %/% 3600
 minutes = (span_sec %% 3600) %/% 60
-print(min(d$submit_dt))
-print(max(d$submit_dt))
-sprintf("%d days %d hours %d minutes", days, hours, minutes)
-
+message(sprintf("%s - %s\n%d days %d hours %d minutes",min(d$submit_dt),max(d$submit_dt), days, hours, minutes))
 d$job_name = str_split(d$name,' ',simplify = T)[,1]
 d$peak_rss_mb = as.numeric(sub(" MB","", d$peak_rss))
 d$hg_id = gsub('\\(|\\)','',str_split(d$name,' ',simplify = T)[,2])
@@ -95,14 +99,21 @@ d$minutes = sapply(d$realtime, function(x){
 	m + s/60
 })
 d$n = as.integer(nseq[d$hg_id])
-df = d
-d = df[df$exit == 0,]
+d$median_len = as.numeric(len[d$hg_id])
+d = d[d$exit == 0,]
+
 # Slurm stats
 res = .get_slurm_stats(ids = unique(d$native_id))
 d = merge(d, res, all.x=TRUE)
+
 # fraction of requensted memory used 
 d$mem_perc = d$peak_rss_mb/d$ReqMem_MB
 d$time_perc = d$minutes/d$Timelimit_min
+saveRDS(d,'results/downstream/job_info.rds')
+d = readRDS('results/downstream/job_info.rds')
+
+
+
 par(mfrow = c(1,2))
 plotname = 'test.pdf'
 pdf(plotname,height = 5,width = 10)
@@ -115,7 +126,9 @@ options(tibble.width = Inf)
 status = "COMPLETED"
 status = c("COMPLETED","CASHED")
 table(d$status)
-d[d$status %in% status,]%>%filter(!is.na(peak_rss_mb))%>%group_by(job_name)%>%summarize(
+library(dplyr)
+table(is.na(d$peak_rss_mb))
+d[,]%>%filter(!is.na(peak_rss_mb))%>%group_by(job_name)%>%summarize(
 	n = n(),
 	mem_requ = sum(ReqMem_MB)/1024,
 	mem_used = sum(peak_rss_mb)/1024,
@@ -134,12 +147,11 @@ hash = '20/b7b09c'
 get_job_workdir(workdir,hash)
 table(d$status)
 # huge time waste for the phylogenies 
-
 # Median is 1Gb but it only uses around 300 
 # ALN job requests too much memory 	
 # I overask for the time clearly 
 ####################################
-# Plots
+# Resource scaling 
 ####################################
 plotname = 'test.pdf'
 pdf(plotname,height = 5,width = 10)
@@ -151,73 +163,59 @@ for(job_name in c("ALN","PHY")){
 }
 dev.off()
 options(max.print = 100)
-
+dir.create('results/downstream')
+saveRDS(p,'results/downstream/job_info.rds')
 ####################################
 # Predict runtimes
 ####################################
-# can we predicted the runtimes? 
 
-# Seqeunce lengths
-f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
-names(f) = gsub('.fasta','',basename(f))
-f = f[names(f) %in% d$hg_id]
-lens = lapply(f,FUN = function(x) nchar(readLines(x)[!grepl('>',readLines(x))]))
-len = sapply(lens,median)
-# average sequence lengths? 
-p = d[d$job_name == "ALN",]
-summary(p$minutes)
-p%>%arrange(-minutes)
-p$median_len = len[p$hg_id]
-m1 = lm(log(minutes) ~ log(n) + log(median_len), data=p)
-m2 = lm(log(minutes) ~ I(2*log(n)) + log(median_len), data=p)
-m3 = lm(log(minutes) ~ log(n) * log(median_len), data=p)
-AIC(m1, m2,m3)
-# interaction coefficients 
-summary(m3)
-pdf('test.pdf')
-plot(predict(m3), log(p$minutes),pch = 16)
-abline(0,1,col = 'blue')
-dev.off()
-# That's very good!
-summary(predict(m3))
-summary(exp(predict(m3)))
-# less than a minute? 
+d = readRDS('results/downstream/job_info.rds')
+table(d$job_name)
+dd = d[,c('hg_id','job_name','hash','minutes','Timelimit_min','peak_rss_mb','ReqMem_MB')]
+colnames(dd) = c('hg_id','job_name','hash','time_used','time_requ','mem_used','mem_requ')
+dd$mem_perc = dd$mem_used/dd$mem_requ
+dd$time_perc = dd$time_used/dd$time_requ
+dd$nseq = as.integer(nseq[dd$hg_id])
+dd$mlen = len[dd$hg_id]
 
 
-p = p[!is.na(p$peak_rss_mb),]
-m1 = lm(log(peak_rss_mb) ~ log(n) + log(median_len), data=p)
-m2 = lm(log(peak_rss_mb) ~ I(2*log(n)) + log(median_len), data=p)
-m3 = lm(log(peak_rss_mb) ~ log(n) * log(median_len), data=p)
-AIC(m1, m2,m3)
-# interaction coefficients 
-summary(m3)
-pdf('test.pdf')
-plot(predict(m3), log(p$peak_rss_mb),pch = 16)
-abline(0,1,col = 'blue')
-dev.off()
-# That's very good!
-summary(predict(m3))
-summary(exp(predict(m3)))
-# less than a minute? 
-
-#################################
-
-fit_aln_models = function(p, time_col="minutes", rss_col="peak_rss_mb", n_col="n", L_col="median_len"){
-	p = p[is.finite(p[[time_col]]) & p[[time_col]]>0 & is.finite(p[[rss_col]]) & p[[rss_col]]>0 & is.finite(p[[n_col]]) & p[[n_col]]>0 & is.finite(p[[L_col]]) & p[[L_col]]>0,]
-	p$ln_n = log(p[[n_col]])
-	p$ln_L = log(p[[L_col]])
-	p$ln_t = log(p[[time_col]])
-	p$ln_m = log(p[[rss_col]])
-	m_time = lm(ln_t ~ ln_n*ln_L, data=p)
-	m_mem  = lm(ln_m ~ ln_n*ln_L, data=p)
-	list(time=m_time, mem=m_mem)
+models = list()
+for(id in c("ALN","PHY")){
+	m1 = lm(log(mem_used) ~ log(nseq) * log(mlen), data=dd[dd$job_name == id,])
+	m2 = lm(log(time_used) ~ log(nseq) * log(mlen), data=dd[dd$job_name == id,])
+	models[[id]] = list(mem = m1,time = m2)
 }
-predict_aln_resources = function(models, n, median_len, time_mult=1.5, mem_mult=1.5, min_time_min=5, min_mem_mb=512){
-	ln_n = log(n)
-	ln_L = log(median_len)
-	new = data.frame(ln_n=ln_n, ln_L=ln_L)
-	new$t_min = pmax(min_time_min, exp(predict(models$time, newdata=new)) * time_mult)
-	new$mem_mb = pmax(min_mem_mb, exp(predict(models$mem, newdata=new)) * mem_mult)
-	new$mem_gb = new$mem_mb/1024
-	new
+
+
+predict_res = function(model_m,model_t,new){
+	pred_m = exp(predict(model_m, newdata=new))
+	pred_t = exp(predict(model_t, newdata=new))
+	data.frame(mem = pred_m,time = pred_t)
 }
+
+job_name = 'ALN'
+
+
+# Predict job resources per file 
+ids = intersect(names(len),names(nseq))
+b = data.frame(mlen = len[ids],nseq = as.integer(nseq[ids]))
+ids = readLines('ids.txt')
+b = b[rownames(b) %in% ids,]
+options(max.print = 30)
+o = b
+for(job_name in names(models)){
+	o = cbind(o,predict_res(models[[job_name]]$mem,models[[job_name]]$time,o))
+	colnames(o)[(ncol(o)-1):ncol(o)] = paste0(job_name,'_',colnames(o)[(ncol(o)-1):ncol(o)])
+}
+rownames(o) = rownames(b)
+o%>%arrange(-ALN_time)
+o%>%arrange(-ALN_mem)
+
+plotname = 'test.pdf'
+w = 6
+pdf(plotname,height = w, width = w)
+
+plot(p$mem_used,predict_res(m3,t2,p)$mem,pch = 16,cex = 0.5,ylab = 'predicted',xlab = 'used');abline(0,1,col = 'blue')
+dev.off()
+
+

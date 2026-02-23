@@ -44,7 +44,7 @@ process ALN {
 		def prev_exit = task.attempt > 1 ? task.previousTrace?.exit : null
 
 		if( prev_exit in [1,137] )
-			return base + (task.attempt - 1) * 1.GB
+			return base + (task.attempt - 1) * 2.GB
 		else
 			return base
 	}
@@ -60,12 +60,14 @@ process ALN {
 	}
 
 	errorStrategy = {
-		if( task.exitStatus in [137,143,1] && task.attempt <= 5 )
+		if (task.attempt <= 10) {
 			return 'retry'
-		else
-			return 'ignore'
+		} else {
+			return 'ignore' // Continue even after retries
+		}
 	}
-	maxRetries 5 
+
+	maxRetries 10
 	maxErrors -1
 
 	//Inputs 
@@ -106,18 +108,23 @@ process PHY {
 	}
 
 	time {
-		def base = 5.min
-		if( task.attempt > 1 && task.previousTrace?.exitStatus == 143 )
-			return base + (task.attempt - 1) * 4.h
+		def prev = task.attempt > 1 ? task.previousTrace?.exitStatus : null
+		if( task.attempt == 1 )
+			return 5.min
+		else if( task.attempt == 2 && prev == 143 )
+			return 30.min
+		else if( task.attempt == 3 && prev == 143 )
+			return 1.h
 		else
-			return base
+			return 6.h
 	}
 
 	errorStrategy = {
-		if( task.exitStatus in [137,143,1] && task.attempt <= 5 )
+		if (task.attempt <= 5) {
 			return 'retry'
-		else
-			return 'ignore'
+		} else {
+			return 'ignore' // Continue even after retries
+		}
 	}
 	maxRetries 5
 	maxErrors -1
@@ -188,7 +195,6 @@ process PVM {
 refnames_file = file(params.REFNAMES)
 
 workflow {
-
 	hg_fastas \
 		| ALN \
 		| PHY \
