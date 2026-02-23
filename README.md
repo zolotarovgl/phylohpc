@@ -23,11 +23,15 @@ bash workflow/prepare_fasta.sh species_list data/input.fasta
 
 ## DEV step 1
 
-Run the pythong wrapper for the step1 
+Run the python wrapper for the step1 
 
 ```bash
 mkdir -p info # a folder to store JSON info files 
 python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json  --output family_status.tab --resubmit
+```
+
+Record the names of the homology groups with moer than `30` sequences and the species of interest `Clacla`:  
+```bash
 mkdir -p tmp
 grep -l '>Clacla' results/clusters/*fasta | xargs -n1 basename | sed 's/.fasta//g' > tmp/hg_soi
 for f in results/clusters/*fasta; do      printf "%s\t%s\n" "$(basename "$f" | sed 's/.fasta//g')" "$(grep -c '>' "$f")"; done > tmp/hg_count
@@ -45,7 +49,7 @@ sbatch submit_nf.sh step2.nf -profile slurm -w $WORKDIR
 ```
 
 
-## step3   
+## DEV step3   
 
 Gather the annotations per species of interest:  
 
