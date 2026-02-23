@@ -2,7 +2,7 @@
 import argparse, subprocess, os, tempfile
 
 parser = argparse.ArgumentParser(description="Gather species annotation")
-parser.add_argument("--config",required = True, help = 'Bash-formatted config file configs/config.txt')
+parser.add_argument("--config",required = False, help = 'Bash-formatted config file configs/config.txt')
 parser.add_argument("--id", required=True, help = 'Species prefox')
 parser.add_argument("--outfile", help = 'Optional output tab file. If not specified, the annotations are printed to stdout')
 parser.add_argument("--search-dir", default=None)
@@ -18,8 +18,15 @@ verbose = False
 
 
 from helper import parse_bash_config
-config_fn = 'configs/config.txt'
-config = parse_bash_config(config_fn)
+if args.config:
+    config = parse_bash_config(args.config)
+else:
+    if not SEARCH_DIR:
+        print(f'provide either config or --search-dir')
+        quit()
+    if not TREE_DIR:
+        print(f'provide either config or --tree-dir')
+        quit()
 if not SEARCH_DIR:
 	SEARCH_DIR = config['SEARCH_DIR']
 if not TREE_DIR:

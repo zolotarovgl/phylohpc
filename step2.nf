@@ -89,6 +89,8 @@ process ALN {
 	"""
 }
 
+
+// iqtree2 does not require a lot of memory usually
 process PHY {
 
 	maxForks 50
@@ -98,35 +100,35 @@ process PHY {
 	publishDir "${projectDir}/results/gene_trees", mode: 'copy'
 	
 	cpus 4
-
+	// simpler version without previous traces
+	// iqtree2 is not memory intensive 
 	memory {
 		def base = 300.MB
-		if( task.attempt > 1 && task.previousTrace?.exitStatus == 137 )
-			return base + (task.attempt - 1) * 500.MB
-		else
+		if( task.attempt = 1)
 			return base
+		else
+			return 800.MB
 	}
 
 	time {
-		def prev = task.attempt > 1 ? task.previousTrace?.exitStatus : null
 		if( task.attempt == 1 )
-			return 5.min
-		else if( task.attempt == 2 && prev == 143 )
+			return 10.min
+		else if( task.attempt == 2 )
 			return 30.min
-		else if( task.attempt == 3 && prev == 143 )
+		else if( task.attempt == 3 )
 			return 1.h
 		else
 			return 6.h
 	}
 
 	errorStrategy = {
-		if (task.attempt <= 5) {
+		if (task.attempt <= 10) {
 			return 'retry'
 		} else {
 			return 'ignore' // Continue even after retries
 		}
 	}
-	maxRetries 5
+	maxRetries 10
 	maxErrors -1
 
 	input:

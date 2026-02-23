@@ -1,0 +1,297 @@
+# TODOs  
+- [ ] oom alignment events not captured 
+
+# Installation  
+
+```bash
+git clone --recurse-submodules https://github.com/zolotarovgl/phylohpc.git
+cd phylohpc
+mamba env create -f workflow/environment.yaml
+```
+
+
+
+
+# Configuration  
+
+`configs/config.txt` - a config file with pipeline settings.   
+`species_list` - the list of species prefixes to use for the pipeline  
+Optinally, you would also like to have the `data/species_tree.newick` and `data/input.fasta` (if you are using custom proteomes)  
+
+
+
+# Prepare data      
+Pull species' proteomes from Xavi's database. If you don't know who Xavi is, then you'd have to prepare a joint protomes fasta yourself: 
+```bash 
+# prepare input files:
+bash workflow/prepare_fasta.sh species_list data/input.fasta
+```
+
+# Pipeline    
+
+The pipeline itself has 2 steps:   
+
+
+1. Family level - search and clustering:
+	- `check_families.py` - checks and submits the family jobs 
+2. HG level - alignment, trimming, phylogeny, POSSVM + optional GeneRax optimization step   
+
+
+## Step1. Gene families    
+
+
+
+Check the status of the families jobs
+
+```bash  
+mkdir -p info # a folder to store JSON info files 
+python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json  --output family_status.tab 
+# Now run with --resubmit to re-submit the missing families 
+python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json  --output family_status.tab --resubmit
+```
+This will submit the search and clusterings 
+
+
+
+Note: some of the jobs will fail multiple times. Check them out!  
+
+
+## Step2. Homology groups    
+
+
+How to launch per-hg jobs? 
+Check the status of the HG jobs
+
+```bash  
+python submit_hg.py -h
+```
+
+## Step3. Gather annotations per species
+
+For instance, to get tfs annotations (leave the argument `--prefix` out to get all of the annotations):  
+
+
+```bash
+python workflow/gather_anno.py --config configs/config.txt --id Tadh --prefix tfs --tree-dir results/generax/ --outfile Tadh.tfs.tab 
+```
+
+
+# TODOs:   
+
+- improve hg submission logic  
+- make sure the phylogenies are rerun (updated) not overwritten  
+- inflation parameter should be specified in the genefam file
+- don't run for the HGs without the species of interest - HG filtering step  
+- ~~family submission python wrapper~~  
+- ~~add GeneRax~~ 
+- ~~add GeneRax explainer~~   
+- ~~add updated species tree and an example one~~
+- ~~status and state in json files~~  
+- ~~make sure to NOT run possvm on the phylogenies that did not finish - relaunch instead~~ 
+- ~~gather anno should account for the families without clusterings~~
+- ~~better annotation gathering with the ortholog support etc~~
+- ~~files checks in addition to the job states - overwrite the status based on this~~       
+
+
+
+# [DEPRECIATED]  
+
+
+The following command will launch the pipeline (first pass). 
+```bash
+bash pipeline.sh   
+```
+
+To check the jobs:  
+
+```bash
+source workflow/slurm_functions.sh
+list_current_jobs
+list_all_jobs
+```
+
+
+Some jobs will inevitably fail do to the amount of allocated resources.
+The resources are specified in the `configs/config.txt`. For instance:  
+
+```
+MEM_S1=1G
+MEM_S2=1G
+TIME_S1=00:10:00
+TIME_S2=00:30:00
+TIME_S3=00:01:00
+TIME_S3_SHORT=1:00:00
+TIME_S3_LONG=12:00:00
+MEM_SHORT=1G
+MEM_LONG=1G
+MEM_S5=10G
+TIME_S5=1:00:00
+```
+
+- `S1` - search step   
+- `S2` - clustering step   
+- `S3` - alignment and phylogeny. The job itself is a job that submits 2 job arrays - long and short. The long job array is intended for big gene families. The difference between the big and short family is determined by the following line in the config:   
+
+```bash
+# separate between small groups
+MAX_SEQ=300
+``` 
+- `S5` - GeneRax 
+
+
+Since many jobs for the big homology groups may fail, the status of each homology group should be checked:  
+
+```bash
+./workflow/check_status.sh tfs.T-box.HG1
+#prefix cluster align   tree    possvm
+tfs.T-box.HG1   1       1       1       1
+``` 
+
+
+
+Check info of all HGs at once:  
+```bash
+python check_info.py --json gen.info.json --hg neu.Pentaxin.HG1
+python check_info.py --json gen.info.json --output status.tab
+```
+
+
+
+
+
+# Useful commands 
+
+
+## Clever job submission   
+
+`submit_hg.py` now has an argument `--json` - if exists, this file will provide the info on the last job launched for a particular `PREF.FAMILY.HG`. 
+This allows to increase the resources, if the job has timed out or OOM:  `--mem_increase`, `--time_increase`  
+
+
+For example, to submit alignment and phylogeny jobs:
+
+```bash
+# run only for HGs with Clacla
+grep -l '>Clacla' results/clusters/*fasta | xargs -n1 basename | sed 's/.fasta//g' | sort | uniq > ids
+#./workflow/get_hg_status.sh > hg_status.tab
+for ID in $(cat ids); do ./workflow/check_status.sh $ID; done | grep -v '#' | awk '{print $1"\t"$2$3$4$5}' > hg_status.tab
+cat hg_status.tab  | grep 1000 | cut -f 1  > tmp/torun
+
+
+# submit alignment jobs:
+TIME=00:30:00
+MEM=500M
+NCPU=4
+while IFS="." read -r PREF FAMILY HG; do
+    python submit_hg.py configs/config.txt --time $TIME --cpus $NCPU --mem $MEM --mode align --pref $PREF --family $FAMILY --hg $HG --mafft ""  --json aln.info.json
+done < tmp/torun
+
+./workflow/get_hg_status.sh > hg_status.tab
+cat hg_status.tab | grep 1100 | cut -f 1  | grep -w -f ids > tmp/torun
+
+# remove gap-only sequences
+for ID in $(cat tmp/torun); do
+echo $ID
+clean_fasta results/align/${ID}.aln.fasta tmp_fa 20; mv tmp_fa results/align/${ID}.aln.fasta
+done
+
+TIME=1-00:00:00
+MEM=500M
+NCPU=6
+while IFS="." read -r PREF FAMILY HG; do
+    python submit_hg.py configs/config.txt --time $TIME --cpus $NCPU --mem $MEM --mode phylogeny --pref $PREF --family $FAMILY --hg $HG  --json phy.info.json
+done < tmp/torun
+```
+
+## Check phylogeny jobs status:
+
+```bash
+for ID in $(cat phy.info.json  | grep jobid | cut -f 2 -d :  | sed -E 's/ |"|,//g'); do sacct -j $ID | awk 'NR==3' ; done
+```
+
+
+## Run possvm for the hgs wth finished phylogenies 
+
+```bash
+sbatch --output=output.log --error=error.log --mem=1G --time=01:00:00 workflow/run_possvm_all.sh 
+```
+
+
+## Family status 
+
+Check the pipeline status of the families defined in `genefam.csv`:  
+
+
+```bash
+source ./workflow/functions.sh
+check_all_families genefam.csv
+```
+
+Submit clustering jobs for the families with missing clusterings:
+
+```bash
+bash workflow/submit_family.sh configs/config.txt sig.GPCRrhod --mem_s1 500M --mem_s2 30G  --dry
+```  
+
+
+
+
+
+
+# GeneRax   
+
+
+Prune the tree (it may include more species and GeneRax will complain)
+```bash
+# fix the species tree for generax
+python workflow/prune_tree.py data/species_tree.newick species_list  data/species_tree.newick
+```
+
+
+Example: submit generax jobs for the HGs with finished phylogenies and possvm:  
+```bash
+comm <(cat hg_status.tab | grep 1111 | cut -f 1 | sort | uniq) <(ls results/generax/*treefile | xargs -n1 basename | sed 's/.treefile//g' | sort ) -3 > tmp/gr.torun
+N=$(cat tmp/gr.torun  | wc -l | awk '{print $1}')
+echo "${N} jobs to run"
+while IFS=. read -r PREF FAMILY HG; do
+    #echo "PREF=$PREF FAMILY=$FAMILY HG=$HG"
+    python submit_hg.py --pref $PREF --family $FAMILY --hg $HG --mode generax configs/config.txt --json gen.info.json
+done < tmp/gr.torun
+```
+
+Run possvm for GeneRax results:  
+```bash
+bash post_generax.sh
+```
+
+
+
+
+```bash
+module load OpenMPI/4.1.5-GCC-12.3.0
+PREF=tfs 
+FAMILY=T-box
+HG=HG1
+
+python phylogeny/main.py generax --alignment results/align/${PREF}.${FAMILY}.${HG}.aln.fasta --gene_tree results/gene_trees/${PREF}.${FAMILY}.${HG}.treefile --species_tree species_tree.newick --iqtree_file results/gene_trees/${PREF}.${FAMILY}.${HG}.iqtree --name ${PREF}.${FAMILY}.${HG} --output_dir boo --name boo 
+```
+
+GeneRax submission example:  
+```bash
+python submit_hg.py --pref tfs --family T-box --hg HG1  --mode generax configs/config.txt
+```
+
+
+ 
+# Changes   
+
+The following HMM models no longer seem to be a part of the PFAM-A: removed
+```
+# missing HMM files:
+for ID in $(awk '{print $2}' genefam.csv  | sed 's/,/\n/g' | sort | uniq ); do
+hmmfetch $PFAMDB $ID > out.hmm 2> err.log
+if [ $? -ne 0 ]; then
+    echo "Error fetching $ID"
+fi
+done
+```

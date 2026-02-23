@@ -3,6 +3,7 @@
 #SBATCH --mem=1GB
 #SBATCH -p genoa64
 #SBATCH --qos=pipelines
+#SBATCH --time=1-0:00:00
 
 set -e
 set -u
