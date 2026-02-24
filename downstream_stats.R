@@ -31,7 +31,7 @@ read_command_err = function(workdir,hash){
 		"sacct -j %s --format=JobIDRaw,ReqMem,Timelimit,Submit --noheader -P",
 		paste(ids, collapse=",")
 	)
-
+	
 	res = read.table(
 		text = system(cmd, intern=TRUE),
 		sep="|",
@@ -58,24 +58,6 @@ read_command_err = function(workdir,hash){
 }
 
 #############################
-# Sequence counts
-#############################
-f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
-names(f) = gsub('.fasta','',basename(f))
-f = f[names(f) %in% d$hg_id]
-nseq = sapply(f,FUN = function(x){
-	system(sprintf('grep -c ">" %s',x),intern = TRUE)
-})
-names(nseq) = gsub(".fasta","",basename(names(nseq)))
-
-
-# Seqeunce lengths
-f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
-names(f) = gsub('.fasta','',basename(f))
-f = f[names(f) %in% d$hg_id]
-lens = lapply(f,FUN = function(x) nchar(readLines(x)[!grepl('>',readLines(x))]))
-len = sapply(lens,median)
-#############################
 # Work outputs
 #############################
 workdir = '/no_backup/asebe/gzolotarov/work/'
@@ -98,11 +80,31 @@ d$minutes = sapply(d$realtime, function(x){
 	if(is.na(s)) s = 0
 	m + s/60
 })
+
+
+# Sequence counts
+f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
+names(f) = gsub('.fasta','',basename(f))
+f = f[names(f) %in% d$hg_id]
+nseq = sapply(f,FUN = function(x){
+	system(sprintf('grep -c ">" %s',x),intern = TRUE)
+})
+names(nseq) = gsub(".fasta","",basename(names(nseq)))
+
+
+# Seqeunce lengths
+f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
+names(f) = gsub('.fasta','',basename(f))
+f = f[names(f) %in% d$hg_id]
+lens = lapply(f,FUN = function(x) nchar(readLines(x)[!grepl('>',readLines(x))]))
+len = sapply(lens,median)
+
 d$n = as.integer(nseq[d$hg_id])
 d$median_len = as.numeric(len[d$hg_id])
 d = d[d$exit == 0,]
 
 # Slurm stats
+d$native_id
 res = .get_slurm_stats(ids = unique(d$native_id))
 d = merge(d, res, all.x=TRUE)
 
@@ -110,10 +112,8 @@ d = merge(d, res, all.x=TRUE)
 d$mem_perc = d$peak_rss_mb/d$ReqMem_MB
 d$time_perc = d$minutes/d$Timelimit_min
 saveRDS(d,'results/downstream/job_info.rds')
+###########################################
 d = readRDS('results/downstream/job_info.rds')
-
-
-
 par(mfrow = c(1,2))
 plotname = 'test.pdf'
 pdf(plotname,height = 5,width = 10)
@@ -140,7 +140,7 @@ d[,]%>%filter(!is.na(peak_rss_mb))%>%group_by(job_name)%>%summarize(
 	time_waste = time_requ * (1-time_perc))%>%arrange(-mem_waste)
 summary(d[dd$job_name == 'ALN',]$peak_rss_mb)
 summary(d[d$job_name == 'ALN',]$ReqMem_MB)
-summary(d[d$job_name == 'PHY',]$minutes)
+summary(d[d$job_name == 'PHY',]$minutes
 # average of 3 minutes? is this real?
 d[d$job_name == 'PHY',]
 hash = '20/b7b09c'
@@ -164,14 +164,13 @@ for(job_name in c("ALN","PHY")){
 dev.off()
 options(max.print = 100)
 dir.create('results/downstream')
-saveRDS(p,'results/downstream/job_info.rds')
 ####################################
 # Predict runtimes
 ####################################
-
 d = readRDS('results/downstream/job_info.rds')
-table(d$job_name)
-dd = d[,c('hg_id','job_name','hash','minutes','Timelimit_min','peak_rss_mb','ReqMem_MB')]
+cls = c('hg_id','job_name','hash','minutes','Timelimit_min','peak_rss_mb','ReqMem_MB')
+cls[!cls %in% colnames(d)]
+dd = d[,cls]
 colnames(dd) = c('hg_id','job_name','hash','time_used','time_requ','mem_used','mem_requ')
 dd$mem_perc = dd$mem_used/dd$mem_requ
 dd$time_perc = dd$time_used/dd$time_requ
@@ -208,6 +207,32 @@ for(job_name in names(models)){
 	colnames(o)[(ncol(o)-1):ncol(o)] = paste0(job_name,'_',colnames(o)[(ncol(o)-1):ncol(o)])
 }
 rownames(o) = rownames(b)
+id = 'tfs.Forkhead.HG5'
+id = 'tfs.NFYB_NFYC.HG2'
+id = 'tfs.T-box.HG1'
+id = 'tfs.Forkhead.HG1'
+
+o[id,]
+# smth is off with the time scaling here 
+convert_mem = function(x) paste0(ceiling(x/10)*10,'.MB')
+convert_time = function(x,min_time = 5){paste0(ceiling(pmax(x,min_time)),'.min')}
+
+#`id	aln_mem	aln_time	phy_mem	phy_time	pvm_mem	pvm_time`
+out = cbind(data.frame(id = rownames(o)),o[,c('ALN_mem','ALN_time','PHY_mem','PHY_time')])
+out$PHY_time = ceiling(out$PHY_time/10)*10
+summary(out$PHY_time/60)
+out%>%arrange(-PHY_time)
+
+out$ALN_mem = convert_mem(out$ALN_mem)
+out$PHY_mem = convert_mem(out$PHY_mem)
+min_time = 5
+out$ALN_time = convert_time(out$ALN_time)
+out$PHY_time = convert_time(out$PHY_time)
+rownames(out) = NULL
+colnames(out) = tolower(colnames(out))
+write.table(out,'resources.tsv',sep = '\t',quote = FALSE,row.names = FALSE)
+# PHY - needs about 38 mins of time 
+
 o%>%arrange(-ALN_time)
 o%>%arrange(-ALN_mem)
 

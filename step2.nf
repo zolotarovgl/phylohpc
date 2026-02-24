@@ -51,12 +51,11 @@ process ALN {
 
 	time {
 		def base = 5.min
-		def prev_exit = task.attempt > 1 ? task.previousTrace?.exit : null
-
-		if( prev_exit == 143 )
+		def prev_exit = task.attempt > 1 ? task.previousTrace?.exit : null 
+		if( prev_exit in [ 143,140] )
 			return base + (task.attempt - 1) * 30.min
 		else
-			return base
+			return 30.min
 	}
 
 	errorStrategy = {
@@ -101,24 +100,23 @@ process PHY {
 	
 	cpus 4
 	// simpler version without previous traces
-	// iqtree2 is not memory intensive 
+	// iqtree2 is not memory intensive - start with 300MB
 	memory {
-		def base = 300.MB
-		if( task.attempt = 1)
-			return base
+		if( task.attempt >= 3 )
+			return 1.GB
 		else
-			return 800.MB
+			return 300.MB
 	}
 
 	time {
 		if( task.attempt == 1 )
 			return 10.min
 		else if( task.attempt == 2 )
-			return 30.min
+			return 1.min
 		else if( task.attempt == 3 )
-			return 1.h
-		else
 			return 6.h
+		else
+			return 12.h
 	}
 
 	errorStrategy = {
