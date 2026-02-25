@@ -91,26 +91,45 @@ process PHY {
 	"""
 }
 process PVM {
+
 	tag "test_${id}"
 	publishDir "${params.OUTDIR}/possvm", mode: 'copy'
+
 	cpus 1
+
 	memory {
-		def base = res[id]?.pvm_mem ?: 300.MB
-		return base * task.attempt
+		def base = res[id]?.pvm_mem ?: 500.MB
+		return base + (task.attempt - 1) * 500.MB
 	}
+
 	time {
 		def base = res[id]?.pvm_time ?: 5.min
 		return base * task.attempt
 	}
-	errorStrategy 'ignore'
+
+	errorStrategy {
+		return task.attempt <= 3 ? 'retry' : 'ignore'
+	}
+
 	maxRetries 3
+
 	input:
 	tuple val(id), path(tree), path(aln), path(refnames_file)
+
 	output:
-	tuple val(id), path(tree), path("${id}.treefile.ortholog_groups.newick"), path("${id}.treefile.ortholog_groups.csv"), path("${id}.treefile.pairs_orthologs.csv")
+	tuple val(id),
+		      path(tree),
+		      path("${id}.treefile.ortholog_groups.newick"),
+		      path("${id}.treefile.ortholog_groups.csv"),
+		      path("${id}.treefile.pairs_orthologs.csv")
+
 	script:
 	"""
-	python ${projectDir}/phylogeny/main.py possvm -t ${tree} --refsps ${params.REFSPECIES} -r ${refnames_file} -o ${id}.
+	python ${projectDir}/phylogeny/main.py possvm \
+	    -t ${tree} \
+	    --refsps ${params.REFSPECIES} \
+	    -r ${refnames_file} \
+	    -o ${id}.
 	"""
 }
 refnames_file = file(params.REFNAMES)

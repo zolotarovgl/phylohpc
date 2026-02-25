@@ -2,13 +2,15 @@
 # Predict resources 
 #############################################
 library(stringr)
+library(dplyr)
+
 ids_fn = 'ids.txt'
 cluster_dir = 'results/clusters'
 models_rds = 'workflow/models/models.rds'
 outfile = 'resources.tsv'
 
 # default values per job
-defaults = setNames(c(100,5,100,5,100,1),paste0(rep(c('aln','phy','pvm'),2),rep(c('_mem','_time'),each = 3)))
+defaults = setNames(c(500,200,300,5,30,1),paste0(rep(c('aln','phy','pvm'),2),rep(c('_mem','_time'),each = 3)))
 min_mem = 100
 min_time = 1
 max_mem = 10000
@@ -48,13 +50,13 @@ for(i in seq_along(o)){
 	colnames(o[[i]]) = paste0(names(o)[i],'_',colnames(o[[i]])) 
 }
 o = do.call(cbind,setNames(o,NULL))
+#############################################
+# Round and convert to values usable by the nextflow: 
+#############################################
 pred = o
 for(i in seq_along(pred)){
 	pred[,i] = ceiling(pred[,i]*(1+increase))
 }
-#############################################
-# Round and convert to values usable by the nextflow: 
-#############################################
 for(x in names(defaults)){
 	if(!x %in% colnames(pred)){
 		pred[,x] = defaults[x]
@@ -81,7 +83,6 @@ for(i in memcols){
 for(i in timcols){
 	pred[,i][pred[,i]>=max_time] = max_time
 }
-
 round_base = function(x,base = 60){ifelse(x>=base,ceiling(x/base)*base,x)}
 # round to hours for long jobs
 for(i in timcols){

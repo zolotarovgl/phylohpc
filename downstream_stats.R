@@ -73,6 +73,7 @@ message(sprintf("%s - %s\n%d days %d hours %d minutes",min(d$submit_dt),max(d$su
 d$job_name = str_split(d$name,' ',simplify = T)[,1]
 d$peak_rss_mb = as.numeric(sub(" MB","", d$peak_rss))
 d$hg_id = gsub('\\(|\\)','',str_split(d$name,' ',simplify = T)[,2])
+d$hg_id = gsub('test_','',d$hg_id)
 d$minutes = sapply(d$realtime, function(x){
 	x = trimws(x)
 	m = if(grepl("m", x)) as.numeric(sub("m.*", "", x)) else 0
@@ -90,7 +91,6 @@ nseq = sapply(f,FUN = function(x){
 	system(sprintf('grep -c ">" %s',x),intern = TRUE)
 })
 names(nseq) = gsub(".fasta","",basename(names(nseq)))
-
 
 # Seqeunce lengths
 f = list.files('results/clusters/',pattern = 'fasta',full = TRUE)
@@ -114,13 +114,21 @@ d$time_perc = d$minutes/d$Timelimit_min
 saveRDS(d,'results/downstream/job_info.rds')
 ###########################################
 d = readRDS('results/downstream/job_info.rds')
-par(mfrow = c(1,2))
+summary(d$ReqMem_MB)
 plotname = 'test.pdf'
 pdf(plotname,height = 5,width = 10)
 par(mfrow = c(1,2))
-boxplot(split(d$mem_perc,d$job_name),ylab = 'mem perc',outline = FALSE)
-boxplot(split(d$time_perc,d$job_name),ylab = 'time perc',outline = FALSE)
+boxplot(split(d$mem_perc,d$job_name),ylab = 'Fraction of MEM used',outline = FALSE)
+boxplot(split(d$time_perc,d$job_name),ylab = 'Fraction of TIME used',outline = FALSE)
 dev.off()
+
+library(cowplot)
+theme_set(theme_cowplot())
+pl = ggplot(d,aes(x = ReqMem_MB+1, y = mem_perc))+
+geom_point(aes(col = job_name),size = 0.5)+
+scale_x_log10()
+ggsave(plotname)
+
 ##########################################
 options(tibble.width = Inf)
 status = "COMPLETED"
@@ -141,21 +149,12 @@ d[,]%>%filter(!is.na(peak_rss_mb))%>%group_by(job_name)%>%summarize(
 summary(d[dd$job_name == 'ALN',]$peak_rss_mb)
 summary(d[d$job_name == 'ALN',]$ReqMem_MB)
 summary(d[d$job_name == 'PHY',]$minutes
-# average of 3 minutes? is this real?
-d[d$job_name == 'PHY',]
-hash = '20/b7b09c'
-get_job_workdir(workdir,hash)
-table(d$status)
-# huge time waste for the phylogenies 
-# Median is 1Gb but it only uses around 300 
-# ALN job requests too much memory 	
-# I overask for the time clearly 
 ####################################
 # Resource scaling 
 ####################################
 plotname = 'test.pdf'
-pdf(plotname,height = 5,width = 10)
-par(mfrow = c(1,2))
+pdf(plotname,height = 10,width = 10)
+par(mfrow = c(2,2))
 for(job_name in c("ALN","PHY")){
 	p = d[d$job_name == job_name,]
 	plot(p$n,p$minutes,pch = 16,log = 'xy',xlab = '# sequences', ylab = 'Duration, min',font.main = 1,main = job_name)
@@ -184,7 +183,7 @@ for(id in c("ALN","PHY")){
 	m2 = lm(log(time_used) ~ log(nseq) * log(mlen), data=dd[dd$job_name == id,])
 	models[[id]] = list(mem = m1,time = m2)
 }
-
+saveRDS(models,'workflow/models/models.rds')
 
 predict_res = function(model_m,model_t,new){
 	pred_m = exp(predict(model_m, newdata=new))
@@ -219,9 +218,29 @@ convert_time = function(x,min_time = 5){paste0(ceiling(pmax(x,min_time)),'.min')
 
 #`id	aln_mem	aln_time	phy_mem	phy_time	pvm_mem	pvm_time`
 out = cbind(data.frame(id = rownames(o)),o[,c('ALN_mem','ALN_time','PHY_mem','PHY_time')])
+# add 10 %
+out$ALN_time = out$ALN_time*1.1
+out$ALN_mem = out$ALN_mem*1.1
+out$PHY_time = out$PHY_time*1.1
+out$PHY_mem = out$PHY_mem*1.1
+
+out$ALN_time = ceiling(out$ALN_time/10)*10
 out$PHY_time = ceiling(out$PHY_time/10)*10
 summary(out$PHY_time/60)
 out%>%arrange(-PHY_time)
+max_time = 48
+table(out$ALN_time>=max_time)
+table(out$PHY_time>=max_time)
+out$ALN_time[out$ALN_time>=max_time] = max_time
+out$PHY_time[out$PHY_time>=max_time] = max_time
+
+
+max_mem = 1024*10
+table(out$ALN_mem>=max_mem)
+table(out$PHY_mem>=max_mem)
+out$ALN_mem[out$ALN_mem>=max_mem] = max_mem
+out$PHY_mem[out$PHY_mem>=max_mem] = max_mem
+
 
 out$ALN_mem = convert_mem(out$ALN_mem)
 out$PHY_mem = convert_mem(out$PHY_mem)
