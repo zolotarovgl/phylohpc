@@ -16,6 +16,7 @@ min_time = 1
 max_mem = 10000
 max_time = 48*60
 increase = 0.1 # to increase predicted resources by 10 percent
+# the minimum values for the jobs 
 ###############################################
 ids = readLines(ids_fn)
 f = list.files(cluster_dir,full = TRUE,pattern = 'fasta')

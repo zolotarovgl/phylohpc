@@ -129,33 +129,13 @@ geom_point(aes(col = job_name),size = 0.5)+
 scale_x_log10()
 ggsave(plotname)
 
-##########################################
-options(tibble.width = Inf)
-status = "COMPLETED"
-status = c("COMPLETED","CASHED")
-table(d$status)
-library(dplyr)
-table(is.na(d$peak_rss_mb))
-d[,]%>%filter(!is.na(peak_rss_mb))%>%group_by(job_name)%>%summarize(
-	n = n(),
-	mem_requ = sum(ReqMem_MB)/1024,
-	mem_used = sum(peak_rss_mb)/1024,
-	time_requ = sum(Timelimit_min),
-	time_used = sum(minutes),
-	mem_perc = mem_used/mem_requ,
-	time_perc = time_used/time_requ,
-	mem_waste = mem_requ * (1-mem_perc),
-	time_waste = time_requ * (1-time_perc))%>%arrange(-mem_waste)
-summary(d[dd$job_name == 'ALN',]$peak_rss_mb)
-summary(d[d$job_name == 'ALN',]$ReqMem_MB)
-summary(d[d$job_name == 'PHY',]$minutes
 ####################################
 # Resource scaling 
 ####################################
-plotname = 'test.pdf'
+plotname = 'results/downstream/scaling.pdf'
 pdf(plotname,height = 10,width = 10)
-par(mfrow = c(2,2))
-for(job_name in c("ALN","PHY")){
+par(mfrow = c(3,2))
+for(job_name in c("ALN","PHY","PVM")){
 	p = d[d$job_name == job_name,]
 	plot(p$n,p$minutes,pch = 16,log = 'xy',xlab = '# sequences', ylab = 'Duration, min',font.main = 1,main = job_name)
 	plot(p$n,p$peak_rss_mb,pch = 16,log = 'xy',xlab = '# sequences', ylab = 'Memory, MB',font.main = 1,main = job_name)

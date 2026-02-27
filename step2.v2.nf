@@ -10,6 +10,7 @@ file(params.config).eachLine { line ->
 		cfg[k.trim()] = v.trim()
 	}
 }
+
 params.ALIGN_DIR = cfg.ALIGN_DIR
 params.TREE_DIR = cfg.TREE_DIR
 params.TREE_METHOD = 'iqtree2'
@@ -17,6 +18,10 @@ params.SPECIES_TREE = cfg.SPECIES_TREE
 params.REFSPECIES = cfg.REFSPECIES
 params.REFNAMES = cfg.REFNAMES
 params.OUTDIR = "${projectDir}/results"
+
+
+params.tag_prefix = ''
+
 def res = [:]
 if( params.resources_tsv && file(params.resources_tsv).exists() ) {
 	file(params.resources_tsv).eachLine { line, n ->
@@ -40,7 +45,7 @@ if( params.resources_tsv && file(params.resources_tsv).exists() ) {
 Channel.fromPath(params.ids).splitText().map { it.trim() }.filter { it }.map { id -> tuple(id, file("${projectDir}/results/clusters/${id}.fasta")) }.set { hg_fastas }
 process ALN {
 	maxForks 50
-	tag "test_${id}"
+	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
 	publishDir "${params.OUTDIR}/align", mode: 'copy'
 	cpus 8
 	memory {
@@ -67,7 +72,7 @@ process ALN {
 }
 process PHY {
 	maxForks 50
-	tag "test_${id}"
+	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
 	publishDir "${params.OUTDIR}/gene_trees", mode: 'copy'
 	cpus 4
 	memory {
@@ -92,7 +97,7 @@ process PHY {
 }
 process PVM {
 
-	tag "test_${id}"
+	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
 	publishDir "${params.OUTDIR}/possvm", mode: 'copy'
 
 	cpus 1
@@ -134,5 +139,5 @@ process PVM {
 }
 refnames_file = file(params.REFNAMES)
 workflow {
-	hg_fastas|ALN|PHY|map { id, tree, aln -> tuple(id, tree, aln, refnames_file) }|PVM
+	hg_fastas|ALN|PHY|map { id, tree, aln -> tuple(id, tree, aln, refnames_file) } | PVM
 }
