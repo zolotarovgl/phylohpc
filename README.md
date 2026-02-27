@@ -21,66 +21,77 @@ The problem, is that during each execution, the nextflow will start over - one n
 3. Gather the annotations per species  
 
 
-## step 0
+# Prepare input data 
 
 ```bash
 bash workflow/prepare_fasta.sh species_list data/input.fasta
 ```
 
-## DEV step 1
+# Step1 
 
-Run the python wrapper for the step1 
-
+## Interactive  
 ```bash
-mkdir -p info # a folder to store JSON info files 
-python check_families.py configs/config.txt --genefam genefam.csv --json info/families.json  --output family_status.tab --resubmit
-```
-
-Record the names of the homology groups with moer than `30` sequences and the species of interest `Clacla`:  
-```bash
-mkdir -p tmp
-grep -l '>Clacla' results/clusters/*fasta | xargs -n1 basename | sed 's/.fasta//g' > tmp/hg_soi
-for f in results/clusters/*fasta; do      printf "%s\t%s\n" "$(basename "$f" | sed 's/.fasta//g')" "$(grep -c '>' "$f")"; done > tmp/hg_count
-cat tmp/hg_count | awk 'FNR==NR{d[$1]=$2;next}d[$1]>=30{print $1}' - tmp/hg_soi > ids.txt
-```
-
-## step 2
-
-Once you have step1 results and the list of homology groups to process `ids.txt`, run the pipeline: 
-
-```bash
+# Interactive session
+module load Java 
 mamba activate phylo 
-WORKDIR=/no_backup/asebe/gzolotarov/work/
-sbatch submit_nf.sh step2.nf -profile slurm -w $WORKDIR
+WORKDIR=work_step1
+nextflow run -profile local -w $WORKDIR -resume step1.nf --genefam_info genefam.csv --infasta data/input.fasta 
 ```
 
-### Resource-informed submission:
+
+## SLURM  
+```bash
+# SLURM submssions
+WORKDIR=work_step1
+mkdir -p $WORKDIR
+mkdir -p reports
+sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf -profile slurm -w $WORKDIR --report reports/report.step1.html --trace reports/trace.step1.txt --timeline reports/timeline.step1.html 
+```
+
+Note: Use `-profile slurm`  to run using the SLURM scheduler instead of locally. Use interactive jobs if `-profile local` unless you want Emyr coming to your desk!  
+
+__Note:__ the re-clustering of the fig files does not work here!   
+
+
+# Filter homology groups   
+
+Filter and get the list of homology groups to run the alignment for: 
+```bash
+python select_hgs.py --out ids.txt --soi Mmus --min_seqs 10 --min_sps 3
+```
+`--soi` - will keep only HG ids with `Mmus` sequnce  
+
+# Step 2
+
+## Resource-informed submission:
 
 Predict resources to generate `resources.tsv`. All IDs not in this table will get default values.
 
 
 ```bash
-Rscript predict_resources.R 
+Rscript predict_resources.R \
+  --ids_fn ids.txt \
+  --cluster_dir results/clusters \
+  --models_rds workflow/models/models.rds \
+  --outfile resources.tsv \
+  --min_mem 100 --min_time 5 --max_mem 10000 --max_time 2880 --increase 0.1 
 ```
 
 ```bash
-cat ids.txt | grep Fork  > ids.txt
-WORKDIR=work
-sbatch submit_nf.sh step2.v2.nf -profile slurm -w $WORKDIR
+WORKDIR=work_step2
+sbatch -J step2 submit_nf.sh step2.nf -profile slurm -w $WORKDIR --report reports/report.step2.html --trace reports/trace.step2.txt --timeline reports/timeline.step2.html 
 ```
 
 
-## DEV step3   
+# Gather annotations 
 
 Gather the annotations per species of interest:  
 
 ```bash
 # no splitting by the group 
-mkdir -p results/annotations
-for SP in Clacla Corcan Osclob Axidam Halduj Spolac; do
-	echo $SP
-	python workflow/gather_anno.py --id ${SP} --search-dir results/search/ --tree-dir results/possvm/ > results/annotations/${SP}.tab
-done
+SP=Nvec
+mkdir -p results/annotations 
+python workflow/gather_anno.py --id ${SP} --search-dir results/search/ --tree-dir results/possvm/ > results/annotations/${SP}.tab
 
 # with splittinb by the functional groups 
 for SP in Clacla Corcan Osclob Axidam Halduj Spolac; do
