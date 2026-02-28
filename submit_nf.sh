@@ -56,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+mkdir -p reports
 nextflow run -resume -ansi-log false \
     "${NF_EXTRA_OPTS[@]}" \
     "${PASSTHRU[@]}" & pid=$!

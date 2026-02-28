@@ -13,11 +13,11 @@ file(params.config).eachLine { line ->
 
 params.ALIGN_DIR = cfg.ALIGN_DIR
 params.TREE_DIR = cfg.TREE_DIR
-params.TREE_METHOD = 'iqtree2'
 params.SPECIES_TREE = cfg.SPECIES_TREE
 params.REFSPECIES = cfg.REFSPECIES
 params.REFNAMES = cfg.REFNAMES
 params.OUTDIR = "${projectDir}/results"
+//params.MAFFT_OPT = "--maxiterate 1000 --localpair"
 
 
 params.tag_prefix = ''
@@ -65,7 +65,7 @@ process ALN {
 	tuple val(id), path("${id}.aln.fasta")
 	script:
 	"""
-	python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "--maxiterate 1000 --localpair"
+	python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
 	python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
 	mv ${id}.aln.fasta_tmp ${id}.aln.fasta
 	"""
@@ -84,7 +84,7 @@ process PHY {
 		return base + (task.attempt - 1) * 6.h
 	}
 	errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
-	maxRetries 10
+	maxRetries 2
 	maxErrors -1
 	input:
 	tuple val(id), path(aln)
@@ -92,7 +92,7 @@ process PHY {
 	tuple val(id), path("${id}.treefile"), path(aln)
 	script:
 	"""
-	python ${projectDir}/phylogeny/main.py phylogeny -f ${aln} --outprefix ${id} -c ${task.cpus} --method ${params.TREE_METHOD}
+	python ${projectDir}/phylogeny/main.py phylogeny -f ${aln} --outprefix ${id} -c ${task.cpus} --method ${params.TREE_METHOD} --iqtree2_model ${params.IQTREE2_MODEL}
 	"""
 }
 process PVM {

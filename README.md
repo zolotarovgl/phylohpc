@@ -1,13 +1,20 @@
 # TODOs
 
-- [ ] `step1` - search and clustering pipeline   
-- [ ] job duration and memory prediction  
-- [ ] proper job re-submission rules   
+- [x] Proper subclustering    
+- [ ] quantile regression for resource prediction   
+- [ ] `phylo` environment with `Rscript` support  
 - [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
 - [ ] limit the iqtree run times 
-- [ ] generax + 2nd possvm 
-- [ ] mafft oom errors (code 1 instesad of 137)
+- [ ] 2nd possvm 
+- [ ] mafft oom errors (code 1 instesad of 137) - proper handling 
+- [ ] better subclustering logic in `phylogeny/`  
+- [ ] generax family error handling   
+- [x] generax
+- [x] `step1` - search and clustering pipeline   
 - [x] `PHY` job time extension 
+- [x] job duration and memory prediction  
+- [x] proper job re-submission rules   
+
 
 Testing PHY job re-submission for timeouts.
 The problem, is that during each execution, the nextflow will start over - one needs to be able to predict how long the jobs will take. 
@@ -22,7 +29,7 @@ The problem, is that during each execution, the nextflow will start over - one n
 
 
 # Prepare input data 
-
+From a species list, get the proteomes from Xavi's database. You can as well just use custom proteomes concatenated into `data/input.fasta`  
 ```bash
 bash workflow/prepare_fasta.sh species_list data/input.fasta
 ```
@@ -35,7 +42,7 @@ bash workflow/prepare_fasta.sh species_list data/input.fasta
 module load Java 
 mamba activate phylo 
 WORKDIR=work_step1
-nextflow run -profile local -w $WORKDIR -resume step1.nf --genefam_info genefam.csv --infasta data/input.fasta 
+nextflow run -profile local -w $WORKDIR -resume step1.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step1.html -with-trace reports/trace.step1.html
 ```
 
 
@@ -48,43 +55,72 @@ mkdir -p reports
 sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf -profile slurm -w $WORKDIR --report reports/report.step1.html --trace reports/trace.step1.txt --timeline reports/timeline.step1.html 
 ```
 
-Note: Use `-profile slurm`  to run using the SLURM scheduler instead of locally. Use interactive jobs if `-profile local` unless you want Emyr coming to your desk!  
-
-__Note:__ the re-clustering of the fig files does not work here!   
+__Note__: Use `-profile slurm`  to run using the SLURM scheduler instead of locally. Use interactive jobs if `-profile local` unless you want Emyr coming to your desk!  
 
 
-# Filter homology groups   
+## Homology groups filtering  
 
 Filter and get the list of homology groups to run the alignment for: 
 ```bash
-python select_hgs.py --out ids.txt --soi Mmus --min_seqs 10 --min_sps 3
+python select_hgs.py --out ids.txt --soi Mmus --min_seqs 5 --min_sps 3
 ```
-`--soi` - will keep only HG ids with `Mmus` sequnce  
+* `--soi` - will keep only HG ids with `Mmus` sequences (it makes sense to filter by the reference species)  
+
+Output: `ids.txt` file with selected homology groups. 
 
 # Step 2
 
-## Resource-informed submission:
-
 Predict resources to generate `resources.tsv`. All IDs not in this table will get default values.
 
-
 ```bash
-Rscript predict_resources.R \
-  --ids_fn ids.txt \
-  --cluster_dir results/clusters \
-  --models_rds workflow/models/models.rds \
-  --outfile resources.tsv \
-  --min_mem 100 --min_time 5 --max_mem 10000 --max_time 2880 --increase 0.1 
+# models.json should contain the mem and time models for each job stored as coefficients - see _export_models.r which will expor workflow/models/models.rds
+python workflow/predict_resources.py --ids_fn ids.txt --cluster_dir results/clusters --models_json workflow/models/models.json --outfile resources.tsv --min_mem 100 --min_time 5 --max_mem 10000 --max_time 2880 --increase 0.1 
 ```
 
+Submit with predicted resources   
 ```bash
+# Interactive session
+WORKDIR=work_step2
+nextflow run -profile local -w $WORKDIR -resume step2.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step2.html -with-trace reports/trace.step2.html
+
+# SLURM
 WORKDIR=work_step2
 sbatch -J step2 submit_nf.sh step2.nf -profile slurm -w $WORKDIR --report reports/report.step2.html --trace reports/trace.step2.txt --timeline reports/timeline.step2.html 
 ```
 
+# Step 3 - GeneRax   
+
+```bash
+# list HGs with trees:
+find results/gene_trees -type f -name "*.treefile" \
+  -exec basename {} .treefile \; > ids_generax
+
+```
+
+
+```bash
+# INTERACTIVE
+WORKDIR=work_generax
+IDS=ids_generax
+nextflow run -profile local -w $WORKDIR -resume generax.nf --ids $IDS
+# SLURM
+WORKDIR=work_generax
+IDS=ids_generax
+sbatch -J generax submit_nf.sh generax.nf --ids $IDS -profile slurm -w $WORKDIR --report reports/report.generax.html --trace reports/trace.generax.txt --timeline reports/timeline.generax.html 
+```
+
+
+
+
+----
+----
+----
+
+# Dev
 
 # Gather annotations 
 
+After the phylogenies are done, you can gather the annotations per species 
 Gather the annotations per species of interest:  
 
 ```bash
@@ -92,7 +128,6 @@ Gather the annotations per species of interest:
 SP=Nvec
 mkdir -p results/annotations 
 python workflow/gather_anno.py --id ${SP} --search-dir results/search/ --tree-dir results/possvm/ > results/annotations/${SP}.tab
-
 # with splittinb by the functional groups 
 for SP in Clacla Corcan Osclob Axidam Halduj Spolac; do
 for PREF in tfs neu ion; do

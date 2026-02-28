@@ -1,13 +1,16 @@
 nextflow.enable.dsl=2
 
+
+// Defaults 
 params.pref_family   = null
-params.genefam_info  = null
-params.infasta       = null
+params.genefam_info  = "genefam.csv"
+params.infasta       = "data/input.fasta"
 params.search_dir    = "results/search"
 params.cluster_dir   = "results/clusters"
-params.max_n         = ""
-params.pfam_db       = null
-params.domain_expand = null
+params.max_n         = 3000
+params.pfam_db       = "/users/asebe/xgraubove/data/pfam/Pfam-A.hmm"
+params.domain_expand = 30
+params.s1_ncpu       = 4
 params.s2_ncpu       = 4
 params.s2_inflation  = 1.1
 
@@ -45,9 +48,9 @@ process SEARCH {
   stageInMode 'copy'
   tag "${pref}.${family}"
 
-  cpus 4
-  memory { 500.MB + (task.attempt - 1) * 500.MB }
-  time   { 30.min + (task.attempt - 1) * 30.min }
+  cpus   { params.s1_ncpu as int }
+  memory { 100.MB + (task.attempt - 1) * 500.MB }
+  time   { 5.min + (task.attempt - 1) * 10.min }
 
   errorStrategy = { task.attempt <= 5 ? 'retry' : 'terminate' }
   maxRetries 5
@@ -71,22 +74,21 @@ process SEARCH {
 
   script:
   """
-  echo "Running hmmsearch for ${family}"
+	set -e
+	echo "Running hmmsearch for ${family}"
 
-  python ${projectDir}/phylogeny/main.py hmmsearch \
-      -f input.fasta \
-      -g genefam.csv \
-      ${family} \
-      -o . \
-      --pfam_db ${params.pfam_db} \
-      --domain_expand ${params.domain_expand} \
-      --ncpu ${task.cpus}
+	python ${projectDir}/phylogeny/main.py hmmsearch \
+		-f input.fasta \
+		-g genefam.csv \
+		${family} \
+		-o . \
+		--pfam_db ${params.pfam_db} \
+		--domain_expand ${params.domain_expand} \
+		--ncpu ${task.cpus}
 
-  OUTFILE=${pref}.${family}.domains.fasta
-  if [[ ! -f "\$OUTFILE" ]]; then
-      echo "No domains found for ${family} — creating empty file"
-      touch "\$OUTFILE"
-  fi
+	touch ${pref}.${family}.domains.fasta 
+	touch ${pref}.${family}.domains.csv 
+	touch ${pref}.${family}.genes.list
   """
 }
 process CLUSTER {
@@ -95,7 +97,7 @@ process CLUSTER {
 
     cpus   { params.s2_ncpu as int }
     memory { 300.MB + (task.attempt - 1) * 1.GB }
-    time   { 30.min + (task.attempt - 1) * 1.h }
+    time   { 10.min + (task.attempt - 1) * 1.h }
 
     errorStrategy = { task.attempt <= 5 ? 'retry' : 'terminate' }
     maxRetries 5
@@ -109,28 +111,18 @@ process CLUSTER {
 
     publishDir "${params.cluster_dir}", mode: 'copy'
 
-    script:
-    """
-    echo "Clustering: ${domains_fasta}"
+	script:
+	"""
+	echo "Clustering: ${domains_fasta}"
 
-    python ${projectDir}/phylogeny/main.py cluster \
-        -f ${domains_fasta} \
-        --out_file ${pref}.${family}_cluster.tsv \
-        -c ${task.cpus} \
-        -m ${params.max_n} \
-        -i ${params.s2_inflation}
+	python ${projectDir}/phylogeny/main.py cluster \
+		-f ${domains_fasta} \
+		--out_file ${pref}.${family}_cluster.tsv \
+		-c ${task.cpus} \
+		-m ${params.max_n} \
+		-i ${params.s2_inflation}
 
-    echo "Indexing fasta"
-    samtools faidx ${domains_fasta}
-
-    OUTPREFIX=\$(echo ${pref}.${family}_cluster.tsv | sed -E 's/_cluster.tsv\$//g')
-
-    for ID in \$(cut -f 1 ${pref}.${family}_cluster.tsv | sort | uniq); do
-        awk -v ID=\${ID} '\$1==ID { print \$2 }' ${pref}.${family}_cluster.tsv \
-        | xargs samtools faidx ${domains_fasta} \
-        > \${OUTPREFIX}.\${ID}.fasta
-
-        echo "Created \${OUTPREFIX}.\${ID}.fasta"
-    done
-    """
+	# Guarantee structural outputs
+	touch ${pref}.${family}_cluster.tsv
+	"""
 }
