@@ -1,6 +1,6 @@
 nextflow.enable.dsl=2
 
-params.resources_tsv = "${projectDir}/resources.tsv"
+params.resources_tsv = null
 params.ALIGN_DIR     = "${projectDir}/results/align"
 params.TREE_DIR      = "${projectDir}/results/gene_trees"
 params.OUTDIR        = "${projectDir}/results"
@@ -48,7 +48,7 @@ Channel
 // -----------------------------
 // GeneRax process
 // -----------------------------
-process GR{
+process GR {
 
     tag "${id}"
 
@@ -56,33 +56,34 @@ process GR{
 
     cpus params.NCPU_GENERAX
 
-	memory {
-		def base = res[id]?.mem ?: 500.MB
-		return base * Math.pow(2, task.attempt-1)
-	}
+    memory {
+        def base = res[id]?.mem ?: 500.MB
+        return base * Math.pow(2, task.attempt-1)
+    }
 
-	time {
-		def base = res[id]?.time ?: 30.min
-		def scaled = base * Math.pow(2, task.attempt-1)
-		return scaled > 24.h ? 24.h : scaled
-	}
+    time {
+        def base = res[id]?.time ?: 30.min
+        def scaled = base * Math.pow(2, task.attempt-1)
+        return scaled > 24.h ? 24.h : scaled
+    }
 
-	errorStrategy {
-		if( task.exitStatus == 10 ) {
-			log.warn "GeneRax | ${id} | Exit 10 | Family parsing error — ignored"
-			return 'ignore'
-		}
-		else if( task.exitStatus == 137 ) {
-			log.warn "GeneRax | ${id} | Exit 137 | Likely OOM — retrying with more memory (attempt ${task.attempt})"
-			return 'retry'
-		}
-		else {
-			log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retrying"
-			return 'retry'
-		}
-	}
+    errorStrategy {
+        if( task.exitStatus == 10 ) {
+            log.warn "GeneRax | ${id} | Exit 10 | Family parsing error — ignored"
+            return 'ignore'
+        }
+        else if( task.exitStatus == 137 ) {
+            log.warn "GeneRax | ${id} | Exit 137 | Likely OOM — retrying with more memory (attempt ${task.attempt})"
+            return 'retry'
+        }
+        else {
+            log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retrying"
+            return 'retry'
+        }
+    }
+
     maxRetries 2
-	maxErrors -1
+    maxErrors -1
 
     input:
     tuple val(id), path(aln), path(tree), path(species_tree)
@@ -90,34 +91,49 @@ process GR{
     output:
     tuple val(id), path("${id}.generax.tree"), path("${id}.generax.log")
 
-	script:
-	"""
-	set +e
+    script:
+    """
+    set +e
 
-	python ${projectDir}/phylogeny/main.py generax \
-		--name ${id} \
-		--alignment ${aln} \
-		--gene_tree ${tree} \
-		--species_tree ${species_tree} \
-		--output_dir ${id}_generax \
-		--subs_model ${params.SUBS_MODEL} \
-		--max_spr ${params.MAX_SPR} \
-		--cpus ${task.cpus} \
-		--logfile ${id}.generax.log \
-		--outfile ${id}.generax.tree
+    # Background watcher for live progress tree
+    (
+        while true; do
+            if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
+                cp ${id}_generax/results/${id}/geneTree.newick \
+                   ${params.OUTDIR}/generax/${id}.progress.tree 2>/dev/null
+            fi
+            sleep 60
+        done
+    ) &
+    WATCH_PID=\$!
 
+    # Run GeneRax
+    python ${projectDir}/phylogeny/main.py generax \
+        --name ${id} \
+        --alignment ${aln} \
+        --gene_tree ${tree} \
+        --species_tree ${species_tree} \
+        --output_dir ${id}_generax \
+        --subs_model ${params.SUBS_MODEL} \
+        --max_spr ${params.MAX_SPR} \
+        --cpus ${task.cpus} \
+        --logfile ${id}.generax.log \
+        --outfile ${id}.generax.tree
 
-	# These lines are to ignore the generax failure - may not finish going through the whole range of SPRs
-	EXIT_CODE=\$?
-	echo "GeneRax exit code: \$EXIT_CODE"
-	
-	if [[ \$EXIT_CODE -eq 10 ]]; then
-    echo "GeneRax family ${id} exited with code 10 (Family parsing error)"
-	fi
-	exit \$EXIT_CODE
-	"""
+    EXIT_CODE=\$?
+    echo "GeneRax exit code: \$EXIT_CODE"
+
+    # Stop watcher safely
+    kill \$WATCH_PID 2>/dev/null
+    wait \$WATCH_PID 2>/dev/null
+
+    if [[ \$EXIT_CODE -eq 10 ]]; then
+        echo "GeneRax family ${id} exited with code 10 (Family parsing error)"
+    fi
+
+    exit \$EXIT_CODE
+    """
 }
-
 // -----------------------------
 // Workflow
 // -----------------------------
