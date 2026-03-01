@@ -129,7 +129,8 @@ done
 
 # TODOs
 
-- [ ] generax resourse prediction   
+- [ ] proper environment with `openmpi` for generax  
+- [ ] generax resource prediction   
 - [ ] quantile regression for resource prediction   
 - [ ] `phylo` environment with `Rscript` support  
 - [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
