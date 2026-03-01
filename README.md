@@ -71,7 +71,6 @@ sbatch -J step2 submit_nf.sh step2.nf -profile slurm -w $WORKDIR --report report
 
 
 ```bash
-
 # list HGs with trees:
 find results/gene_trees -type f -name "*.treefile" \
   -exec basename {} .treefile \; > ids_generax
@@ -83,7 +82,7 @@ module load Java
 mamba activate phylo
 WORKDIR=work_generax
 IDS=ids_generax
-nextflow run -profile local -w $WORKDIR -resume generax.nf --ids $IDS 
+nextflow run -profile local -w $WORKDIR  generax.nf --ids $IDS -with-report reports/report.generax.html -with-trace reports/trace.generax.txt -with-timeline reports/timeline.generax.html -resume
 # SLURM
 WORKDIR=work_generax
 mkdir -p $WORKDIR
@@ -91,14 +90,7 @@ IDS=ids_generax
 sbatch -J generax submit_nf.sh generax.nf --ids $IDS -profile slurm -w $WORKDIR --report reports/report.generax.html --trace reports/trace.generax.txt --timeline reports/timeline.generax.html 
 ```
 
-
-
-
-----
-----
-----
-
-# Dev
+Ah, the issue is that the tree is modified!
 
 # Gather annotations 
 
@@ -108,16 +100,8 @@ Gather the annotations per species of interest:
 ```bash
 # no splitting by the group 
 SP=Nvec
-mkdir -p results/annotations 
-python workflow/gather_anno.py --id ${SP} --search-dir results/search/ --tree-dir results/possvm/ > results/annotations/${SP}.tab
-# with splittinb by the functional groups 
-for SP in Clacla Corcan Osclob Axidam Halduj Spolac; do
-for PREF in tfs neu ion; do
-	echo "${SP} ${PREF}"
-	python workflow/gather_anno.py --prefix ${PREF} --id ${SP} --search-dir results/search/ --tree-dir results/possvm/ > results/annotations/${SP}.${PREF}.tab
-done
-done
-# still very few proteins classified 
+TREEDIR=results/possvm/ # use possvm if no generax available, or results/generax 
+python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $TREEDIR --id Nvec
 ```
 
 
@@ -127,14 +111,19 @@ done
 
 `dowstream_stats.R` - explores and plots resource usage. 
 
+---
+
 # TODOs
 
+- [ ] generax speedup - does increasing the number of cores make a difference?  
+- [ ] `generax.nf` - proper OOM and OOT handling  
 - [ ] proper environment with `openmpi` for generax  
 - [ ] generax resource prediction   
 - [ ] quantile regression for resource prediction   
 - [ ] `phylo` environment with `Rscript` support  
 - [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
 - [ ] mafft oom errors (code 1 instesad of 137) - proper handling 
+- [x] generax caching issue   
 - [x] better subclustering logic in `phylogeny/`  
 - [x] generax family error handling - raises exit 10  
 - [x] Clustering: proper subclustering - local and global model  
