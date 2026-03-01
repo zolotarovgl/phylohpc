@@ -1,30 +1,9 @@
-# TODOs
-
-- [x] Proper subclustering    
-- [ ] quantile regression for resource prediction   
-- [ ] `phylo` environment with `Rscript` support  
-- [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
-- [ ] limit the iqtree run times 
-- [ ] 2nd possvm 
-- [ ] mafft oom errors (code 1 instesad of 137) - proper handling 
-- [ ] better subclustering logic in `phylogeny/`  
-- [ ] generax family error handling   
-- [x] generax
-- [x] `step1` - search and clustering pipeline   
-- [x] `PHY` job time extension 
-- [x] job duration and memory prediction  
-- [x] proper job re-submission rules   
-
-
-Testing PHY job re-submission for timeouts.
-The problem, is that during each execution, the nextflow will start over - one needs to be able to predict how long the jobs will take. 
-
-
 # Pipeline 
 
 0. prepare the input data - `data/input.fasta`    
 1. search and clustering $\rightarrow$ homology groups. Select which HGs to run the pipeline for $\rightarrow$ `ids.txt`  
-2. Alignment and phylogenies per homology group   
+2. Alignment, phylogeny, possvm     
+- optional: GeneRax + POSSVM
 3. Gather the annotations per species  
 
 
@@ -90,21 +69,24 @@ sbatch -J step2 submit_nf.sh step2.nf -profile slurm -w $WORKDIR --report report
 
 # Step 3 - GeneRax   
 
+
 ```bash
+
 # list HGs with trees:
 find results/gene_trees -type f -name "*.treefile" \
   -exec basename {} .treefile \; > ids_generax
 
-```
 
-
-```bash
 # INTERACTIVE
+module load OpenMPI
+module load Java 
+mamba activate phylo
 WORKDIR=work_generax
 IDS=ids_generax
-nextflow run -profile local -w $WORKDIR -resume generax.nf --ids $IDS
+nextflow run -profile local -w $WORKDIR -resume generax.nf --ids $IDS 
 # SLURM
 WORKDIR=work_generax
+mkdir -p $WORKDIR
 IDS=ids_generax
 sbatch -J generax submit_nf.sh generax.nf --ids $IDS -profile slurm -w $WORKDIR --report reports/report.generax.html --trace reports/trace.generax.txt --timeline reports/timeline.generax.html 
 ```
@@ -145,3 +127,18 @@ done
 
 `dowstream_stats.R` - explores and plots resource usage. 
 
+# TODOs
+
+- [ ] generax resourse prediction   
+- [ ] quantile regression for resource prediction   
+- [ ] `phylo` environment with `Rscript` support  
+- [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
+- [ ] mafft oom errors (code 1 instesad of 137) - proper handling 
+- [x] better subclustering logic in `phylogeny/`  
+- [x] generax family error handling - raises exit 10  
+- [x] Clustering: proper subclustering - local and global model  
+- [x] generax
+- [x] `step1` - search and clustering pipeline   
+- [x] `PHY` job time extension 
+- [x] job duration and memory prediction  
+- [x] proper job re-submission rules   
