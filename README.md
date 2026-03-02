@@ -7,16 +7,7 @@
 3. Gather the annotations per species  
 
 
-# Prepare input data 
-From a species list, get the proteomes from Xavi's database. You can as well just use custom proteomes concatenated into `data/input.fasta`  
-```bash
-bash workflow/prepare_fasta.sh species_list data/input.fasta
-```
-
-
 # Profiles   
-
-
 There are 2 main flavours to run the pipeline:  
 - `fast` - for testing, automatic `mafft`, `fasttree` and `max_spr` of the generax is set to 2 (suboptimal) 
 - `precise` - LINSI mode, IQTREE2 with model testing, max_spr up to 7   
@@ -26,6 +17,21 @@ Execution:
 - `slurm` - configured to be used on the CRG HPC system   
 
 To run a pipeline, combine the flavour and the executor. For instance `-profile local,fast` will run the fast pipeline locally. For submitting the jobs via slurm, you have to use a species sbatch script `submit.nf` (vis the commands below).  
+
+
+# Prepare inputs   
+If you are planning to run GeneRax, you have to make sure i) your species tree contains all the prefixes present in the input fasta file; ii) strictly binary (expected by GeneRax) - i.e. no polytomies are present. To check the tree:   
+
+```bash
+python workflow/check_tree.py  data/species_tree.full.newick species_list data/species_tree.newick 
+```
+
+From a species list, get the proteomes from Xavi's database. You can as well just use custom proteomes concatenated into `data/input.fasta`  
+```bash
+bash workflow/prepare_fasta.sh species_list data/input.fasta
+```
+
+
 
 # Step1 
 
