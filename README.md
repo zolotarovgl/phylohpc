@@ -13,6 +13,20 @@ From a species list, get the proteomes from Xavi's database. You can as well jus
 bash workflow/prepare_fasta.sh species_list data/input.fasta
 ```
 
+
+# Profiles   
+
+
+There are 2 main flavours to run the pipeline:  
+- `fast` - for testing, automatic `mafft`, `fasttree` and `max_spr` of the generax is set to 2 (suboptimal) 
+- `precise` - LINSI mode, IQTREE2 with model testing, max_spr up to 7   
+
+Execution:  
+- `local` - use the interactive HPC session or run on your machine   
+- `slurm` - configured to be used on the CRG HPC system   
+
+To run a pipeline, combine the flavour and the executor. For instance `-profile local,fast` will run the fast pipeline locally. For submitting the jobs via slurm, you have to use a species sbatch script `submit.nf` (vis the commands below).  
+
 # Step1 
 
 Interactive: 
@@ -20,16 +34,18 @@ Interactive:
 ```bash
 module load Java 
 mamba activate phylo 
+
+
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1
-mkdir -p $WORKDIR
 nextflow run -profile local -w $WORKDIR -resume step1.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step1.html -with-trace reports/trace.step1.html
 ```
 
 SLURM:  
 ```bash
+module load Java 
+mamba activate phylo 
+
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1
-mkdir -p $WORKDIR
-mkdir -p reports
 sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf -profile slurm -w $WORKDIR --report reports/report.step1.html --trace reports/trace.step1.txt --timeline reports/timeline.step1.html 
 ```
 
@@ -38,7 +54,7 @@ __Note__: Use `-profile slurm`  to run using the SLURM scheduler instead of loca
 
 ## Homology groups filtering  
 
-Filter and get the list of homology groups to run the alignment for: 
+Filter and get the list of homology groups to run the following steps for: 
 ```bash
 python select_hgs.py --out ids.txt --soi Mmus --min_seqs 30 --min_sps 10
 ```
@@ -62,45 +78,20 @@ module load OpenMPI
 module load Java 
 mamba activate phylo
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2
-nextflow run -resume -profile local -w $WORKDIR step2.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step2.html -with-trace reports/trace.step2.html
+PROFILE=local,fast
+nextflow run -resume -profile $PROFILE -w $WORKDIR  step2.nf --run_generax --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step2.html -with-trace reports/trace.step2.html
 
 # SLURM
-sbatch -J step2 submit_nf.sh step2.nf -profile slurm --run_generax -w $WORKDIR --report reports/report.step2.html --trace reports/trace.step2.txt --timeline reports/timeline.step2.html 
+PROFILE=slurm,fast
+sbatch -J step2 submit_nf.sh step2.nf -profile $PROFILE --run_generax -w $WORKDIR --report reports/report.step2.html --trace reports/trace.step2.txt --timeline reports/timeline.step2.html 
 ```
 
 `--run_generax` - use this flag to run `GeneRax` prior to `POSSVM`. 
 
 
-
+# Runtimes   
 
 How long does the slurm execution take with the linsi, fasttree and small SPR value? 
-
-
-
-
-# Depreciated - GeneRax 
-
-```bash
-# list HGs with trees:
-find results/gene_trees -type f -name "*.treefile" \
-  -exec basename {} .treefile \; > ids_generax
-
-
-# INTERACTIVE
-module load OpenMPI
-module load Java 
-mamba activate phylo
-WORKDIR=work_generax
-IDS=ids_generax
-nextflow run -profile local -w $WORKDIR  generax.nf --ids $IDS -with-report reports/report.generax.html -with-trace reports/trace.generax.txt -with-timeline reports/timeline.generax.html -resume
-# SLURM
-WORKDIR=work_generax
-mkdir -p $WORKDIR
-IDS=ids_generax
-sbatch -J generax submit_nf.sh generax.nf --ids $IDS -profile slurm -w $WORKDIR --report reports/report.generax.html --trace reports/trace.generax.txt --timeline reports/timeline.generax.html 
-```
-
-Ah, the issue is that the tree is modified!
 
 # Gather annotations 
 
@@ -125,15 +116,16 @@ python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $T
 
 # TODOs
 
+- [ ] 2 execution profiles - fast and precise
 - [ ] generax: missing species in the tree - tree checks!  
 - [ ] generax speedup - does increasing the number of cores make a difference?  
-- [ ] `generax.nf` - proper OOM and OOT handling  
-- [ ] proper environment with `openmpi` for generax  
 - [ ] generax resource prediction   
 - [ ] quantile regression for resource prediction   
 - [ ] `phylo` environment with `Rscript` support  
 - [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
 - [ ] mafft oom errors (code 1 instesad of 137) - proper handling 
+- [x] `generax.nf` - proper OOM and OOT handling  
+- [x] proper environment with `openmpi` for generax  
 - [x] `step2.nf` - make sure the processes are correctly cached and not rerun   
 - [x] generax caching issue   
 - [x] better subclustering logic in `phylogeny/`  
