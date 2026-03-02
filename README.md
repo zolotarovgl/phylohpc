@@ -15,20 +15,19 @@ bash workflow/prepare_fasta.sh species_list data/input.fasta
 
 # Step1 
 
-## Interactive  
+Interactive: 
+
 ```bash
-# Interactive session
 module load Java 
 mamba activate phylo 
-WORKDIR=work_step1
+WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1
+mkdir -p $WORKDIR
 nextflow run -profile local -w $WORKDIR -resume step1.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step1.html -with-trace reports/trace.step1.html
 ```
 
-
-## SLURM  
+SLURM:  
 ```bash
-# SLURM submssions
-WORKDIR=work_step1
+WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1
 mkdir -p $WORKDIR
 mkdir -p reports
 sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf -profile slurm -w $WORKDIR --report reports/report.step1.html --trace reports/trace.step1.txt --timeline reports/timeline.step1.html 
@@ -59,16 +58,26 @@ python workflow/predict_resources.py --ids_fn ids.txt --cluster_dir results/clus
 Submit with predicted resources   
 ```bash
 # Interactive session
-WORKDIR=work_step2
+WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2
 nextflow run -profile local -w $WORKDIR -resume step2.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step2.html -with-trace reports/trace.step2.html
 
 # SLURM
-WORKDIR=work_step2
+WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2
 sbatch -J step2 submit_nf.sh step2.nf -profile slurm -w $WORKDIR --report reports/report.step2.html --trace reports/trace.step2.txt --timeline reports/timeline.step2.html 
 ```
 
-# Step 3 - GeneRax   
 
+```bash
+module load OpenMPI
+module load Java 
+mamba activate phylo
+# sample small hgs
+grep -c '>' results/clusters/*fasta | sed -E 's/:/\t/g' | awk '$2>=10&&$2<=30' | head -n 5 | cut -f 1  | cut -f 3 -d / | sed 's/.fasta//g' > ids.txt
+WORKDIR=work
+nextflow run -profile local -w $WORKDIR -resume step2.v2.nf --ids ids.txt --run_generax
+```
+
+# Step 3 - GeneRax   
 
 ```bash
 # list HGs with trees:
@@ -115,6 +124,7 @@ python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $T
 
 # TODOs
 
+- [ ] generax: missing species in the tree - tree checks!  
 - [ ] generax speedup - does increasing the number of cores make a difference?  
 - [ ] `generax.nf` - proper OOM and OOT handling  
 - [ ] proper environment with `openmpi` for generax  
@@ -123,6 +133,7 @@ python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $T
 - [ ] `phylo` environment with `Rscript` support  
 - [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
 - [ ] mafft oom errors (code 1 instesad of 137) - proper handling 
+- [x] `step2.nf` - make sure the processes are correctly cached and not rerun   
 - [x] generax caching issue   
 - [x] better subclustering logic in `phylogeny/`  
 - [x] generax family error handling - raises exit 10  

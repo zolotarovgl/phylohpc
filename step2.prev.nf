@@ -2,8 +2,6 @@ nextflow.enable.dsl=2
 params.ids = "${projectDir}/ids.txt"
 params.config = "${projectDir}/configs/config.txt"
 params.resources_tsv = "${projectDir}/resources.tsv"
-params.run_generax = params.run_generax ?: false
-
 def cfg = [:]
 file(params.config).eachLine { line ->
 	line = line.trim()
@@ -126,9 +124,9 @@ process PVM {
 	output:
 	tuple val(id),
 		      path(tree),
-		      path("${id}.*.ortholog_groups.newick"),
-		      path("${id}.*.ortholog_groups.csv"),
-		      path("${id}.*.pairs_orthologs.csv")
+		      path("${id}.treefile.ortholog_groups.newick"),
+		      path("${id}.treefile.ortholog_groups.csv"),
+		      path("${id}.treefile.pairs_orthologs.csv")
 
 	script:
 	"""
@@ -139,153 +137,7 @@ process PVM {
 	    -o ${id}.
 	"""
 }
-
-// -----------------------------
-// GeneRax process
-// -----------------------------
-process GR_watcher {
-
-    tag "${id}"
-
-    publishDir "${params.OUTDIR}/generax", mode: 'copy'
-
-    cpus params.NCPU_GENERAX
-    maxForks 30
-
-    memory {
-        def base = res[id]?.mem ?: 500.MB
-        return base * Math.pow(2, task.attempt-1)
-    }
-
-    time {
-        def base = res[id]?.time ?: 30.min
-        def scaled = base * Math.pow(2, task.attempt-1)
-        return scaled > 24.h ? 24.h : scaled
-    }
-
-    errorStrategy {
-        if( task.exitStatus == 10 ) {
-            log.warn "GeneRax | ${id} | Exit 10 | Family parsing error — ignored"
-            return 'ignore'
-        }
-        else if( task.exitStatus == 137 ) {
-            log.warn "GeneRax | ${id} | Exit 137 | Likely OOM — retrying (attempt ${task.attempt})"
-            return 'retry'
-        }
-        else {
-            log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retrying"
-            return 'retry'
-        }
-    }
-
-    maxRetries 2
-    maxErrors -1
-
-    input:
-    tuple val(id), path(aln), path(tree), path(species_tree)
-
-    output:
-    tuple val(id),
-          path("${id}.generax.tree"),
-          path("${id}.generax.log"),
-          path("${id}.progress.tree"),
-          path(aln)
-
-	script:
-	"""
-	set -euo pipefail
-
-	export OMP_NUM_THREADS=${task.cpus}
-	export OPENBLAS_NUM_THREADS=${task.cpus}
-	export MKL_NUM_THREADS=${task.cpus}
-	export NUMEXPR_NUM_THREADS=${task.cpus}
-
-	touch ${id}.progress.tree
-
-	progress_watcher() {
-		while kill -0 \$MAIN_PID 2>/dev/null; do
-			if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
-				cp ${id}_generax/results/${id}/geneTree.newick \
-				${id}.progress.tree 2>/dev/null || true
-			fi
-			sleep 10
-		done
-	}
-
-	python ${projectDir}/phylogeny/main.py generax \
-		--name ${id} \
-		--alignment ${aln} \
-		--gene_tree ${tree} \
-		--species_tree ${species_tree} \
-		--output_dir ${id}_generax \
-		--subs_model ${params.SUBS_MODEL} \
-		--max_spr ${params.MAX_SPR} \
-		--cpus ${task.cpus} \
-		--logfile ${id}.generax.log \
-		--outfile ${id}.generax.tree &
-
-	MAIN_PID=\$!
-
-	progress_watcher &
-	WATCH_PID=\$!
-
-	cleanup() {
-		kill \$WATCH_PID 2>/dev/null || true
-		wait \$WATCH_PID 2>/dev/null || true
-	}
-	trap cleanup EXIT INT TERM
-
-	wait \$MAIN_PID
-	EXIT_CODE=\$?
-
-	echo "GeneRax exit code: \$EXIT_CODE"
-
-	if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
-		cp ${id}_generax/results/${id}/geneTree.newick ${id}.progress.tree || true
-	fi
-
-	exit \$EXIT_CODE
-	"""
-}
-
-//workflow {
-//	hg_fastas|ALN|PHY|map { id, tree, aln -> tuple(id, tree, aln, refnames_file) } | PVM
-//}
-
-species_tree_ch = Channel.value( file(params.SPECIES_TREE) )
-refnames_ch     = Channel.value( file(params.REFNAMES) )
-
+refnames_file = file(params.REFNAMES)
 workflow {
-
-    // ALN → PHY
-    phy_out = hg_fastas | ALN | PHY
-
-    if (params.run_generax) {
-
-        // PHY → GR_watcher
-        gr_input = phy_out
-            .map { id, tree, aln ->
-                tuple(id, aln, tree)
-            }
-            .combine(species_tree_ch)
-
-        gr_out = gr_input | GR_watcher
-
-        // Use GeneRax tree for PVM
-        pvm_base = gr_out.map { id, generax_tree, log, progress, aln ->
-            tuple(id, generax_tree, aln)
-        }
-
-    } else {
-
-        // Use PHY tree for PVM
-        pvm_base = phy_out.map { id, tree, aln ->
-            tuple(id, tree, aln)
-        }
-    }
-
-    // Add refnames and run PVM
-    pvm_base
-        .combine(refnames_ch)
-        | PVM
+	hg_fastas|ALN|PHY|map { id, tree, aln -> tuple(id, tree, aln, refnames_file) } | PVM
 }
