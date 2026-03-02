@@ -40,7 +40,7 @@ __Note__: Use `-profile slurm`  to run using the SLURM scheduler instead of loca
 
 Filter and get the list of homology groups to run the alignment for: 
 ```bash
-python select_hgs.py --out ids.txt --soi Mmus --min_seqs 5 --min_sps 3
+python select_hgs.py --out ids.txt --soi Mmus --min_seqs 30 --min_sps 10
 ```
 * `--soi` - will keep only HG ids with `Mmus` sequences (it makes sense to filter by the reference species)  
 
@@ -58,26 +58,27 @@ python workflow/predict_resources.py --ids_fn ids.txt --cluster_dir results/clus
 Submit with predicted resources   
 ```bash
 # Interactive session
-WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2
-nextflow run -profile local -w $WORKDIR -resume step2.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step2.html -with-trace reports/trace.step2.html
-
-# SLURM
-WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2
-sbatch -J step2 submit_nf.sh step2.nf -profile slurm -w $WORKDIR --report reports/report.step2.html --trace reports/trace.step2.txt --timeline reports/timeline.step2.html 
-```
-
-
-```bash
 module load OpenMPI
 module load Java 
 mamba activate phylo
-# sample small hgs
-grep -c '>' results/clusters/*fasta | sed -E 's/:/\t/g' | awk '$2>=10&&$2<=30' | head -n 5 | cut -f 1  | cut -f 3 -d / | sed 's/.fasta//g' > ids.txt
-WORKDIR=work
-nextflow run -profile local -w $WORKDIR -resume step2.v2.nf --ids ids.txt --run_generax
+WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2
+nextflow run -resume -profile local -w $WORKDIR step2.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step2.html -with-trace reports/trace.step2.html
+
+# SLURM
+sbatch -J step2 submit_nf.sh step2.nf -profile slurm --run_generax -w $WORKDIR --report reports/report.step2.html --trace reports/trace.step2.txt --timeline reports/timeline.step2.html 
 ```
 
-# Step 3 - GeneRax   
+`--run_generax` - use this flag to run `GeneRax` prior to `POSSVM`. 
+
+
+
+
+How long does the slurm execution take with the linsi, fasttree and small SPR value? 
+
+
+
+
+# Depreciated - GeneRax 
 
 ```bash
 # list HGs with trees:

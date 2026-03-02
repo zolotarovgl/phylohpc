@@ -57,7 +57,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p reports
-nextflow run -resume -ansi-log false \
+nextflow run -ansi-log false \
     "${NF_EXTRA_OPTS[@]}" \
     "${PASSTHRU[@]}" & pid=$!
 
