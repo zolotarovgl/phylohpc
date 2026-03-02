@@ -33,7 +33,10 @@ workflow {
             tuple(pref, family)
         }
 
-	def search = SEARCH(families_ch, file(params.genefam_info), file(params.infasta))
+	genefam_ch = Channel.value( file(params.genefam_info) )
+	infasta_ch = Channel.value( file(params.infasta) )
+
+	def search = SEARCH(families_ch, genefam_ch, infasta_ch)
 
     def nonempty = search.main
         .filter { pref, family, fasta -> fasta && fasta.size() > 0 }
@@ -49,7 +52,7 @@ process SEARCH {
   tag "${pref}.${family}"
 
   cpus   { params.s1_ncpu as int }
-  memory { 100.MB + (task.attempt - 1) * 500.MB }
+  memory { 500.MB + (task.attempt - 1) * 500.MB }
   time   { 5.min + (task.attempt - 1) * 10.min }
 
   errorStrategy = { task.attempt <= 5 ? 'retry' : 'terminate' }

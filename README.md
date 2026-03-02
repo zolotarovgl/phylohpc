@@ -40,8 +40,6 @@ Interactive:
 ```bash
 module load Java 
 mamba activate phylo 
-
-
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1
 nextflow run -profile local -w $WORKDIR -resume step1.nf --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step1.html -with-trace reports/trace.step1.html
 ```
@@ -50,9 +48,8 @@ SLURM:
 ```bash
 module load Java 
 mamba activate phylo 
-
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1
-sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf -profile slurm -w $WORKDIR --report reports/report.step1.html --trace reports/trace.step1.txt --timeline reports/timeline.step1.html 
+sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf -resume -profile slurm -w $WORKDIR --report reports/report.step1.html --trace reports/trace.step1.txt --timeline reports/timeline.step1.html 
 ```
 
 __Note__: Use `-profile slurm`  to run using the SLURM scheduler instead of locally. Use interactive jobs if `-profile local` unless you want Emyr coming to your desk!  
@@ -71,6 +68,8 @@ Output: `ids.txt` file with selected homology groups.
 # Step 2
 
 Predict resources to generate `resources.tsv`. All IDs not in this table will get default values.
+So far, I the prediction has been made for the `precise` pipeline. It needs to be improved (e.g. quantile regression instead of a mean to cover the majority of the cases). 
+
 
 ```bash
 # models.json should contain the mem and time models for each job stored as coefficients - see _export_models.r which will expor workflow/models/models.rds
