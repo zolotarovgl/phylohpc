@@ -25,24 +25,46 @@ params.OUTDIR = "${projectDir}/results"
 params.tag_prefix = ''
 
 def res = [:]
+
 if( params.resources_tsv && file(params.resources_tsv).exists() ) {
-	file(params.resources_tsv).eachLine { line, n ->
-		line = line.trim()
-		if( !line || line.startsWith('#') )
-			return
-		def cols = line.split('\t', -1).collect { it.trim() }
-		if( n == 1 && cols[0].toLowerCase() == 'id' )
-			return
-		def rid = cols[0]
-		def m = [:]
-		if( cols.size() > 1 && cols[1] ) m.aln_mem = cols[1] as nextflow.util.MemoryUnit
-		if( cols.size() > 2 && cols[2] ) m.aln_time = cols[2] as nextflow.util.Duration
-		if( cols.size() > 3 && cols[3] ) m.phy_mem = cols[3] as nextflow.util.MemoryUnit
-		if( cols.size() > 4 && cols[4] ) m.phy_time = cols[4] as nextflow.util.Duration
-		if( cols.size() > 5 && cols[5] ) m.pvm_mem = cols[5] as nextflow.util.MemoryUnit
-		if( cols.size() > 6 && cols[6] ) m.pvm_time = cols[6] as nextflow.util.Duration
-		res[rid] = m
-	}
+
+    def header = null
+
+    file(params.resources_tsv).eachLine { line, n ->
+
+        line = line.trim()
+        if( !line || line.startsWith('#') ) return
+
+        def cols = line.split('\t').collect{ it.trim() }
+
+        if( n == 1 ) {
+            header = cols
+            return
+        }
+
+        def row = [:]
+        header.eachWithIndex { h, i -> row[h] = cols[i] }
+
+        def rid = row.id
+        def m = [:]
+
+        if( row.aln_mem ) m.aln_mem = row.aln_mem as nextflow.util.MemoryUnit
+        if( row.aln_time ) m.aln_time = row.aln_time as nextflow.util.Duration
+
+        if( row.phy_mem ) m.phy_mem = row.phy_mem as nextflow.util.MemoryUnit
+        if( row.phy_time ) m.phy_time = row.phy_time as nextflow.util.Duration
+
+        if( row.pvm_mem ) m.pvm_mem = row.pvm_mem as nextflow.util.MemoryUnit
+        if( row.pvm_time ) m.pvm_time = row.pvm_time as nextflow.util.Duration
+
+        if( row.gr_watcher_mem ) m.mem = row.gr_watcher_mem as nextflow.util.MemoryUnit
+        if( row.gr_watcher_time ) m.time = row.gr_watcher_time as nextflow.util.Duration
+
+        if( row.gr_mem ) m.mem = row.gr_mem as nextflow.util.MemoryUnit
+        if( row.gr_time ) m.time = row.gr_time as nextflow.util.Duration
+
+        res[rid] = m
+    }
 }
 Channel.fromPath(params.ids).splitText().map { it.trim() }.filter { it }.map { id -> tuple(id, file("${projectDir}/results/clusters/${id}.fasta")) }.set { hg_fastas }
 process ALN {
@@ -65,6 +87,9 @@ process ALN {
 	tuple val(id), path(fasta)
 	output:
 	tuple val(id), path("${id}.aln.fasta")
+	// Use for snakemake-like behavior 
+    //when:
+    //!file("${params.OUTDIR}/align/${id}.aln.fasta").exists()
 	script:
 	"""
 	python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
@@ -92,6 +117,9 @@ process PHY {
 	tuple val(id), path(aln)
 	output:
 	tuple val(id), path("${id}.treefile"), path(aln)
+	// Skip if already present in the results 
+	//when:
+    //!file("${params.OUTDIR}/gene_trees/${id}.treefile").exists()
 	script:
 	"""
 	python ${projectDir}/phylogeny/main.py phylogeny -f ${aln} --outprefix ${id} -c ${task.cpus} --method ${params.TREE_METHOD} --iqtree2_model ${params.IQTREE2_MODEL}

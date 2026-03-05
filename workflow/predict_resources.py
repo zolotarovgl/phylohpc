@@ -56,18 +56,56 @@ def convert_time(x, min_time=5):
     return np.ceil(np.maximum(x, min_time)).astype(int).astype(str) + ".min"
 
 
+def predict_resources(job_name, models, defaults, nseq, mlen):
+
+    job_defaults = defaults[job_name]
+
+    default_mem = job_defaults["mem"]
+    default_time = job_defaults["time"]
+
+    model = models.get(job_name)
+
+    # ---- Memory prediction ----
+    if model and "mem" in model:
+        mem_val = predict_model(model["mem"], nseq, mlen)
+    else:
+        mem_val = default_mem
+
+    # ---- Time prediction ----
+    if model and "time" in model:
+        time_val = predict_model(model["time"], nseq, mlen)
+    else:
+        time_val = default_time
+
+    # enforce defaults as minimum
+    mem_val = max(mem_val, default_mem)
+    time_val = max(time_val, default_time)
+
+    # ---- Large family override ----
+    threshold = job_defaults.get("large_nseq_threshold")
+
+    if threshold and nseq >= threshold:
+        mem_val = job_defaults.get("large_mem", mem_val)
+        time_val = job_defaults.get("large_time", time_val)
+
+    return mem_val, time_val
+
+
 def main():
+
     parser = argparse.ArgumentParser(description="Predict resources and write TSV")
 
     parser.add_argument("--ids_fn", required=True)
     parser.add_argument("--cluster_dir", required=True)
+
     parser.add_argument("--models_json", required=True)
+    parser.add_argument("--defaults_json", required=True)
+
     parser.add_argument("--outfile", required=True)
 
-    parser.add_argument("--min_mem", type=int, required=True)
-    parser.add_argument("--min_time", type=int, required=True)
     parser.add_argument("--max_mem", type=int, required=True)
     parser.add_argument("--max_time", type=int, required=True)
+
     parser.add_argument("--increase", type=float, required=True)
 
     args = parser.parse_args()
@@ -96,22 +134,35 @@ def main():
 
     df_input = pd.DataFrame(input_data).set_index("id")
 
-    # ---- Load models from JSON ----
+    # ---- Load models ----
     with open(args.models_json) as f:
         models = json.load(f)
 
+    # ---- Load defaults ----
+    with open(args.defaults_json) as f:
+        defaults = json.load(f)
+
+    jobs = sorted(defaults.keys())
+
     results = {}
 
-    for job_name, model_dict in models.items():
+    for job_name in jobs:
+
         mem_preds = []
         time_preds = []
 
         for idx, row in df_input.iterrows():
+
             nseq = row["nseq"]
             mlen = row["mlen"]
 
-            mem_val = predict_model(model_dict["mem"], nseq, mlen)
-            time_val = predict_model(model_dict["time"], nseq, mlen)
+            mem_val, time_val = predict_resources(
+                job_name,
+                models,
+                defaults,
+                nseq,
+                mlen
+            )
 
             mem_preds.append(mem_val)
             time_preds.append(time_val)
@@ -121,14 +172,10 @@ def main():
             f"{job_name.lower()}_time": time_preds
         }, index=df_input.index)
 
-        # Apply minimums
+        # Apply safety increase
         mem_col = f"{job_name.lower()}_mem"
         time_col = f"{job_name.lower()}_time"
 
-        pred[mem_col] = np.maximum(pred[mem_col], args.min_mem)
-        pred[time_col] = np.maximum(pred[time_col], args.min_time)
-
-        # Increase factor
         pred[mem_col] *= (1 + args.increase)
         pred[time_col] *= (1 + args.increase)
 

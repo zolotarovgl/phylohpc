@@ -1,0 +1,58 @@
+{
+  "ALN": {
+    "mem": {
+      "(Intercept)": -5.1287,
+      "log(nseq)": 1.6687,
+      "log(mlen)": 1.0436,
+      "log(nseq):log(mlen)": -0.0844
+    },
+    "time": {
+      "(Intercept)": -17.3334,
+      "log(nseq)": 2.9843,
+      "log(mlen)": 1.1598,
+      "log(nseq):log(mlen)": -0.043
+    }
+  },
+  "PHY": {
+    "mem": {
+      "(Intercept)": 2.9954,
+      "log(nseq)": 0.426,
+      "log(mlen)": -0.0677,
+      "log(nseq):log(mlen)": 0.0336
+    },
+    "time": {
+      "(Intercept)": -5.9678,
+      "log(nseq)": 2.2108,
+      "log(mlen)": 1.1173,
+      "log(nseq):log(mlen)": -0.1523
+    }
+  },
+  "GR_watcher": {
+    "mem": {
+      "(Intercept)": 8.0697,
+      "log(nseq)": -0.3379,
+      "log(mlen)": -0.4161,
+      "log(nseq):log(mlen)": 0.0928
+    },
+    "time": {
+      "(Intercept)": -18.9501,
+      "log(nseq)": 4.8435,
+      "log(mlen)": 2.1226,
+      "log(nseq):log(mlen)": -0.4205
+    }
+  },
+  "PVM": {
+    "mem": {
+      "(Intercept)": 5.5964,
+      "log(nseq)": -0.0016,
+      "log(mlen)": -0.0576,
+      "log(nseq):log(mlen)": 0.0129
+    },
+    "time": {
+      "(Intercept)": 1.6435,
+      "log(nseq)": 0.0262,
+      "log(mlen)": -0.6882,
+      "log(nseq):log(mlen)": 0.1275
+    }
+  }
+}

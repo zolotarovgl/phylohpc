@@ -1,0 +1,19 @@
+{
+  "ALN": {
+    "mem": 500,
+    "time": 30,
+    "large_nseq_threshold": 1000,
+    "large_mem": 50000,
+    "large_time": 360
+  },
+  "PHY": {
+    "mem": 500,
+    "time": 30,
+    "large_nseq_threshold": 1000,
+    "large_mem": 1000,
+    "large_time": 720
+  },
+  "PVM": { "mem": 500, "time": 5 },
+  "GR":  { "mem": 2048, "time": 60, "large_nseq_threshold": 1000, "large_mem": 2048, "large_time": 360},
+  "GR_watcher":  { "mem": 2048, "time": 60, "large_nseq_threshold": 1000, "large_mem": 2048, "large_time": 360}
+}
