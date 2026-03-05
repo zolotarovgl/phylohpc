@@ -6,6 +6,9 @@
 - optional: GeneRax + POSSVM
 3. Gather the annotations per species  
 
+TODOs:  
+- [] a script (python!) that will compute the efficiency from a trace file - i.e. the fraction of mem and time requested that has actually been used per job  
+
 
 # Profiles   
 There are 2 main flavours to run the pipeline:  
@@ -122,17 +125,16 @@ CAVE: standardize the input data - remove the parsing of the trace file!
 ```bash
 python workflow/get_seqstat.py  results/clusters/*.fasta > seq_stat.tab
 TRACEFILE=reports/trace.step2.txt
-Rscript train.R --trace $TRACEFILE --seq_stats seq_stat.tab --outfile workflow/models/models.json --plotfile workflow/models/models.pdf --tau 0.9
+Rscript train.R --trace $TRACEFILE --seq_stats seq_stat.tab --outfile workflow/models/models.json --plotfile workflow/models/models.pdf --tau 0.95
 open workflow/models/models.pdf
 ```
 
 Predict for `ids.txt`  
-
+ 
 ```bash
 python workflow/predict_resources.py --ids_fn ids.txt --cluster_dir results/clusters --models_json workflow/models/models.json  --defaults_json workflow/models/defaults.json --outfile resources.tsv --max_mem 100000 --max_time 2880 --increase 0.1
 
 ```
-
 ## 2.2 Job submission  
 
 
@@ -182,9 +184,6 @@ SP=Nvec
 TREEDIR=results/possvm/ # use possvm if no generax available, or results/generax 
 python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $TREEDIR --id Nvec
 ```
-
-
-
 
 # Resource usage 
 

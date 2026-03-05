@@ -47,10 +47,14 @@ parser$add_argument("--seq_stats", required=TRUE)
 parser$add_argument("--outfile", required=TRUE)
 parser$add_argument("--plotfile", required=FALSE, default = 'plot.pdf',
                     help="Output PDF with model diagnostics")
-parser$add_argument("--tau", type="double", default=0.9)
+parser$add_argument("--tau", type="double", default=0.95)
+parser$add_argument("--min_n", type="double", default=50)
 parser$add_argument("--jobs", default=NULL)
 
 args <- parser$parse_args()
+
+min_n = as.integer(args$min_n) # minimum number of sequences in fasta (to avoid fitting on small files)
+
 
 jobs = args$jobs
 if(!is.null(jobs)){jobs <- strsplit(jobs,",")[[1]]}
@@ -86,8 +90,7 @@ cat("Training models for:", paste(jobs, collapse=", "), "\n")
 
 d <- merge(d, input, by="id")
 
-min_len = 100
-d = d[d$nseq>=min_len,]
+d = d[d$nseq>=min_n,]
 
 # -----------------------------
 # Ensure coefficients exist

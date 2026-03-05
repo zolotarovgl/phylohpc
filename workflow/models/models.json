@@ -1,58 +1,58 @@
 {
   "ALN": {
     "mem": {
-      "(Intercept)": -5.1287,
-      "log(nseq)": 1.6687,
-      "log(mlen)": 1.0436,
-      "log(nseq):log(mlen)": -0.0844
+      "(Intercept)": -3.4283,
+      "log(nseq)": 1.483,
+      "log(mlen)": 0.5241,
+      "log(nseq):log(mlen)": 0.001
     },
     "time": {
-      "(Intercept)": -17.3334,
-      "log(nseq)": 2.9843,
-      "log(mlen)": 1.1598,
-      "log(nseq):log(mlen)": -0.043
+      "(Intercept)": -8.5502,
+      "log(nseq)": 1.7613,
+      "log(mlen)": -0.009,
+      "log(nseq):log(mlen)": 0.117
     }
   },
   "PHY": {
     "mem": {
-      "(Intercept)": 2.9954,
-      "log(nseq)": 0.426,
-      "log(mlen)": -0.0677,
-      "log(nseq):log(mlen)": 0.0336
+      "(Intercept)": 4.0029,
+      "log(nseq)": 0.2384,
+      "log(mlen)": -0.1557,
+      "log(nseq):log(mlen)": 0.0519
     },
     "time": {
-      "(Intercept)": -5.9678,
-      "log(nseq)": 2.2108,
-      "log(mlen)": 1.1173,
-      "log(nseq):log(mlen)": -0.1523
+      "(Intercept)": -2.2115,
+      "log(nseq)": 1.2364,
+      "log(mlen)": 0.1884,
+      "log(nseq):log(mlen)": 0.0847
     }
   },
   "GR_watcher": {
     "mem": {
-      "(Intercept)": 8.0697,
-      "log(nseq)": -0.3379,
-      "log(mlen)": -0.4161,
-      "log(nseq):log(mlen)": 0.0928
+      "(Intercept)": 7.7411,
+      "log(nseq)": -0.2835,
+      "log(mlen)": -0.2883,
+      "log(nseq):log(mlen)": 0.0714
     },
     "time": {
-      "(Intercept)": -18.9501,
-      "log(nseq)": 4.8435,
-      "log(mlen)": 2.1226,
-      "log(nseq):log(mlen)": -0.4205
+      "(Intercept)": -12.7269,
+      "log(nseq)": 3.5802,
+      "log(mlen)": 1.0855,
+      "log(nseq):log(mlen)": -0.2024
     }
   },
   "PVM": {
     "mem": {
-      "(Intercept)": 5.5964,
-      "log(nseq)": -0.0016,
-      "log(mlen)": -0.0576,
-      "log(nseq):log(mlen)": 0.0129
+      "(Intercept)": 6.1591,
+      "log(nseq)": -0.0913,
+      "log(mlen)": -0.1153,
+      "log(nseq):log(mlen)": 0.0215
     },
     "time": {
-      "(Intercept)": 1.6435,
-      "log(nseq)": 0.0262,
-      "log(mlen)": -0.6882,
-      "log(nseq):log(mlen)": 0.1275
+      "(Intercept)": 3.9864,
+      "log(nseq)": -0.337,
+      "log(mlen)": -0.7548,
+      "log(nseq):log(mlen)": 0.1359
     }
   }
 }
