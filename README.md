@@ -64,11 +64,11 @@ Filter and get the list of homology groups to run the following steps for:
 ```bash
 grep -c '>' results/clusters/*HG*fasta | sed -E 's/:/\t/g' | sort -k 2 -n 
 
-python select_hgs.py --out ids.txt --soi Clacla --min_seqs 20 --min_sps 5
+python workflow/select_hgs.py --out ids.txt --soi Clacla --min_seqs 20 --min_sps 5
 
 
 # Explore the sequence stats
-python get_seqstat.py  results/clusters/*.fasta | grep -f ids.txt -w | sort -k 2 -n 
+python workflow/get_seqstat.py  results/clusters/*.fasta | grep -f ids.txt -w | sort -k 2 -n 
 # how to predict the d
 ```
 * `--soi` - will keep only HG ids with `Mmus` sequences (it makes sense to filter by the reference species)  
@@ -199,17 +199,17 @@ python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $T
 
 # TODOs
 
-- [ ] The support values are not parsed correctly by POSSVM after GENERAX - can we rely on them? 
-- [ ] re-clustering - prevent diamond reruns  
+- [ ] resource efficiency reports    
+- [ ] re-clustering - prevent diamond reruns during each re-clustering  
 - [ ] re-clustering - use MMSEQS2  
-- [ ] 2 execution profiles - fast and precise
-- [ ] generax: missing species in the tree - tree checks!  
 - [ ] generax speedup - does increasing the number of cores make a difference?  
-- [ ] generax resource prediction   
-- [ ] quantile regression for resource prediction   
 - [ ] `phylo` environment with `Rscript` support  
-- [ ] allow the phylogeny script to rerun the iqtree if it finds the outputs? 
-- [ ] mafft oom errors (code 1 instesad of 137) - proper handling 
+- [ ] __allow the phylogeny script to rerun the iqtree if it finds the outputs?__ 
+- [ ] __mafft oom errors (code 1 instesad of 137) - proper handling__ 
+- [x] generax: missing species in the tree - tree checks!  
+- [x] 2 execution profiles - fast and precise
+- [x] generax resource prediction   
+- [x] quantile regression for resource prediction   
 - [x] `generax.nf` - proper OOM and OOT handling  
 - [x] proper environment with `openmpi` for generax  
 - [x] `step2.nf` - make sure the processes are correctly cached and not rerun   
@@ -217,7 +217,7 @@ python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $T
 - [x] better subclustering logic in `phylogeny/`  
 - [x] generax family error handling - raises exit 10  
 - [x] Clustering: proper subclustering - local and global model  
-- [x] generax
+- [x] GeneRax
 - [x] `step1` - search and clustering pipeline   
 - [x] `PHY` job time extension 
 - [x] job duration and memory prediction  
