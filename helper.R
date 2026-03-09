@@ -43,7 +43,6 @@ open = function(x){system(sprintf('open %s',x))}
 	as.integer(str_split(d$mem_res,'\\.',simplify = T)[,1])
 }
 
-
 # GeneRax parsing 
 parse_generax_log = function(fn){
 	o = readLines(fn)
@@ -63,4 +62,15 @@ parse_generax_log = function(fn){
 	# Total execution time
 	out$time_total = as.numeric(as.difftime(gsub('\\[|\\]','',str_split(o[length(o)],' ',simplify = T)[,1]),format = "%H:%M:%S",units = 'secs'))	
 	out
+}
+
+# count the sequnces 
+count_seq = function(x){
+	o = as.integer(str_split(system(sprintf('grep -c ">" %s',paste0(x,collapse = ' ')),intern = TRUE),':',simplify = T)[,2])
+	if(!is.null(names(x))){
+		names(o) = names(x)
+	}else{
+		names(o) = basename(x)
+	}
+	o
 }
