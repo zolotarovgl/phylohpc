@@ -68,62 +68,82 @@ if( params.resources_tsv && file(params.resources_tsv).exists() ) {
 }
 Channel.fromPath(params.ids).splitText().map { it.trim() }.filter { it }.map { id -> tuple(id, file("${projectDir}/results/clusters/${id}.fasta")) }.set { hg_fastas }
 process ALN {
-	maxForks 50
-	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
-	publishDir "${params.OUTDIR}/align", mode: 'copy'
-	cpus 8
-	memory {
-		def base = res[id]?.aln_mem ?: 500.MB
-		return base + (task.attempt - 1) * 1.GB
-	}
-	time {
-		def base = res[id]?.aln_time ?: 30.min
-		return base + (task.attempt - 1) * 30.min
-	}
-	errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
-	maxRetries 10
-	maxErrors -1
-	input:
-	tuple val(id), path(fasta)
-	output:
-	tuple val(id), path("${id}.aln.fasta")
-	// Use for snakemake-like behavior 
-    //when:
-    //!file("${params.OUTDIR}/align/${id}.aln.fasta").exists()
-	script:
-	"""
-	python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
-	python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
-	mv ${id}.aln.fasta_tmp ${id}.aln.fasta
-	"""
+
+    tag "${id}"
+
+    publishDir "${params.OUTDIR}/align", mode: 'copy'
+
+    input:
+    tuple val(id), path(fasta)
+
+    output:
+    tuple val(id), path("${id}.aln.fasta")
+
+    script:
+    def existing = file("${params.OUTDIR}/align/${id}.aln.fasta")
+
+    if (existing.exists()) {
+        """
+        ln -s ${existing} ${id}.aln.fasta
+        """
+    }
+    else {
+        """
+        python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
+        python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
+        mv ${id}.aln.fasta_tmp ${id}.aln.fasta
+        """
+    }
 }
 process PHY {
-	maxForks 50
-	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
-	publishDir "${params.OUTDIR}/gene_trees", mode: 'copy'
-	cpus 4
-	memory {
-		def base = res[id]?.phy_mem ?: 300.MB
-		return base * task.attempt
-	}
-	time {
-		def base = res[id]?.phy_time ?: 30.min
-		return base + (task.attempt - 1) * 6.h
-	}
-	errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
-	maxRetries 2
-	maxErrors -1
-	input:
-	tuple val(id), path(aln)
-	output:
-	tuple val(id), path("${id}.treefile"), path(aln)
-	// Skip if already present in the results 
-	//when:
-    //!file("${params.OUTDIR}/gene_trees/${id}.treefile").exists()
-	script:
-	"""
-	python ${projectDir}/phylogeny/main.py phylogeny -f ${aln} --outprefix ${id} -c ${task.cpus} --method ${params.TREE_METHOD} --iqtree2_model ${params.IQTREE2_MODEL}
-	"""
+
+    maxForks 50
+    tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
+
+    publishDir "${params.OUTDIR}/gene_trees", mode: 'copy'
+
+    cpus 4
+
+    memory {
+        def base = res[id]?.phy_mem ?: 300.MB
+        return base * task.attempt
+    }
+
+    time {
+        def base = res[id]?.phy_time ?: 30.min
+        return base + (task.attempt - 1) * 6.h
+    }
+
+    errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
+    maxRetries 2
+    maxErrors -1
+
+    input:
+    tuple val(id), path(aln)
+
+    output:
+    tuple val(id), path("${id}.treefile"), path(aln)
+
+    script:
+
+    def existing = file("${params.OUTDIR}/gene_trees/${id}.treefile")
+
+    if (existing.exists()) {
+        """
+        echo "Using existing tree for ${id}"
+        ln -sf ${existing} ${id}.treefile
+        """
+    }
+    else {
+        """
+        python ${projectDir}/phylogeny/main.py phylogeny \
+            -f ${aln} \
+            --outprefix ${id} \
+            -c ${task.cpus} \
+            --method ${params.TREE_METHOD} \
+            --iqtree2_model ${params.IQTREE2_MODEL}
+        """
+    }
 }
 process PVM {
 
@@ -157,6 +177,33 @@ process PVM {
 		      path("${id}.*.ortholog_groups.newick"),
 		      path("${id}.*.ortholog_groups.csv"),
 		      path("${id}.*.pairs_orthologs.csv")
+
+	script:
+	"""
+	python ${projectDir}/phylogeny/main.py possvm \
+	    -t ${tree} \
+	    --refsps ${params.REFSPECIES} \
+	    -r ${refnames_file} \
+	    -o ${id}.
+	"""
+}
+
+process PVM_PREV {
+
+	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
+	publishDir "${params.OUTDIR}/possvm_prev", mode: 'copy'
+
+	cpus 1
+
+	input:
+	tuple val(id), path(tree), path(aln), path(refnames_file)
+
+	output:
+	tuple val(id),
+	      path(tree),
+	      path("${id}.*.ortholog_groups.newick"),
+	      path("${id}.*.ortholog_groups.csv"),
+	      path("${id}.*.pairs_orthologs.csv")
 
 	script:
 	"""
@@ -219,61 +266,77 @@ process GR_watcher {
           path("${id}.progress.tree"),
           path(aln)
 
-	script:
-	"""
-	set -euo pipefail
+    script:
 
-	export OMP_NUM_THREADS=${task.cpus}
-	export OPENBLAS_NUM_THREADS=${task.cpus}
-	export MKL_NUM_THREADS=${task.cpus}
-	export NUMEXPR_NUM_THREADS=${task.cpus}
+    def existing = file("${params.OUTDIR}/generax/${id}.generax.tree")
 
-	touch ${id}.progress.tree
+    if (existing.exists()) {
+        """
+        echo "Using existing GeneRax result for ${id}"
 
-	progress_watcher() {
-		while kill -0 \$MAIN_PID 2>/dev/null; do
-			if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
-				cp ${id}_generax/results/${id}/geneTree.newick \
-				${id}.progress.tree 2>/dev/null || true
-			fi
-			sleep 10
-		done
-	}
+        ln -sf ${existing} ${id}.generax.tree
 
-	python ${projectDir}/phylogeny/main.py generax \
-		--name ${id} \
-		--alignment ${aln} \
-		--gene_tree ${tree} \
-		--species_tree ${species_tree} \
-		--output_dir ${id}_generax \
-		--subs_model ${params.SUBS_MODEL} \
-		--max_spr ${params.MAX_SPR} \
-		--cpus ${task.cpus} \
-		--logfile ${id}.generax.log \
-		--outfile ${id}.generax.tree &
+        # dummy files so outputs exist
+        touch ${id}.generax.log
+        touch ${id}.progress.tree
+        """
+    }
+    else {
+        """
+        set -euo pipefail
 
-	MAIN_PID=\$!
+        export OMP_NUM_THREADS=${task.cpus}
+        export OPENBLAS_NUM_THREADS=${task.cpus}
+        export MKL_NUM_THREADS=${task.cpus}
+        export NUMEXPR_NUM_THREADS=${task.cpus}
 
-	progress_watcher &
-	WATCH_PID=\$!
+        touch ${id}.progress.tree
 
-	cleanup() {
-		kill \$WATCH_PID 2>/dev/null || true
-		wait \$WATCH_PID 2>/dev/null || true
-	}
-	trap cleanup EXIT INT TERM
+        progress_watcher() {
+            while kill -0 \$MAIN_PID 2>/dev/null; do
+                if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
+                    cp ${id}_generax/results/${id}/geneTree.newick \
+                    ${id}.progress.tree 2>/dev/null || true
+                fi
+                sleep 10
+            done
+        }
 
-	wait \$MAIN_PID
-	EXIT_CODE=\$?
+        python ${projectDir}/phylogeny/main.py generax \
+            --name ${id} \
+            --alignment ${aln} \
+            --gene_tree ${tree} \
+            --species_tree ${species_tree} \
+            --output_dir ${id}_generax \
+            --subs_model ${params.SUBS_MODEL} \
+            --max_spr ${params.MAX_SPR} \
+            --cpus ${task.cpus} \
+            --logfile ${id}.generax.log \
+            --outfile ${id}.generax.tree &
 
-	echo "GeneRax exit code: \$EXIT_CODE"
+        MAIN_PID=\$!
 
-	if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
-		cp ${id}_generax/results/${id}/geneTree.newick ${id}.progress.tree || true
-	fi
+        progress_watcher &
+        WATCH_PID=\$!
 
-	exit \$EXIT_CODE
-	"""
+        cleanup() {
+            kill \$WATCH_PID 2>/dev/null || true
+            wait \$WATCH_PID 2>/dev/null || true
+        }
+        trap cleanup EXIT INT TERM
+
+        wait \$MAIN_PID
+        EXIT_CODE=\$?
+
+        echo "GeneRax exit code: \$EXIT_CODE"
+
+        if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
+            cp ${id}_generax/results/${id}/geneTree.newick ${id}.progress.tree || true
+        fi
+
+        exit \$EXIT_CODE
+        """
+    }
 }
 
 //workflow {
@@ -285,12 +348,18 @@ refnames_ch     = Channel.value( file(params.REFNAMES) )
 
 workflow {
 
-    // ALN → PHY
     phy_out = hg_fastas | ALN | PHY
 
     if (params.run_generax) {
 
-        // PHY → GR_watcher
+        // ---------- PVM on original trees ----------
+        phy_out
+            .map { id, tree, aln -> tuple(id, tree, aln) }
+            .combine(refnames_ch)
+            | PVM_PREV
+
+
+        // ---------- GeneRax ----------
         gr_input = phy_out
             .map { id, tree, aln ->
                 tuple(id, aln, tree)
@@ -299,21 +368,23 @@ workflow {
 
         gr_out = gr_input | GR_watcher
 
-        // Use GeneRax tree for PVM
-        pvm_base = gr_out.map { id, generax_tree, log, progress, aln ->
-            tuple(id, generax_tree, aln)
-        }
 
-    } else {
+        // ---------- PVM on GeneRax trees ----------
+        gr_out
+            .map { id, generax_tree, log, progress, aln ->
+                tuple(id, generax_tree, aln)
+            }
+            .combine(refnames_ch)
+            | PVM
 
-        // Use PHY tree for PVM
-        pvm_base = phy_out.map { id, tree, aln ->
-            tuple(id, tree, aln)
-        }
+    } 
+    else {
+
+        phy_out
+            .map { id, tree, aln ->
+                tuple(id, tree, aln)
+            }
+            .combine(refnames_ch)
+            | PVM
     }
-
-    // Add refnames and run PVM
-    pvm_base
-        .combine(refnames_ch)
-        | PVM
 }

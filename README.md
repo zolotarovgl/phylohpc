@@ -1,5 +1,7 @@
 # Phylogeny pipeline for CRG HPC
 
+The jobs will be reran over and over and over again it seems
+
 0. prepare the input data - `data/input.fasta`    
 1. search and clustering $\rightarrow$ homology groups. Select which HGs to run the pipeline for $\rightarrow$ `ids.txt`  
 2. Alignment, phylogeny, possvm     
@@ -15,7 +17,7 @@ Execution:
 - `local` - use the interactive HPC session or run on your machine   
 - `slurm` - configured to be used on the CRG HPC system   
 
-To run a pipeline, combine the flavour and the executor. For instance `-profile local,fast` will run the fast pipeline locally. For submitting the jobs via slurm, you have to use a species sbatch script `submit.nf` (vis the commands below).  
+To run a pipeline, combine the flavour and the executor. For instance `-profile local,fast` will run the fast pipeline locally. For submitting the jobs via slurm, you have to use a specific sbatch script `submit.nf` (vis the commands below).  
 
 
 # Prepare inputs   
@@ -161,7 +163,7 @@ Gather the annotations per species of interest:
 SP=Nvec
 SP=Clacla
 TREEDIR=results/possvm/ # use possvm if no generax available, or results/generax 
-python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $TREEDIR --id Nvec > results/annotations/${SP}.tab
+python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $TREEDIR --id ${SP} > results/annotations/${SP}.tab
 ```
 
 ---
@@ -175,7 +177,7 @@ python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $T
 
 
 - [ ] how important is it to set the max spr param for such a high value?   
-
+- [ ] what are the time costs vs SPR?  
 
 
 ![](img/scaling.png)
@@ -195,11 +197,26 @@ This info can be used to monitor the efficiency of the memory and time requests.
 `resources.R` - a downstream script that explores the resource scaling.  
 
 
+### GeneRax   
+
+
+Joint likelihood change as a fraction of the SPR radius:   
+It seems that most of the famies get their maximum increase after SPR=2. Thus, setting the SPR to 3 seems justified.     
+![](img/generax.ll_radius.png)
+
+
+The fraction of the total runtime spent in each iteration: 
+![](img/generax.spr_time_fraction.png)
+
+Using maxspr = 3 will decrease the generax runtimes almost twice.  
+
+
 ---
 
 # TODOs
 
 - [ ] __Gather annotations: if no generax annotation available, use the non-GeneRax'ed tree__  
+- [ ] GeneRax: does sharing information across families improve the reconciliation?   
 - [ ] resource efficiency reports    
 - [ ] re-clustering - prevent diamond reruns during each re-clustering  
 - [ ] re-clustering - use MMSEQS2  

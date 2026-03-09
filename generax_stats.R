@@ -1,26 +1,21 @@
 ##########################
 # Generax Runtimes
+# - what are the costs of running an additional SPR rounds? 
 ##########################
 options(max.print = 30)
 source('helper.R')
 library(dplyr)
 library(quantreg)
 library(ggplot2)
-set_theme()
+library(cowplot)
+theme_set(theme_cowplot())
+
 # parse generax logs
 f = list.files('results/generax',full = TRUE,pattern = '*log')
 message(sprintf("%s generax logs found",length(f)))
 p = do.call(rbind,lapply(f,parse_generax_log))
 # Runtimes
-df = p%>%group_by(id)%>%slice_max(radius)
-dim(df)
-df$time = df$time_total
-range(df$time/60)
-summary(df$n_genes)
-fit <- lm(log10(time/60) ~ log10(n_genes), data = df)
-r2  <- round(summary(fit)$r.squared, 3)
-# that's very few genes yet, of course
-df%>%mutate(min = time/60)%>%arrange(-min)%>%as.data.frame()
+p = p[p$time_total>0,]
 df=p%>%group_by(id)%>%slice(which.max(radius))
 fit=lm(log10(time/60)~log10(n_genes),data=df)
 r2=round(summary(fit)$r.squared,3)
@@ -29,7 +24,8 @@ fit_q=rq(log10(time/60)~log10(n_genes),data=df,tau=tau)
 newdata=data.frame(n_genes=seq(min(df$n_genes),max(df$n_genes),length.out=200))
 pred_log=predict(fit_q,newdata=newdata)
 newdata$time_pred=10^pred_log
-ggplot(df,aes(n_genes,time/60))+
+# a dummy plot showing fitting the tuau
+pl = ggplot(df,aes(n_genes,time/60))+
 geom_point()+
 scale_x_log10()+
 scale_y_log10()+
@@ -41,25 +37,102 @@ ylab("Time, min")+
 ggtitle("GeneRax")
 
 #########################
-# Likelihoods
+# SPR vs time
 ##########################
 id = 'tfs.Forkhead.HG1'
+tdf = p %>%
+  group_by(id) %>%
+  arrange(radius, .by_group = TRUE) %>%
+  mutate(
+    time_total = max(time),
+    time_delta = time - lag(time, default = 0),
+    time_frac = time_delta / time_total
+  ) %>%select(id, n_genes, radius, time_delta, time_frac,time)
+library(reshape2)
+library(ComplexHeatmap)
+# time delta then can be the fraction of the whole total time 
+m = dcast(tdf,id~radius,value.var = 'time_frac',fun.aggregate = mean)
+rownames(m) = m[,1]
+m = m[,-1]
+m = as.matrix(m)
+m[is.nan(m)]=0
+m = head(m)
+rownames(m)
+ra = rowAnnotation(N = anno_barplot(n_seq[rownames(m)]))
+Heatmap(m,right_anno = ra,cluster_rows = FALSE,cluster_columns = FALSE,show_row_names = FALSE,border = TRUE,name = 'time fraction')
+# Time delta here means the fraction of the total runtime to run a step 
+tdf$n_seq = n_seq[tdf$id]
+
+min_seq = 30
+dd = tdf[tdf$n_seq>=min_seq,]%>%group_by(radius)%>%summarize(time_frac = median(time_frac))
+pl = ggplot(tdf[tdf$n_seq>=min_seq,],aes(x = radius, y = time_frac))+
+geom_line(alpha = 0.1,color = 'grey',aes(group = id))+
+ylab("Fraction of time")+
+xlab('SPR')+
+geom_line(data = dd)+
+geom_point(data = dd)+
+ggtitle('Fraction of runtime for each SPR interation')+
+scale_x_continuous(expand = c(0,.1))+
+scale_y_continuous(expand = c(0,0))+
+theme(
+  plot.title = element_text(
+    hjust = 0.5,   # center
+    face = "plain" # normal font (not bold)
+  )
+)
+plotname = 'downstream/generax.spr_time_fraction.pdf'
+
+save_plots = function(plotname,fig_w = 6,fig_h = 4){
+	ggsave(plotname,height=fig_h,width = fig_w)
+	plotname = gsub(".pdf",".png",plotname)
+	ggsave(plotname,height=fig_h,width = fig_w,bg = 'white')
+	message(plotname)
+	open(plotname)
+	
+}
+save_plots(plotname)
+
+#########################
+# Likelihoods
+##########################
 # relative change - relative to the radius one
+
+
 pp = p[,] %>%
   group_by(id) %>%
   select(-ncpu,-n_species) %>%
   arrange(radius, .by_group = TRUE) %>%
-  mutate(rel_change = (JointLL - first(JointLL)) / abs(first(JointLL)))
-pl = ggplot(pp,aes(x = radius, y = rel_change,group = id))+
-geom_line(alpha = 0.5)+
+  mutate(
+	rel_JointLL = (JointLL - first(JointLL)) / abs(first(JointLL)),
+	rel_RecLL = (RecLL - first(RecLL)) / abs(first(RecLL))
+  )
+
+dd = pp%>%group_by(radius)%>%summarize(rel_JointLL = mean(rel_JointLL))
+pl1 = ggplot(pp,aes(x = radius, y = rel_JointLL,group = id))+
+geom_line(alpha = 0.5,color = 'grey')+
+geom_point(data = dd)+
+geom_line(data = dd)+
 scale_y_log10()+
 ylab("Relative JointLL change")
 plotname = 'downstream/generax.jointll_radius.pdf'
-ggsave(plotname,height = 5,width = 5)
-plotname = gsub(".pdf",".png",plotname)
-ggsave(plotname,height = 5,width = 5,bg = 'white')
-open(plotname)
+save_plots(plotname)
+dd = pp%>%group_by(radius)%>%summarize(rel_RecLL = mean(rel_RecLL))
+pl2 = ggplot(pp,aes(x = radius, y = rel_RecLL,group = id))+
+geom_line(alpha = 0.5,color = 'grey')+
+geom_point(data = dd)+
+geom_line(data = dd)+
+scale_y_log10()+
+ylab("Relative RecLL change")
 
+pl = pl1+pl2
+plotname = 'downstream/generax.ll_radius.pdf'
+save_plots(plotname,fig_w = 10)
+
+
+b = tdf%>%group_by(id)%>%filter(radius <=3)%>%mutate(time_frac = sum(time_frac))%>%filter(radius ==3 )%>%pull(time_frac)
+plot(density(b))
+
+# hmm what about the RecLL
 
 #########################
 # Likelihoods

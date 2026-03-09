@@ -74,3 +74,4 @@ count_seq = function(x){
 	}
 	o
 }
+settheme = function(){theme_set(theme_cowplot())}

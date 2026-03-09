@@ -1,5 +1,5 @@
 ##########################
-# HG info
+# HG sequence info - number of seqs, median length
 ##########################
 source('helper.R')
 trace_fn = 'reports/trace.step2.txt'
@@ -7,14 +7,15 @@ ids = read.table(trace_fn,sep = '\t')[[4]]
 ids = gsub("\\(|\\)","",str_split(ids,' ',simplify = T)[,2])
 f = list.files('results/clusters',full = TRUE,pattern = 'fasta')
 names(f) = gsub('.fasta','',basename(f))
-count_seq = function(x){as.integer(system(sprintf('grep -c ">" %s',x),intern = TRUE))}
+#count_seq = function(x){as.integer(system(sprintf('grep -c ">" %s',x),intern = TRUE))}
 f = f[intersect(ids,names(f))]
-n_seq <- count_seq_fast(f)
-names(n_seq) <- names(f)
+
+
+n_seq = count_seq(f)
 library(Biostrings)
+# Median sequence length
 mlen = sapply(f,FUN = function(x) median(width(readAAStringSet(x))))
 length(mlen)
-
 
 ##########################
 # Memory
@@ -57,12 +58,17 @@ colnames(r)[colnames(r) == 'time'] = 'time_res'
 d$id = gsub("\\(|\\)","",str_split(d$name,' ',simplify = T)[,2])
 d = left_join(d,r,by = c("job_name","id"))
 
+
+d$nseq = n_seq[d$id]
 # resources contain the predictions 
 d$time_pred = .nf_convert_time(d$time_res)
 d$mem_pred = .nf_convert_mem(d$mem_res)
 
+library(ggplot2)
+library(cowplot)
+theme_set(theme_cowplot())
 pl1=ggplot(d,aes(x = nseq,y = time/60))+
-geom_point(aes(col = job_name))+
+geom_point(aes(col = job_name),size = 0.5)+
 scale_x_log10()+
 scale_y_log10()+
 xlab('# nseq')+
@@ -70,15 +76,22 @@ ylab('Time, min')+
 scale_color_manual(values = pal,breaks = names(pal))
 
 pl2=ggplot(d[d$mem>=100,],aes(x = nseq,y = mem))+
-geom_point(aes(col = job_name))+
+geom_point(aes(col = job_name),size = 0.5)+
 scale_x_log10()+
 scale_y_log10()+
 xlab('# nseq')+
 ylab('mem, MB')+
 scale_color_manual(values = pal,breaks = names(pal))
 library(patchwork)
-pl1+pl2
+pl = pl1+pl2
+plotname = 'downstream/scaling.pdf'
+ggsave(plotname,width = 10,height = 5)
+open(plotname)
+plotname = gsub(".pdf",".png",plotname)
+ggsave(plotname,width = 10,height = 4,bg = 'white')
+open(plotname)
 
+options(max.print = 30)
 
 # Prediction efficiency - compare the resources data frame  
 pl1 = ggplot(d[,],aes(x = job_name,y = time/time_pred))+
