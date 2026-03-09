@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-import argparse, subprocess
+import argparse
+import subprocess
+import sys
+
 
 def parse_mem(val):
     try:
@@ -10,6 +13,7 @@ def parse_mem(val):
         return float(val)
     except:
         return 0
+
 
 parser = argparse.ArgumentParser(
     description="""Check SLURM job status
@@ -30,63 +34,111 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-
+# -----------------------------
 # Collect job IDs
+# -----------------------------
+
 job_ids = []
 
-# From command line
+# from command line
 for item in args.jobid:
     job_ids.extend(item.split(","))
 
-# From file
+# from file
 if args.file:
-    with open(args.file) as f:
-        for line in f:
-            job_ids.extend(line.strip().split(","))
+    try:
+        with open(args.file) as f:
+            for line in f:
+                job_ids.extend(line.strip().split(","))
+    except Exception as e:
+        print(f"Error reading file: {e}", file=sys.stderr)
+        sys.exit(1)
 
-
-# Clean list
+# clean list
 job_ids = [j.strip() for j in job_ids if j.strip()]
 
+if not job_ids:
+    print("No job IDs provided.", file=sys.stderr)
+    sys.exit(1)
 
-for jobid in job_ids:
+job_str = ",".join(job_ids)
 
-    status = subprocess.run(
-        ["squeue", "-j", jobid, "-h", "-o", "%T"],
-        capture_output=True, text=True
-    )
+# -----------------------------
+# Check running jobs (squeue)
+# -----------------------------
 
-    if status.stdout.strip():
-        state = status.stdout.strip()
-        print(f"{jobid}\t{state}\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN")
+running = {}
+
+sq = subprocess.run(
+    ["squeue", "-j", job_str, "-h", "-o", "%i|%T"],
+    capture_output=True,
+    text=True
+)
+
+for line in (sq.stdout or "").splitlines():
+    try:
+        jid, state = line.split("|")
+        running[jid] = state
+    except:
         continue
 
-    out = subprocess.run(
-        ["sacct", "-j", jobid,
-         "-o", "JobID,State,ExitCode,Elapsed,Timelimit,ReqMem,MaxRSS",
-         "-n", "-P"],
-        capture_output=True, text=True
-    )
+# -----------------------------
+# Query sacct once
+# -----------------------------
 
-    lines = out.stdout.splitlines()
-    main = None
-    max_mem = 0
+out = subprocess.run(
+    [
+        "sacct",
+        "-j", job_str,
+        "-o", "JobID,State,ExitCode,Elapsed,Timelimit,ReqMem,MaxRSS",
+        "-n",
+        "-P"
+    ],
+    capture_output=True,
+    text=True
+)
 
-    for line in lines:
-        parts = line.strip().split("|")
-        if not parts or len(parts) < 7:
-            continue
+if out.returncode != 0:
+    print("Error running sacct:", out.stderr, file=sys.stderr)
+    sys.exit(1)
 
-        if parts[0] == jobid:
-            main = parts
+records = {}
+maxrss = {}
 
-        if parts[6].strip() not in ("", "None"):
-            mem_val = parse_mem(parts[6].strip())
-            if mem_val > max_mem:
-                max_mem = mem_val
+for line in (out.stdout or "").splitlines():
 
-    if main:
-        main[6] = f"{round(max_mem)}M" if max_mem else "NaN"
-        print("\t".join(main))
+    parts = line.strip().split("|")
+    if len(parts) < 7:
+        continue
+
+    jid = parts[0].split(".")[0]
+
+    if jid not in records:
+        records[jid] = parts
+
+    mem = parts[6].strip()
+
+    if mem not in ("", "None"):
+        val = parse_mem(mem)
+        if jid not in maxrss or val > maxrss[jid]:
+            maxrss[jid] = val
+
+# -----------------------------
+# Print results
+# -----------------------------
+
+for jid in job_ids:
+
+    # running jobs
+    if jid in running:
+        print(f"{jid}\t{running[jid]}\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN")
+        continue
+
+    # finished jobs
+    if jid in records:
+        rec = records[jid]
+        mem = round(maxrss.get(jid, 0))
+        rec[6] = f"{mem}M" if mem else "NaN"
+        print("\t".join(rec))
     else:
-        print(f"{jobid}\tUNKNOWN\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN")
+        print(f"{jid}\tUNKNOWN\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN")
