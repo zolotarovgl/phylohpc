@@ -1,4 +1,4 @@
-peline 
+Phylogeny pipeline
 
 0. prepare the input data - `data/input.fasta`    
 1. search and clustering $\rightarrow$ homology groups. Select which HGs to run the pipeline for $\rightarrow$ `ids.txt`  
