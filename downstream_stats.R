@@ -61,7 +61,7 @@ read_command_err = function(workdir,hash){
 # Work outputs
 #############################
 workdir = '/no_backup/asebe/gzolotarov/work/'
-d = read.table('trace.txt',sep = '\t',fill = TRUE,header = TRUE)
+d = read.table('reports/trace.step2.txt',sep = '\t',fill = TRUE,header = TRUE)
 rownames(d) = d$hash
 d$submit_dt = as.POSIXct(d$submit, format="%Y-%m-%d %H:%M:%OS", tz="UTC")
 span = difftime(max(d$submit_dt), min(d$submit_dt), units="mins")
@@ -111,6 +111,7 @@ d = merge(d, res, all.x=TRUE)
 # fraction of requensted memory used 
 d$mem_perc = d$peak_rss_mb/d$ReqMem_MB
 d$time_perc = d$minutes/d$Timelimit_min
+dir.create('results/downstream')
 saveRDS(d,'results/downstream/job_info.rds')
 ###########################################
 d = readRDS('results/downstream/job_info.rds')
@@ -121,7 +122,8 @@ par(mfrow = c(1,2))
 boxplot(split(d$mem_perc,d$job_name),ylab = 'Fraction of MEM used',outline = FALSE)
 boxplot(split(d$time_perc,d$job_name),ylab = 'Fraction of TIME used',outline = FALSE)
 dev.off()
-
+open = function(x){system(sprintf('open %s',x))}
+open(plotname)
 library(cowplot)
 theme_set(theme_cowplot())
 pl = ggplot(d,aes(x = ReqMem_MB+1, y = mem_perc))+
@@ -141,6 +143,7 @@ for(job_name in c("ALN","PHY","PVM")){
 	plot(p$n,p$peak_rss_mb,pch = 16,log = 'xy',xlab = '# sequences', ylab = 'Memory, MB',font.main = 1,main = job_name)
 }
 dev.off()
+open(plotname)
 options(max.print = 100)
 dir.create('results/downstream')
 ####################################
