@@ -1,4 +1,4 @@
-# Pipeline 
+peline 
 
 0. prepare the input data - `data/input.fasta`    
 1. search and clustering $\rightarrow$ homology groups. Select which HGs to run the pipeline for $\rightarrow$ `ids.txt`  
@@ -132,7 +132,7 @@ open workflow/models/models.pdf
 Predict for `ids.txt`  
  
 ```bash
-python workflow/predict_resources.py --ids_fn ids.txt --cluster_dir results/clusters --models_json workflow/models/models.json  --defaults_json workflow/models/defaults.json --outfile resources.tsv --max_mem 100000 --max_time 2880 --increase 0.1
+python workflow/predict_resources.py --ids_fn ids.txt --cluster_dir results/clusters --models_json workflow/models/models.json  --defaults_json workflow/models/defaults.json --outfile resources.tsv --max_mem 100000 --max_time 2880 --increase 3
 
 ```
 ## 2.2 Job submission  
@@ -160,16 +160,23 @@ sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf -profile $PROFI
 
 # Runtimes   
 
-Can we faitfully predict the runtimes of the jobs?   
 
-How long does the slurm execution take with the linsi, fasttree and small SPR value? 
-> step1: 56 species, local ~ 1h.  
+- [ ] how important is it to set the max spr param for such a high value?   
 
 
 Job stats from SLURM job ids:
 ```bash
 python workflow/check_job.py $(cat reports/trace.step2.txt | grep COMPL | grep ALN | cut -f 3 | grep -v native)
 ```
+
+Collect SLURM job stats 
+```bash
+cat reports/trace.step2.txt  |grep COMPLETED | cut -f 3 | grep -v native > job_ids
+python workflow/check_job.v2.py -f job_ids > job_stats.tab
+```
+This info can be used to monitor the efficiency of the memory and time requests.   
+
+`resources.R` - a downstream script that explores the resource scaling.  
 
 
 
@@ -181,8 +188,9 @@ Gather the annotations per species of interest:
 ```bash
 # no splitting by the group 
 SP=Nvec
+SP=Clacla
 TREEDIR=results/possvm/ # use possvm if no generax available, or results/generax 
-python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $TREEDIR --id Nvec
+python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $TREEDIR --id Nvec > results/annotations/${SP}.tab
 ```
 
 # Resource usage 
@@ -192,7 +200,10 @@ python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $T
 `generax_runtime.R` - explores the generax scaling. 
 
 
+## GeneRax 
 
+
+![Alt text](img/generax.jointll_radius.png)
 
 
 ---
