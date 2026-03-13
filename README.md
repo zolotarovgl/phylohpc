@@ -1,12 +1,14 @@
 # Phylogeny pipeline for CRG HPC
 
-The jobs will be reran over and over and over again it seems
-
 0. prepare the input data - `data/input.fasta`    
 1. search and clustering $\rightarrow$ homology groups. Select which HGs to run the pipeline for $\rightarrow$ `ids.txt`  
 2. Alignment, phylogeny, possvm     
 - optional: GeneRax + POSSVM
 3. Gather the annotations per species  
+
+
+Note: it seems that the strict file checks are now submitting the jobs that only perfom tests - massive waste of resources. 
+__Add hg ids filtering script that will decide which hgs to run the processes for__ .
 
 # Profiles   
 There are 2 main flavours to run the pipeline:  
@@ -129,7 +131,7 @@ python workflow/predict_resources.py --ids_fn ids.txt --cluster_dir results/clus
 ```
 
 
-## 2.2 Job submission  
+## 2.2 Job submissions
 
 ```bash
 module load OpenMPI
@@ -142,7 +144,7 @@ Submit with predicted resources
 ```bash
 # Interactive session
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2
-PROFILE=local,fast
+PROFILE=local,precise
 nextflow run -resume -profile $PROFILE -w $WORKDIR  step2.nf --run_generax --genefam_info genefam.csv --infasta data/input.fasta -with-report reports/report.step2.html -with-trace reports/trace.step2.html
 
 # SLURM
@@ -155,15 +157,10 @@ sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf -profile $PROFI
 
 # Gather annotations 
 
-After the phylogenies are done, you can gather the annotations per species 
-Gather the annotations per species of interest:  
-
+Gather the annotations per species of interest defined in the `sps_annotate` list:  
 ```bash
-# no splitting by the group 
-SP=Nvec
-SP=Clacla
-TREEDIR=results/possvm/ # use possvm if no generax available, or results/generax 
-python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $TREEDIR --id ${SP} > results/annotations/${SP}.tab
+python workflow/gather_annotations.py --search-dir results/search/ --tree-dir results/possvm/ results/possvm_prev --id sps_annotate --outdir results/annotations/ --split-prefix
+
 ```
 
 ---
@@ -174,11 +171,7 @@ python workflow/gather_annotations.py --search-dir results/search/ --tree-dir $T
 
 `generax_runtime.R` - explores the generax scaling. 
   
-
-
-- [ ] how important is it to set the max spr param for such a high value?   
-- [ ] what are the time costs vs SPR?  
-
+![](img/efficiency.png)
 
 ![](img/scaling.png)
 
@@ -189,7 +182,7 @@ python workflow/check_job.py $(cat reports/trace.step2.txt | grep COMPL | grep A
 
 Collect SLURM job stats 
 ```bash
-cat reports/trace.step2.txt  |grep COMPLETED | cut -f 3 | grep -v native > job_ids
+cat reports/trace.step2.txt  |grep -E "COMPLETED|CACHED"| cut -f 3 | grep -v native > job_ids
 python workflow/check_job.v2.py -f job_ids > job_stats.tab
 ```
 This info can be used to monitor the efficiency of the memory and time requests.   
@@ -199,7 +192,7 @@ This info can be used to monitor the efficiency of the memory and time requests.
 
 ### GeneRax   
 
-
+`generax_stats.R`  
 Joint likelihood change as a fraction of the SPR radius:   
 It seems that most of the famies get their maximum increase after SPR=2. Thus, setting the SPR to 3 seems justified.     
 ![](img/generax.ll_radius.png)
@@ -215,15 +208,15 @@ Using maxspr = 3 will decrease the generax runtimes almost twice.
 
 # TODOs
 
-- [ ] __Gather annotations: if no generax annotation available, use the non-GeneRax'ed tree__  
+- [ ] HG phylogenetic profiles   
 - [ ] GeneRax: does sharing information across families improve the reconciliation?   
 - [ ] resource efficiency reports    
 - [ ] re-clustering - prevent diamond reruns during each re-clustering  
 - [ ] re-clustering - use MMSEQS2  
-- [ ] generax speedup - does increasing the number of cores make a difference?  
 - [ ] `phylo` environment with `Rscript` support  
 - [ ] __allow the phylogeny script to rerun the iqtree if it finds the outputs?__ 
 - [ ] __mafft oom errors (code 1 instesad of 137) - proper handling__ 
+- [x] Gather annotations: if no generax annotation available, use the non-GeneRax'ed tree - added PVM_PREV  
 - [x] generax: missing species in the tree - tree checks!  
 - [x] 2 execution profiles - fast and precise
 - [x] generax resource prediction   

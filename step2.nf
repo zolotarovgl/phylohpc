@@ -73,6 +73,10 @@ process ALN {
 
     publishDir "${params.OUTDIR}/align", mode: 'copy'
 
+    errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
+    maxRetries 10
+    maxErrors -1
+
     input:
     tuple val(id), path(fasta)
 
@@ -115,7 +119,7 @@ process PHY {
     }
 
     errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
-    maxRetries 2
+    maxRetries 10
     maxErrors -1
 
     input:
