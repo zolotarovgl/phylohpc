@@ -49,10 +49,8 @@ def test_load_og_csv_skips_comments(tmp_path):
 # ── gene_tree_to_dict ─────────────────────────────────────────────────────────
 
 def test_gene_tree_to_dict_leaf():
-    try:
-        from ete3 import Tree
-    except ImportError:
-        pytest.skip("ete3 not installed")
+    pytest.importorskip("ete3")
+    from ete3 import Tree
     t = Tree("(Mmus_g1:0.1);")
     d = r2.gene_tree_to_dict(t.get_leaves()[0])
     assert d["leaf"] is True
@@ -60,34 +58,23 @@ def test_gene_tree_to_dict_leaf():
     assert d["species"] == "Mmus"
 
 def test_gene_tree_to_dict_internal_og():
-    try:
-        from ete3 import Tree
-    except ImportError:
-        pytest.skip("ete3 not installed")
+    pytest.importorskip("ete3")
+    from ete3 import Tree
     t = Tree("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);")
     d = r2.gene_tree_to_dict(t)
-    # root has one child (the OG node wrapping two leaves)
-    assert "children" in d
     og_node = d["children"][0]
     assert og_node["name"] == "OG_0001"
     assert len(og_node["children"]) == 2
-    leaves = og_node["children"]
-    assert all(c["leaf"] for c in leaves)
-    species = {c["species"] for c in leaves}
-    assert species == {"Mmus", "Hsap"}
+    assert all(c["leaf"] for c in og_node["children"])
+    assert {c["species"] for c in og_node["children"]} == {"Mmus", "Hsap"}
 
 
 # ── load_possvm_trees ─────────────────────────────────────────────────────────
 
 def test_load_possvm_trees_basic(tmp_path):
-    try:
-        from ete3 import Tree
-    except ImportError:
-        pytest.skip("ete3 not installed")
-
+    pytest.importorskip("ete3")
     nwk = tmp_path / "Pref.TF.HG00001.treefile.ortholog_groups.newick"
     nwk.write_text("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2,Nvec_g2:0.3);\n")
-
     csv = tmp_path / "Pref.TF.HG00001.treefile.ortholog_groups.csv"
     csv.write_text("Mmus_g1\tOG_0001\tOG_0001\t-\nHsap_g1\tOG_0001\tOG_0001\t-\n")
 
@@ -98,7 +85,11 @@ def test_load_possvm_trees_basic(tmp_path):
     assert rec["family"] == "TF"
     assert rec["n_leaves"] == 3
     assert sorted(rec["species"]) == ["Hsap", "Mmus", "Nvec"]
-    assert "OG_0001" in rec["ogs"]
+    assert rec["n_ogs"] == 1
+    assert "OG_0001" in rec["og_names"]
+    # Heavy fields present
+    assert "tree_dict" in rec
+    assert "ogs" in rec
     assert sorted(all_species) == ["Hsap", "Mmus", "Nvec"]
 
 def test_load_possvm_trees_empty_dir(tmp_path):
@@ -109,25 +100,75 @@ def test_load_possvm_trees_empty_dir(tmp_path):
 
 # ── HTML generation ───────────────────────────────────────────────────────────
 
-def test_html_output(tmp_path):
-    try:
-        from ete3 import Tree
-    except ImportError:
-        pytest.skip("ete3 not installed")
-
-    nwk = tmp_path / "Pre.FAM.HG00001.treefile.ortholog_groups.newick"
+def test_html_output_structure(tmp_path):
+    """TREE_INDEX (not TREES) and per-HG lazy script tags must be present."""
+    pytest.importorskip("ete3")
+    nwk = tmp_path / "Pre.TF.HG00001.treefile.ortholog_groups.newick"
     nwk.write_text("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);")
 
     out = tmp_path / "report.html"
     r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
-
     html = out.read_text()
+
     assert "Gene Tree Explorer" in html
+    # New lazy-loading structure
+    assert "TREE_INDEX" in html
+    assert "TREES" not in html or "TREE_INDEX" in html  # TREE_INDEX must be there
+    assert 'id="treedata-' in html
+    # Leaf names appear only in lazy tag, not in index
     assert "Mmus_g1" in html
     assert "OG_0001" in html
-    # Valid JSON embedded
-    start = html.index("const TREES")
-    chunk = html[start: start + 2000]
+
+    # TREE_INDEX is valid JSON
+    start = html.index("const TREE_INDEX")
+    chunk = html[start: start + 3000]
     json_start = chunk.index("[")
-    # should not raise
-    json.loads(chunk[json_start: chunk.index(";", json_start)])
+    parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
+    assert len(parsed) == 1
+    assert parsed[0]["hg"] == "HG00001"
+    assert "tree_dict" not in parsed[0]   # heavy data must NOT be in the index
+    assert "ogs" not in parsed[0]
+
+
+def test_html_family_grouping(tmp_path):
+    """Two HGs from different families both appear in TREE_INDEX."""
+    pytest.importorskip("ete3")
+    (tmp_path / "Pre.TF.HG00001.treefile.ortholog_groups.newick").write_text(
+        "((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);"
+    )
+    (tmp_path / "Pre.RBP.HG00002.treefile.ortholog_groups.newick").write_text(
+        "((Mmus_g2:0.1,Hsap_g2:0.1)OG_0002:0.2);"
+    )
+
+    out = tmp_path / "report.html"
+    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    html = out.read_text()
+
+    start = html.index("const TREE_INDEX")
+    chunk = html[start: start + 5000]
+    json_start = chunk.index("[")
+    parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
+
+    families = {r["family"] for r in parsed}
+    assert families == {"TF", "RBP"}
+
+
+def test_lazy_script_tags(tmp_path):
+    """Each HG must have exactly one treedata- script tag in the HTML."""
+    pytest.importorskip("ete3")
+    for hg, fam in [("HG00001", "TF"), ("HG00002", "RBP")]:
+        (tmp_path / f"Pre.{fam}.{hg}.treefile.ortholog_groups.newick").write_text(
+            "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
+        )
+
+    out = tmp_path / "report.html"
+    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    html = out.read_text()
+
+    assert html.count('id="treedata-') == 2
+    # Content of each tag should be valid JSON with "tree" and "ogs" keys
+    import re
+    for m in re.finditer(r'<script type="application/json" id="treedata-[^"]+">([^<]+)</script>', html):
+        detail = json.loads(m.group(1))
+        assert "tree" in detail
+        assert "ogs" in detail
