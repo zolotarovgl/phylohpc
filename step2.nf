@@ -237,7 +237,11 @@ process REPORT {
     script:
     """
     python ${projectDir}/workflow/report_step2.py \
-        --possvm_dir ${params.OUTDIR}/possvm \
+        --possvm_dir  ${params.OUTDIR}/possvm \
+        --search_dir  ${params.OUTDIR}/search \
+        --cluster_dir ${params.OUTDIR}/clusters \
+        --family_info ${projectDir}/data/gene_families_searchinfo.csv \
+        --species_tree ${projectDir}/data/species_tree.full.newick \
         --output report_step2.html
     """
 }

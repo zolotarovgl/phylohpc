@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 import pytest
 from pathlib import Path
@@ -87,7 +88,6 @@ def test_load_possvm_trees_basic(tmp_path):
     assert sorted(rec["species"]) == ["Hsap", "Mmus", "Nvec"]
     assert rec["n_ogs"] == 1
     assert "OG_0001" in rec["og_names"]
-    # Heavy fields present
     assert "tree_dict" in rec
     assert "ogs" in rec
     assert sorted(all_species) == ["Hsap", "Mmus", "Nvec"]
@@ -98,10 +98,68 @@ def test_load_possvm_trees_empty_dir(tmp_path):
     assert species == []
 
 
+# ── Heatmap data loaders ─────────────────────────────────────────────────────
+
+def test_load_family_info(tmp_path):
+    csv = tmp_path / "info.csv"
+    csv.write_text("MyFam\tc1\tc2\tc3\tc4\tc5\tMyClass\n")
+    info = r2.load_family_info(str(csv))
+    assert info == {"MyFam": "MyClass"}
+
+def test_build_family_records(tmp_path):
+    gl = tmp_path / "Pre.Wnt.genes.list"
+    gl.write_text("Mmus_g1\nHsap_g2\nMmus_g3\n")
+    recs = r2.build_family_records(tmp_path, {"Wnt": "sig"})
+    assert len(recs) == 1
+    assert recs[0]["family"] == "Wnt"
+    assert recs[0]["class"] == "sig"
+    assert recs[0]["total"] == 3
+    assert recs[0]["species_counts"]["Mmus"] == 2
+
+def test_build_hg_records(tmp_path):
+    fa = tmp_path / "Pre.Wnt.HG001.fasta"
+    fa.write_text(">Mmus_g1\nACGT\n>Hsap_g2\nACGT\n")
+    recs = r2.build_hg_records(tmp_path, {"Wnt": "sig"})
+    assert len(recs) == 1
+    assert recs[0]["hg"] == "HG001"
+    assert recs[0]["total"] == 2
+
+def test_build_family_records_missing_dir(tmp_path):
+    recs = r2.build_family_records(tmp_path / "nope", {})
+    assert recs == []
+
+
+# ── Clade groupings ──────────────────────────────────────────────────────────
+
+def test_parse_clade_groupings():
+    pytest.importorskip("ete3")
+    # Create a minimal species tree with named internal nodes
+    from pathlib import Path
+    import tempfile
+    nwk = "((A:1,B:1)Clade1:1,(C:1,D:1,E:1)Clade2:1)Root;"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".nwk", delete=False) as f:
+        f.write(nwk)
+        f.flush()
+        groups = r2.parse_clade_groupings(Path(f.name))
+    os.unlink(f.name)
+    # Root has 2 named children: Clade1 and Clade2, with 5 species total
+    assert len(groups) >= 1
+    root_entry = [g for g in groups if g["name"] == "Root"]
+    assert len(root_entry) == 1
+    rg = root_entry[0]["groups"]
+    assert rg["A"] == "Clade1"
+    assert rg["B"] == "Clade1"
+    assert rg["C"] == "Clade2"
+
+def test_parse_clade_groupings_no_file():
+    groups = r2.parse_clade_groupings(Path("/nonexistent.nwk"))
+    assert groups == []
+
+
 # ── HTML generation ───────────────────────────────────────────────────────────
 
 def test_html_output_structure(tmp_path):
-    """TREE_INDEX (not TREES) and per-HG lazy script tags must be present."""
+    """TREE_INDEX and per-HG lazy script tags must be present."""
     pytest.importorskip("ete3")
     nwk = tmp_path / "Pre.TF.HG00001.treefile.ortholog_groups.newick"
     nwk.write_text("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);")
@@ -110,12 +168,9 @@ def test_html_output_structure(tmp_path):
     r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
     html = out.read_text()
 
-    assert "Gene Tree Explorer" in html
-    # New lazy-loading structure
+    assert "Step 2 Report" in html
     assert "TREE_INDEX" in html
-    assert "TREES" not in html or "TREE_INDEX" in html  # TREE_INDEX must be there
     assert 'id="treedata-' in html
-    # Leaf names appear only in lazy tag, not in index
     assert "Mmus_g1" in html
     assert "OG_0001" in html
 
@@ -126,7 +181,7 @@ def test_html_output_structure(tmp_path):
     parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
     assert len(parsed) == 1
     assert parsed[0]["hg"] == "HG00001"
-    assert "tree_dict" not in parsed[0]   # heavy data must NOT be in the index
+    assert "tree_dict" not in parsed[0]
     assert "ogs" not in parsed[0]
 
 
@@ -148,13 +203,12 @@ def test_html_family_grouping(tmp_path):
     chunk = html[start: start + 5000]
     json_start = chunk.index("[")
     parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
-
     families = {r["family"] for r in parsed}
     assert families == {"TF", "RBP"}
 
 
 def test_lazy_script_tags(tmp_path):
-    """Each HG must have exactly one treedata- script tag in the HTML."""
+    """Each HG must have exactly one treedata- script tag."""
     pytest.importorskip("ete3")
     for hg, fam in [("HG00001", "TF"), ("HG00002", "RBP")]:
         (tmp_path / f"Pre.{fam}.{hg}.treefile.ortholog_groups.newick").write_text(
@@ -166,9 +220,64 @@ def test_lazy_script_tags(tmp_path):
     html = out.read_text()
 
     assert html.count('id="treedata-') == 2
-    # Content of each tag should be valid JSON with "tree" and "ogs" keys
-    import re
-    for m in re.finditer(r'<script type="application/json" id="treedata-[^"]+">([^<]+)</script>', html):
+    for m in re.finditer(
+        r'<script type="application/json" id="treedata-[^"]+">([^<]+)</script>', html
+    ):
         detail = json.loads(m.group(1))
         assert "tree" in detail
         assert "ogs" in detail
+
+
+def test_heatmap_data_in_html(tmp_path):
+    """FAMILY_DATA and HG_DATA are present when search/cluster dirs provided."""
+    pytest.importorskip("ete3")
+    # Create search data
+    search = tmp_path / "search"
+    search.mkdir()
+    (search / "Pre.Wnt.genes.list").write_text("Mmus_g1\nHsap_g2\n")
+    # Create cluster data
+    cluster = tmp_path / "clusters"
+    cluster.mkdir()
+    (cluster / "Pre.Wnt.HG001.fasta").write_text(">Mmus_g1\nACGT\n>Hsap_g2\nACGT\n")
+    # Create possvm data
+    possvm = tmp_path / "possvm"
+    possvm.mkdir()
+    (possvm / "Pre.Wnt.HG001.treefile.ortholog_groups.newick").write_text(
+        "((Mmus_g1:0.1,Hsap_g2:0.1)OG_X:0.2);"
+    )
+
+    out = tmp_path / "report.html"
+    r2.main([
+        "--possvm_dir", str(possvm),
+        "--search_dir", str(search),
+        "--cluster_dir", str(cluster),
+        "--output", str(out),
+    ])
+    html = out.read_text()
+
+    assert "FAMILY_DATA" in html
+    assert "HG_DATA" in html
+    # Parse FAMILY_DATA
+    start = html.index("const FAMILY_DATA")
+    chunk = html[start: start + 3000]
+    json_start = chunk.index("[")
+    fam = json.loads(chunk[json_start: chunk.index(";", json_start)])
+    assert len(fam) == 1
+    assert fam[0]["family"] == "Wnt"
+
+
+def test_clade_data_empty_when_no_tree(tmp_path):
+    """CLADE_DATA is [] when --species_tree not given."""
+    pytest.importorskip("ete3")
+    nwk = tmp_path / "Pre.TF.HG00001.treefile.ortholog_groups.newick"
+    nwk.write_text("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);")
+
+    out = tmp_path / "report.html"
+    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    html = out.read_text()
+
+    start = html.index("const CLADE_DATA")
+    chunk = html[start: start + 200]
+    json_start = chunk.index("[")
+    parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
+    assert parsed == []
