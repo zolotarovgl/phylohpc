@@ -281,3 +281,66 @@ def test_clade_data_empty_when_no_tree(tmp_path):
     json_start = chunk.index("[")
     parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
     assert parsed == []
+
+
+# ── prev-tree (GeneRax toggle) ─────────────────────────────────────────────────
+
+def test_prev_tree_in_lazy_data(tmp_path):
+    """When --possvm_prev_dir given, lazy data includes prev_tree/prev_ogs."""
+    pytest.importorskip("ete3")
+    possvm = tmp_path / "possvm"; possvm.mkdir()
+    prev   = tmp_path / "prev";   prev.mkdir()
+    # Same HG in both dirs
+    for d in [possvm, prev]:
+        (d / "Pre.TF.HG001.treefile.ortholog_groups.newick").write_text(
+            "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
+        )
+    out = tmp_path / "report.html"
+    r2.main(["--possvm_dir", str(possvm), "--possvm_prev_dir", str(prev),
+             "--output", str(out)])
+    html = out.read_text()
+
+    # Parse the single treedata- script tag
+    m = re.search(r'<script type="application/json" id="treedata-[^"]+">([^<]+)</script>', html)
+    assert m, "No treedata- script tag found"
+    detail = json.loads(m.group(1))
+    assert "prev_tree" in detail
+    assert "prev_ogs" in detail
+
+
+def test_has_prev_in_index(tmp_path):
+    """TREE_INDEX records have has_prev=True when prev dir has matching HG."""
+    pytest.importorskip("ete3")
+    possvm = tmp_path / "possvm"; possvm.mkdir()
+    prev   = tmp_path / "prev";   prev.mkdir()
+    for d in [possvm, prev]:
+        (d / "Pre.TF.HG001.treefile.ortholog_groups.newick").write_text(
+            "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
+        )
+    out = tmp_path / "report.html"
+    r2.main(["--possvm_dir", str(possvm), "--possvm_prev_dir", str(prev),
+             "--output", str(out)])
+    html = out.read_text()
+
+    start = html.index("const TREE_INDEX")
+    chunk = html[start: start + 3000]
+    json_start = chunk.index("[")
+    parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
+    assert parsed[0]["has_prev"] is True
+
+
+def test_has_prev_false_without_prev_dir(tmp_path):
+    """TREE_INDEX records have has_prev=False when --possvm_prev_dir not given."""
+    pytest.importorskip("ete3")
+    (tmp_path / "Pre.TF.HG001.treefile.ortholog_groups.newick").write_text(
+        "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
+    )
+    out = tmp_path / "report.html"
+    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    html = out.read_text()
+
+    start = html.index("const TREE_INDEX")
+    chunk = html[start: start + 3000]
+    json_start = chunk.index("[")
+    parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
+    assert parsed[0]["has_prev"] is False

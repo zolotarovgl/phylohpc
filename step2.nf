@@ -237,11 +237,12 @@ process REPORT {
     script:
     """
     python ${projectDir}/workflow/report_step2.py \
-        --possvm_dir  ${params.OUTDIR}/possvm \
-        --search_dir  ${params.OUTDIR}/search \
-        --cluster_dir ${params.OUTDIR}/clusters \
-        --family_info ${projectDir}/data/gene_families_searchinfo.csv \
-        --species_tree ${projectDir}/data/species_tree.full.newick \
+        --possvm_dir      ${params.OUTDIR}/possvm \
+        --possvm_prev_dir ${params.OUTDIR}/possvm_prev \
+        --search_dir      ${params.OUTDIR}/search \
+        --cluster_dir     ${params.OUTDIR}/clusters \
+        --family_info     ${projectDir}/data/gene_families_searchinfo.csv \
+        --species_tree    ${projectDir}/data/species_tree.full.newick \
         --output report_step2.html
     """
 }
@@ -384,7 +385,7 @@ workflow {
     if (params.run_generax) {
 
         // ---------- PVM on original trees ----------
-        phy_out
+        pvm_prev_out = phy_out
             .map { id, tree, aln -> tuple(id, tree, aln) }
             .combine(refnames_ch)
             | PVM_PREV
@@ -408,6 +409,12 @@ workflow {
             .combine(refnames_ch)
             | PVM
 
+        // ---------- Report (wait for both PVM and PVM_PREV) ----------
+        pvm_out.map { id, tree, nwk, csv, pairs -> nwk }
+            .mix(pvm_prev_out.map { id, tree, nwk, csv, pairs -> nwk })
+            .collect()
+            | REPORT
+
     }
     else {
 
@@ -417,11 +424,11 @@ workflow {
             }
             .combine(refnames_ch)
             | PVM
-    }
 
-    // ---------- Report (runs after all PVM jobs complete) ----------
-    pvm_out
-        .map { id, tree, nwk, csv, pairs -> nwk }
-        .collect()
-        | REPORT
+        // ---------- Report ----------
+        pvm_out
+            .map { id, tree, nwk, csv, pairs -> nwk }
+            .collect()
+            | REPORT
+    }
 }

@@ -420,6 +420,7 @@ html,body{height:100%;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Ari
         <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
         <button class="ctrl-btn" onclick="collapseToOGs()">Collapse to OGs</button>
         <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
+        <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
         <span id="tree-title"></span>
         <span id="n-ogs-label"></span>
         <span style="flex:1"></span>
@@ -514,7 +515,7 @@ function showTip(event, d) {
       const sp = d.data.species || "?";
       html += '<div class="tt-row"><span>Species</span><strong style="color:'+spColor(sp)+'">'+sp+'</strong></div>';
       if (currentDetail) {
-        for (const [og,genes] of Object.entries(currentDetail.ogs)) {
+        for (const [og,genes] of Object.entries(activeOgs())) {
           if (genes.includes(d.data.name)) {
             html += '<div class="tt-row"><span>OG</span><strong>'+og+'</strong></div>'; break;
           }
@@ -524,8 +525,8 @@ function showTip(event, d) {
       const nL = d._children ? countDescLeaves(d._children) : d.leaves().length;
       html += '<div class="tt-row"><span>Subtree leaves</span><strong>'+nL+'</strong></div>';
       html += '<div class="tt-row" style="color:#888"><span>'+(d._children?"collapsed":"expanded")+'</span><span>click to '+(d._children?"expand":"collapse")+'</span></div>';
-      if (isOGNode(d) && currentDetail && currentDetail.ogs[d.data.name])
-        html += '<div class="tt-row"><span>OG members</span><strong>'+currentDetail.ogs[d.data.name].length+'</strong></div>';
+      if (isOGNode(d) && currentDetail && activeOgs()[d.data.name])
+        html += '<div class="tt-row"><span>OG members</span><strong>'+activeOgs()[d.data.name].length+'</strong></div>';
     }
   }
   tooltipEl.innerHTML = html;
@@ -669,6 +670,7 @@ function hmBack(){ hmViewMode="family"; hmActiveFamily=null; drawHeatmap(); }
 // ═══════════════════════════════════════════════════════════════════════════════
 let currentIndex  = null;
 let currentDetail = null;
+let treeSource    = "generax";   // "generax" | "original"
 
 document.getElementById("tree-count").textContent =
   TREE_INDEX.length+" gene tree"+(TREE_INDEX.length!==1?"s":"");
@@ -832,6 +834,16 @@ function selectTree(rec){
   colorMode="species"; cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={};
   document.getElementById("color-by").value="species";
 
+  // reset tree source toggle
+  treeSource="generax";
+  const toggle=document.getElementById("tree-toggle");
+  if(currentDetail.prev_tree){
+    toggle.style.display="inline";
+    toggle.textContent="Showing: GeneRax";
+  } else {
+    toggle.style.display="none";
+  }
+
   renderSidebar(document.getElementById("hg-search").value);
   buildLegend(rec.species);
   populateColorBy();
@@ -839,6 +851,25 @@ function selectTree(rec){
   document.getElementById("tree-title").textContent=rec.id+" \u00b7 "+rec.n_leaves+" genes";
   document.getElementById("n-ogs-label").textContent=rec.n_ogs+" orthogroups";
   drawGeneTree(currentDetail.tree);
+}
+
+function toggleTreeSource(){
+  if(!currentDetail||!currentDetail.prev_tree) return;
+  const toggle=document.getElementById("tree-toggle");
+  if(treeSource==="generax"){
+    treeSource="original";
+    toggle.textContent="Showing: Original (bootstrap)";
+    drawGeneTree(currentDetail.prev_tree);
+  } else {
+    treeSource="generax";
+    toggle.textContent="Showing: GeneRax";
+    drawGeneTree(currentDetail.tree);
+  }
+}
+
+function activeOgs(){
+  return (treeSource==="original"&&currentDetail&&currentDetail.prev_ogs)
+    ? currentDetail.prev_ogs : (currentDetail?currentDetail.ogs:{});
 }
 
 const treeSvg = d3.select("#tree-svg");
@@ -1003,6 +1034,9 @@ def parse_args(argv=None):
         description="Generate interactive HTML report for step2 outputs.")
     p.add_argument("--possvm_dir", default="results/possvm",
                    help="Directory with POSSVM *.ortholog_groups.newick files")
+    p.add_argument("--possvm_prev_dir", default=None,
+                   help="Directory with POSSVM results on original IQ-TREE2 trees (pre-GeneRax); "
+                        "enables toggle between GeneRax and original trees in the report")
     p.add_argument("--search_dir", default="results/search",
                    help="Directory with *.genes.list files (for heatmap)")
     p.add_argument("--cluster_dir", default="results/clusters",
@@ -1038,6 +1072,17 @@ def main(argv=None):
         print(f"WARN: {possvm_dir} does not exist – no gene trees.", file=sys.stderr)
     records, all_species = load_possvm_trees(possvm_dir) if possvm_dir.exists() else ([], [])
     print(f"Loaded {len(records)} gene trees, {len(all_species)} species.", file=sys.stderr)
+
+    # Prev trees (IQ-TREE2 original, pre-GeneRax) — optional
+    prev_records: dict = {}
+    if args.possvm_prev_dir:
+        prev_dir = Path(args.possvm_prev_dir)
+        if prev_dir.is_dir():
+            prev_list, prev_sp = load_possvm_trees(prev_dir)
+            prev_records = {r["id"]: r for r in prev_list}
+            all_species = sorted(set(all_species) | set(prev_sp))
+            print(f"Loaded {len(prev_records)} prev gene trees (original IQ-TREE2).",
+                  file=sys.stderr)
     print(f"Loaded {len(family_records)} families, {len(hg_records)} HGs for heatmap.",
           file=sys.stderr)
 
@@ -1048,15 +1093,20 @@ def main(argv=None):
         print(f"Extracted {len(clade_groupings)} clade groupings.", file=sys.stderr)
 
     # Build lightweight index (no tree/ogs dicts)
-    index_records = [
-        {k: v for k, v in rec.items() if k not in ("tree_dict", "ogs")}
-        for rec in records
-    ]
+    index_records = []
+    for rec in records:
+        idx = {k: v for k, v in rec.items() if k not in ("tree_dict", "ogs")}
+        idx["has_prev"] = rec["id"] in prev_records
+        index_records.append(idx)
 
     # Build per-HG lazy <script> tags
     lazy_parts = []
     for rec in records:
         detail = {"tree": rec["tree_dict"], "ogs": rec["ogs"]}
+        prev = prev_records.get(rec["id"])
+        if prev:
+            detail["prev_tree"] = prev["tree_dict"]
+            detail["prev_ogs"]  = prev["ogs"]
         tag_id = _html.escape(rec["id"], quote=True)
         lazy_parts.append(
             f'<script type="application/json" id="treedata-{tag_id}">'
