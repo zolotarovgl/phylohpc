@@ -4,14 +4,20 @@ open = function(x){system(sprintf('open %s',x))}
 .trace_time_convert=function(x){
   sapply(x,function(z){
     z=gsub(" ","",z)
-    m=regmatches(z,regexec("^(?:(\\d+(?:\\.\\d+)?)m)?(?:(\\d+(?:\\.\\d+)?)s)?$",z))[[1]]
+    m=regmatches(
+      z,
+      regexec("^(?:(\\d+(?:\\.\\d+)?)m)?(?:(\\d+(?:\\.\\d+)?)s)?(?:(\\d+(?:\\.\\d+)?)ms)?$",z)
+    )[[1]]
+    
     if(length(m)==0) return(NA_real_)
+    
     mins=ifelse(m[2]=="",0,as.numeric(m[2]))
     secs=ifelse(m[3]=="",0,as.numeric(m[3]))
+    # milliseconds captured but ignored (treated as 0)
+    
     mins*60+secs
   })
 }
-
 .trace_mem_convert <- function(x) {
   sapply(x, function(z) {
     z <- gsub(" ", "", z)

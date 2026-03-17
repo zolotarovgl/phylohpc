@@ -21,8 +21,9 @@ After running `step2.nf` you have, for each Homology Group, a set of ortholog gr
 
 ```bash
 mamba activate phylo
-
+TREE=data/species_tree.full.newick
 nextflow run step4.ancestry.nf \
+	--SPECIES_TREE $TREE \
     -profile local,precise \
     --node_names Bilateria \
     --ids ids.txt
@@ -31,9 +32,11 @@ nextflow run step4.ancestry.nf \
 For multiple clades in one run:
 
 ```bash
+TREE=data/species_tree.full.newick
 nextflow run step4.ancestry.nf \
+	--SPECIES_TREE $TREE \
     -profile slurm,precise \
-    --node_names "Bilateria,Metazoa,Deuterostomia,Vertebrata" \
+    --node_names "Bilateria,Protostomia,Deuterostomia,Vertebrata" \
     --ids ids.txt
 ```
 

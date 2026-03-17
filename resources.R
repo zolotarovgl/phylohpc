@@ -9,8 +9,6 @@ f = list.files('results/clusters',full = TRUE,pattern = 'fasta')
 names(f) = gsub('.fasta','',basename(f))
 #count_seq = function(x){as.integer(system(sprintf('grep -c ">" %s',x),intern = TRUE))}
 f = f[intersect(ids,names(f))]
-
-
 n_seq = count_seq(f)
 library(Biostrings)
 # Median sequence length
@@ -18,27 +16,30 @@ mlen = sapply(f,FUN = function(x) median(width(readAAStringSet(x))))
 length(mlen)
 
 ##########################
-# Memory
+# Memory scaling 
+# Nextflow will only measure the resources on the COMPLETED processes
 ##########################
-source('helper.R')
 trace_fn = 'reports/trace.step2.txt'
 trace = read.table(trace_fn,sep = '\t',header = TRUE)
 trace$job_name = str_split(trace$name,' ',simplify = T)[,1]
 trace$hg_id = gsub('\\(|\\)','',str_split(trace$name,' ',simplify = T)[,2])
+
 #d = trace[trace$job_name == job_name,]
-d = trace
-d = d[d$status == 'COMPLETED',]
-dim(d)
-summary(.trace_time_convert(d$duration))
+# maybe those are the artefacts introduced by the file check rules that copy the snakemake behaviour 
+
+table(trace$status)
+d = d%>%filter(status %in% c('COMPLETED','CACHED'))%>%filter(peak_rss!='0')
 d$time = .trace_time_convert(d$realtime)
 d$mem = .trace_mem_convert(d$peak_rss)
+d = d[d$mem>0&d$time>0,]
 d$nseq = n_seq[d$hg_id]
 d$mlen = mlen[d$hg_id]
 d$Class = str_split(d$hg_id,'\\.',simplify = T)[,1]
 levs = c('ALN','PHY','GR_watcher','PVM')
-pal = setNames(brewer.pal(length(levs),'Spectral'),levs)
 d$job_name = factor(d$job_name,levels = levs)
-
+d$job_name = droplevels(d$job_name)
+levs = levels(d$job_name)
+pal = setNames(brewer.pal(length(levs),'Spectral'),levs)
 res_fn = 'resources.tsv'
 res = read.table(res_fn,header = TRUE)
 library(RColorBrewer)
@@ -57,8 +58,6 @@ colnames(r)[colnames(r) == 'mem'] = 'mem_res'
 colnames(r)[colnames(r) == 'time'] = 'time_res'
 d$id = gsub("\\(|\\)","",str_split(d$name,' ',simplify = T)[,2])
 d = left_join(d,r,by = c("job_name","id"))
-
-
 d$nseq = n_seq[d$id]
 # resources contain the predictions 
 d$time_pred = .nf_convert_time(d$time_res)
@@ -67,15 +66,14 @@ d$mem_pred = .nf_convert_mem(d$mem_res)
 library(ggplot2)
 library(cowplot)
 theme_set(theme_cowplot())
-pl1=ggplot(d,aes(x = nseq,y = time/60))+
+pl1=ggplot(d,aes(x = nseq,y = (time+1)/60))+
 geom_point(aes(col = job_name),size = 0.5)+
 scale_x_log10()+
 scale_y_log10()+
 xlab('# nseq')+
 ylab('Time, min')+
 scale_color_manual(values = pal,breaks = names(pal))
-
-pl2=ggplot(d[d$mem>=100,],aes(x = nseq,y = mem))+
+pl2=ggplot(d[d$mem>=100,],aes(x = nseq,y = mem+1))+
 geom_point(aes(col = job_name),size = 0.5)+
 scale_x_log10()+
 scale_y_log10()+
@@ -86,28 +84,33 @@ library(patchwork)
 pl = pl1+pl2
 plotname = 'downstream/scaling.pdf'
 ggsave(plotname,width = 10,height = 5)
+
 open(plotname)
 plotname = gsub(".pdf",".png",plotname)
 ggsave(plotname,width = 10,height = 4,bg = 'white')
 open(plotname)
 
 options(max.print = 30)
-
+theme_set(theme_cowplot())
 # Prediction efficiency - compare the resources data frame  
 pl1 = ggplot(d[,],aes(x = job_name,y = time/time_pred))+
-geom_jitter(aes(col = job_name))+
+geom_jitter(aes(col = job_name),size = .5)+
 ylab('Time efficiency')+
 scale_color_manual(values = pal,breaks = names(pal))+
-geom_hline(yintercept = 1)
-
-
+geom_hline(yintercept = 1,linetype = 'dashed')+
+xlab("")+
+theme(axis.text.x = element_blank())
 pl2 = ggplot(d[,],aes(x = job_name,y = mem/mem_pred))+
-geom_jitter(aes(col = job_name))+
+geom_jitter(aes(col = job_name),size = .5)+
 ylab('Memory efficiency')+
 scale_color_manual(values = pal,breaks = names(pal))+
-geom_hline(yintercept = 1)
-pl1+pl2
-
+geom_hline(yintercept = 1,linetype = 'dashed')+
+xlab("")+
+theme(axis.text.x = element_blank())
+pl = pl1+pl2
+plotname = 'img/efficiency.png'
+ggsave(plotname,pl,width = 10,height = 4,bg = 'white')
+open(plotname)
 # Generax vs Phylogeny time 
 library(reshape2)
 u = dcast(d,hg_id + Class + nseq + mlen~ job_name,value.var = 'time')
@@ -125,8 +128,8 @@ ggplot(u, aes(x = PHY, y = GR)) +
   ylab('GeneRax runtime, min')+
   xlab('IQTREE2 runtime, min')
 u%>%arrange(-log2(GR/PHY))
-
-
+dim(u)
+# it is quite clear that GeneRax takes a shorter time than the phylogenies 
 
 #########################################
 # SLURM job stats - memory efficiency etc 

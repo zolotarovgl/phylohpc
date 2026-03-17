@@ -102,9 +102,11 @@ def parse_marginal_file(prob_path: Path) -> pd.Series:
     return df[col1].rename(index=str)
 
 
+from typing import Optional
+
 def get_root_prob(
     probs: pd.Series,
-    root_name: str | None,
+    root_name: Optional[str],
     internal_nodes: set,
     leaf_names: set,
     og: str,
