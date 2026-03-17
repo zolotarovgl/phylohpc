@@ -218,6 +218,31 @@ process PVM_PREV {
 }
 
 // -----------------------------
+// Step-2 HTML report
+// -----------------------------
+process REPORT {
+
+    publishDir "${params.OUTDIR}", mode: 'copy'
+
+    cpus   1
+    memory 2.GB
+    time   30.min
+
+    input:
+    path(newicks)   // collected PVM newick outputs — used as a completion barrier
+
+    output:
+    path("report_step2.html")
+
+    script:
+    """
+    python ${projectDir}/workflow/report_step2.py \
+        --possvm_dir ${params.OUTDIR}/possvm \
+        --output report_step2.html
+    """
+}
+
+// -----------------------------
 // GeneRax process
 // -----------------------------
 process GR_watcher {
@@ -372,21 +397,27 @@ workflow {
 
 
         // ---------- PVM on GeneRax trees ----------
-        gr_out
+        pvm_out = gr_out
             .map { id, generax_tree, log, progress, aln ->
                 tuple(id, generax_tree, aln)
             }
             .combine(refnames_ch)
             | PVM
 
-    } 
+    }
     else {
 
-        phy_out
+        pvm_out = phy_out
             .map { id, tree, aln ->
                 tuple(id, tree, aln)
             }
             .combine(refnames_ch)
             | PVM
     }
+
+    // ---------- Report (runs after all PVM jobs complete) ----------
+    pvm_out
+        .map { id, tree, nwk, csv, pairs -> nwk }
+        .collect()
+        | REPORT
 }
