@@ -31,7 +31,6 @@ params.REFSPECIES      = "Mmus"
 params.REFNAMES        = "${projectDir}/data/Mmus_gene_names.csv"
 params.gene_trees_dir  = "${params.OUTDIR}/gene_trees"
 params.min_presence    = 2
-params.n_restarts      = 5   // ML optimisation restarts for ASR
 
 
 if (!params.node_names) {
@@ -174,8 +173,7 @@ process ANCESTRAL_RECON {
         --tree       ${pruned_tree} \
         --output     ${node}.ancestral_states.tsv \
         --node_probs ${node}.node_probs.tsv \
-        --node       ${node} \
-        --n_restarts ${params.n_restarts}
+        --node       ${node}
     """
 }
 

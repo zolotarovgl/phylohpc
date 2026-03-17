@@ -1,245 +1,35 @@
 #!/usr/bin/env python3
 """
-Ancestral state reconstruction for binary (presence/absence) orthogroup data
-using the Mk model (continuous-time Markov chain on a binary character).
+Ancestral state reconstruction using PastML (MPPA + F81 model).
 
-The model:
-  States : 0 = absent,  1 = present
-  Rate matrix:
-        Q = [[-q01,  q01],
-             [ q10, -q10]]
-  where q01 = gain rate and q10 = loss rate.
+PastML implements the MPPA (Marginal Posterior Probabilities Approximation)
+method, which computes P(state | all tip data) at every internal node using
+a Bayesian integration over the model parameters.  The F81 model allows
+asymmetric gain/loss rates via estimated stationary frequencies, making it
+equivalent to a two-rate binary Mk model.
 
-Both rates are estimated jointly by maximum likelihood using the Felsenstein
-pruning algorithm, then marginal ancestral probabilities P(state=1) are
-computed at every internal node via the two-pass (pruning + peeling) algorithm.
+Reference:
+    Ishikawa SA et al. (2019) A fast likelihood method to reconstruct and
+    visualize ancestral scenarios. Mol Biol Evol 36(9):2069–2085.
+    doi:10.1093/molbev/msz131
 
-Outputs:
-  --output      : per-OG summary (root / LCA probability, rate estimates)
-  --node_probs  : per-OG × per-internal-node probability table
+Input:
+    --pam        Binary presence/absence matrix TSV (rows=species, cols=OGs)
+    --tree       Pruned species tree (newick, with named internal nodes)
 
-Usage example:
-  python ancestral_reconstruction.py \\
-      --pam  Bilateria.pam.tsv \\
-      --tree Bilateria.pruned.tree \\
-      --output      Bilateria.ancestral_states.tsv \\
-      --node_probs  Bilateria.node_probs.tsv \\
-      --node        Bilateria
+Output:
+    --output     Per-OG summary: P(present at root/LCA), support label (TSV)
+    --node_probs Per-OG × per-internal-node marginal probabilities (TSV)
 """
 
 import argparse
+import subprocess
 import sys
-import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
 from ete3 import Tree
-
-warnings.filterwarnings("ignore")
-
-# ── Mk model: transition probability matrix ───────────────────────────────────
-
-def mk_transition(q01: float, q10: float, t: float) -> np.ndarray:
-    """
-    Return 2×2 transition probability matrix P(t) = exp(Q*t) for the
-    two-rate binary Mk model.
-
-    P[s_from, s_to]
-    """
-    r = q01 + q10
-    if r < 1e-15 or t < 1e-15:
-        return np.eye(2)
-
-    e   = np.exp(-r * t)
-    p01 = q01 / r * (1.0 - e)   # P(0 → 1)
-    p10 = q10 / r * (1.0 - e)   # P(1 → 0)
-
-    return np.array([[1.0 - p01, p01],
-                     [p10,       1.0 - p10]])
-
-
-# ── Felsenstein pruning (bottom-up conditional likelihoods) ───────────────────
-
-def felsenstein_pruning(
-    tree: Tree,
-    tip_states: dict[str, int],
-    q01: float,
-    q10: float,
-) -> dict[int, np.ndarray]:
-    """
-    Compute conditional likelihood vectors L[node] = [P(data | state=0),
-    P(data | state=1)] for every node using the postorder (Felsenstein)
-    pruning algorithm.
-
-    tip_states : {leaf_name: 0 or 1}   (missing leaves → ambiguous)
-    Returns    : {id(node): array([L0, L1])}
-    """
-    condL: dict[int, np.ndarray] = {}
-
-    for node in tree.traverse("postorder"):
-        nid = id(node)
-
-        if node.is_leaf():
-            state = tip_states.get(node.name, -1)
-            if state == 0:
-                condL[nid] = np.array([1.0, 0.0])
-            elif state == 1:
-                condL[nid] = np.array([0.0, 1.0])
-            else:
-                condL[nid] = np.array([1.0, 1.0])   # ambiguous / missing
-        else:
-            L = np.ones(2)
-            for child in node.children:
-                t        = max(child.dist, 1e-6)
-                P        = mk_transition(q01, q10, t)   # shape (2,2)
-                child_L  = condL[id(child)]
-                # P[s_parent, s_child] summed over s_child
-                L       *= P @ child_L
-            condL[nid] = L
-
-    return condL
-
-
-# ── Negative log-likelihood ───────────────────────────────────────────────────
-
-def neg_log_likelihood(
-    log_params: np.ndarray,
-    tree: Tree,
-    tip_states: dict[str, int],
-) -> float:
-    q01, q10 = np.exp(log_params)
-    condL    = felsenstein_pruning(tree, tip_states, q01, q10)
-
-    r = q01 + q10
-    pi = np.array([q10 / r, q01 / r]) if r > 1e-15 else np.array([0.5, 0.5])
-
-    root_L = condL[id(tree)]
-    lnL    = np.log(max(np.dot(pi, root_L), 1e-300))
-    return -lnL
-
-
-# ── ML optimisation ───────────────────────────────────────────────────────────
-
-def fit_mk_model(
-    tree: Tree,
-    tip_states: dict[str, int],
-    n_restarts: int = 5,
-) -> tuple[float, float, float]:
-    """
-    Estimate q01 and q10 by maximum likelihood.
-
-    Returns (q01, q10, lnL).
-    """
-    rng = np.random.default_rng(42)
-
-    # Starting points: one near typical values + random restarts
-    starts = [np.log([0.1, 0.1])] + [
-        rng.uniform(-4.0, 1.0, size=2) for _ in range(n_restarts - 1)
-    ]
-
-    best_nll = np.inf
-    best_res = None
-
-    for p0 in starts:
-        try:
-            res = minimize(
-                neg_log_likelihood,
-                p0,
-                args=(tree, tip_states),
-                method="Nelder-Mead",
-                options={"maxiter": 10_000, "xatol": 1e-7, "fatol": 1e-7},
-            )
-            if res.fun < best_nll:
-                best_nll = res.fun
-                best_res = res
-        except Exception:
-            pass
-
-    if best_res is None:
-        return 0.1, 0.1, float("nan")
-
-    q01, q10 = np.exp(best_res.x)
-    return float(q01), float(q10), float(-best_nll)
-
-
-# ── Marginal ancestral reconstruction (two-pass) ─────────────────────────────
-
-def marginal_ancestral_states(
-    tree: Tree,
-    tip_states: dict[str, int],
-    q01: float,
-    q10: float,
-) -> dict[str, float]:
-    """
-    Compute marginal P(state=1) at each internal node using the
-    two-pass (pruning + peeling) algorithm.
-
-    Returns {node_label: P(present)}.
-    Node labels are the node's .name attribute or a synthetic
-    'node_<postorder_index>' for unnamed nodes.
-    """
-    condL = felsenstein_pruning(tree, tip_states, q01, q10)
-
-    r  = q01 + q10
-    pi = np.array([q10 / r, q01 / r]) if r > 1e-15 else np.array([0.5, 0.5])
-
-    # margL[node] ≈ joint P(data, state) — not fully normalised but
-    # proportional within each node.
-    margL: dict[int, np.ndarray] = {}
-
-    for node in tree.traverse("preorder"):
-        nid = id(node)
-
-        if node.is_root():
-            margL[nid] = pi * condL[nid]
-        else:
-            parent   = node.up
-            pid      = id(parent)
-            t        = max(node.dist, 1e-6)
-            P        = mk_transition(q01, q10, t)
-
-            # Partial parent marginal: parent's margL divided by this child's
-            # contribution to avoid double-counting.
-            child_contrib = P @ condL[nid]   # shape (2,)
-            parent_partial = np.where(
-                child_contrib > 1e-300,
-                margL[pid] / child_contrib,
-                margL[pid],
-            )
-
-            # node_margL[s_child] ∝ condL[child][s_child]
-            #                        × Σ_{s_parent} P[s_parent,s_child] × parent_partial[s_parent]
-            node_margL = condL[nid] * (P.T @ parent_partial)
-            margL[nid] = node_margL
-
-    # Collect P(present) for each internal node
-    result: dict[str, float] = {}
-    counter = 0
-
-    for node in tree.traverse("postorder"):
-        if node.is_leaf():
-            continue
-        nid   = id(node)
-        total = margL[nid].sum()
-
-        if total > 1e-300:
-            p1 = float(margL[nid][1] / total)
-        else:
-            p1 = float("nan")
-
-        # Assign a stable label
-        if node.name:
-            label = node.name
-        elif node.is_root():
-            label = "root"
-        else:
-            label = f"node_{counter}"
-        counter += 1
-
-        result[label] = p1
-
-    return result
 
 
 # ── Support classification ────────────────────────────────────────────────────
@@ -256,140 +46,188 @@ def classify_support(p: float) -> str:
     return "absent"
 
 
+# ── Tree helpers ──────────────────────────────────────────────────────────────
+
+def get_tree_info(tree_path: str) -> tuple:
+    """Return (root_name, internal_node_names_set, leaf_names_set)."""
+    t = Tree(tree_path, format=1)
+    root_name = t.name if t.name else None
+    internal  = {n.name for n in t.traverse() if not n.is_leaf() and n.name}
+    leaves    = set(t.get_leaf_names())
+    return root_name, internal, leaves
+
+
+# ── PastML runner ─────────────────────────────────────────────────────────────
+
+def run_pastml(tree_path: str, data_path: str, work_dir: Path) -> None:
+    """Run PastML MPPA+F81.  Raises RuntimeError on non-zero exit."""
+    cmd = [
+        "pastml",
+        "--tree",              tree_path,
+        "--data",              str(data_path),
+        "--model",             "F81",
+        "--prediction_method", "MPPA",
+        "--work_dir",          str(work_dir),
+    ]
+    print(f"Running PastML: {' '.join(cmd)}", file=sys.stderr)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"PastML exited with code {result.returncode}.\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+
+# ── Output parser ─────────────────────────────────────────────────────────────
+
+def parse_marginal_file(prob_path: Path) -> pd.Series:
+    """
+    Parse a PastML marginal_probabilities.{column}.tab file.
+
+    The file has rows = nodes, columns = state labels ('0', '1').
+    Returns a float Series indexed by node name with P(state='1') values.
+    """
+    try:
+        df = pd.read_csv(prob_path, sep="\t", index_col=0)
+    except Exception as exc:
+        print(f"  WARNING: Cannot parse {prob_path}: {exc}", file=sys.stderr)
+        return pd.Series(dtype=float)
+
+    # Locate the column for state "1" (present)
+    col1 = next((c for c in df.columns if str(c).strip() == "1"), None)
+    if col1 is None:
+        print(f"  WARNING: State '1' column not found in {prob_path}", file=sys.stderr)
+        return pd.Series(dtype=float)
+
+    return df[col1].rename(index=str)
+
+
+def get_root_prob(
+    probs: pd.Series,
+    root_name: str | None,
+    internal_nodes: set,
+    leaf_names: set,
+    og: str,
+) -> float:
+    """
+    Extract P(present) at the root from a marginal probability Series.
+    Falls back to searching for non-leaf nodes when root_name is absent.
+    """
+    if probs.empty:
+        return float("nan")
+
+    # Preferred: direct name lookup
+    if root_name and root_name in probs.index:
+        return float(probs[root_name])
+
+    # Fallback: any internal-node entry not in the leaf set
+    candidates = [n for n in probs.index if n not in leaf_names]
+    if not candidates:
+        print(f"  WARNING: No internal nodes found in PastML output for {og}", file=sys.stderr)
+        return float("nan")
+
+    if len(candidates) > 1:
+        print(
+            f"  WARNING: Root node '{root_name}' not found for {og}; "
+            f"multiple candidates: {candidates[:4]}. "
+            "Name the root in the pruned tree for unambiguous results.",
+            file=sys.stderr,
+        )
+
+    # Return the first candidate (order in PastML output is typically top-down)
+    return float(probs[candidates[0]])
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Mk-model ancestral state reconstruction for binary OG presence/absence data."
+        description="Ancestral state reconstruction using PastML (MPPA + F81)."
     )
     parser.add_argument("--pam",        required=True, help="PAM TSV (rows=species, cols=OGs)")
     parser.add_argument("--tree",       required=True, help="Pruned species tree (newick)")
-    parser.add_argument("--output",     required=True, help="Per-OG ancestral states at root (TSV)")
-    parser.add_argument("--node_probs", required=True, help="Per-OG × per-node probabilities (TSV)")
-    parser.add_argument("--node",       default="root", help="Clade name used for labelling")
-    parser.add_argument(
-        "--n_restarts", type=int, default=5,
-        help="Number of ML optimisation restarts (default: 5)"
-    )
+    parser.add_argument("--output",     required=True, help="Per-OG ancestral states TSV")
+    parser.add_argument("--node_probs", required=True, help="Per-OG × per-node probabilities TSV")
+    parser.add_argument("--node",       default="root", help="Clade name for labelling")
     args = parser.parse_args()
 
-    # ── Load data ─────────────────────────────────────────────────────────────
+    # ── Load PAM ──────────────────────────────────────────────────────────────
     pam = pd.read_csv(args.pam, sep="\t", index_col=0)
     print(f"PAM: {pam.shape[0]} species × {pam.shape[1]} OGs", file=sys.stderr)
 
+    empty_cols = ["og", "n_present", "n_total", "P_at_root", "support"]
+
     if pam.empty or pam.shape[1] == 0:
-        print("WARNING: Empty PAM — nothing to reconstruct.", file=sys.stderr)
-        pd.DataFrame(
-            columns=["og", "n_present", "n_total", "q01", "q10", "lnL", "P_at_root", "support"]
-        ).to_csv(args.output, sep="\t", index=False)
-        pd.DataFrame(
-            columns=["og", "node", "P_present"]
-        ).to_csv(args.node_probs, sep="\t", index=False)
+        pd.DataFrame(columns=empty_cols).to_csv(args.output, sep="\t", index=False)
+        pd.DataFrame(columns=["og", "node", "P_present"]).to_csv(
+            args.node_probs, sep="\t", index=False
+        )
         return
 
-    tree = Tree(args.tree, format=1)
+    root_name, internal_nodes, leaf_names = get_tree_info(args.tree)
+    print(
+        f"Tree root: '{root_name}' | internal nodes: {len(internal_nodes)} "
+        f"| leaves: {len(leaf_names)}",
+        file=sys.stderr,
+    )
 
-    # Ensure non-zero branch lengths
-    for node in tree.traverse():
-        if node.dist == 0.0 and not node.is_root():
-            node.dist = 1.0
+    # ── Prepare PastML input ──────────────────────────────────────────────────
+    # Rename OG columns to safe aliases (og0, og1, …) to avoid issues with
+    # dots/special characters in OG names being mangled in output filenames.
+    og_list   = pam.columns.tolist()
+    col_alias = {og: f"og{i}" for i, og in enumerate(og_list)}
+    alias_og  = {v: k for k, v in col_alias.items()}
 
-    tree_species = set(tree.get_leaf_names())
-    pam_species  = set(pam.index)
+    work_dir  = Path("pastml_work")
+    work_dir.mkdir(exist_ok=True)
 
-    missing_in_pam  = tree_species - pam_species
-    missing_in_tree = pam_species  - tree_species
+    pastml_data = pam.rename(columns=col_alias).astype(str)
+    pastml_data.index.name = "node"
+    data_path = work_dir / "input.tsv"
+    pastml_data.to_csv(data_path, sep="\t")
 
-    if missing_in_pam:
-        print(
-            f"  {len(missing_in_pam)} species in tree but absent from PAM "
-            "(treated as ambiguous): " + ", ".join(sorted(missing_in_pam)[:6]),
-            file=sys.stderr,
-        )
-    if missing_in_tree:
-        print(
-            f"  {len(missing_in_tree)} species in PAM but absent from tree "
-            "(ignored): " + ", ".join(sorted(missing_in_tree)[:6]),
-            file=sys.stderr,
-        )
+    # ── Run PastML ────────────────────────────────────────────────────────────
+    try:
+        run_pastml(args.tree, str(data_path), work_dir)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
 
-    # ── Process each OG ───────────────────────────────────────────────────────
-    og_list       = pam.columns.tolist()
-    results       = []
-    node_rows     = []
+    # ── Parse outputs ─────────────────────────────────────────────────────────
+    results   = []
+    node_rows = []
 
-    for idx, og in enumerate(og_list, start=1):
-        if idx % 100 == 0 or idx == 1:
-            print(f"  OG {idx}/{len(og_list)}: {og}", file=sys.stderr)
+    for alias, og in alias_og.items():
+        n_present = int(pam[og].sum())
+        n_total   = int(pam[og].notna().sum())
 
-        # Build tip_states
-        tip_states: dict[str, int] = {}
-        for sps in pam.index:
-            if sps in tree_species:
-                tip_states[sps] = int(pam.loc[sps, og])
+        prob_path = work_dir / f"marginal_probabilities.{alias}.tab"
+        probs     = parse_marginal_file(prob_path) if prob_path.exists() else pd.Series(dtype=float)
 
-        n_present = sum(v == 1 for v in tip_states.values())
-        n_total   = len(tip_states)
+        p_root = get_root_prob(probs, root_name, internal_nodes, leaf_names, og)
 
-        # ── Shortcut: trivial cases ───────────────────────────────────────────
-        if n_present == 0:
-            results.append(dict(
-                og=og, n_present=0, n_total=n_total,
-                q01=float("nan"), q10=float("nan"), lnL=float("nan"),
-                P_at_root=0.0, support="absent",
-            ))
-            continue
+        results.append(dict(
+            og=og,
+            n_present=n_present,
+            n_total=n_total,
+            P_at_root=round(p_root, 4) if not np.isnan(p_root) else float("nan"),
+            support=classify_support(p_root),
+        ))
 
-        if n_present == n_total:
-            results.append(dict(
-                og=og, n_present=n_present, n_total=n_total,
-                q01=float("nan"), q10=float("nan"), lnL=float("nan"),
-                P_at_root=1.0, support="present",
-            ))
-            continue
+        # Store internal-node probabilities only (skip leaf rows)
+        for node_id, p1 in probs.items():
+            if node_id not in leaf_names:
+                node_rows.append(dict(og=og, node=node_id, P_present=round(float(p1), 4)))
 
-        # ── ML fit ────────────────────────────────────────────────────────────
-        try:
-            q01, q10, lnL = fit_mk_model(tree, tip_states, n_restarts=args.n_restarts)
+    # ── Write outputs ─────────────────────────────────────────────────────────
+    pd.DataFrame(results).to_csv(args.output, sep="\t", index=False)
+    pd.DataFrame(node_rows).to_csv(args.node_probs, sep="\t", index=False)
 
-            node_p1 = marginal_ancestral_states(tree, tip_states, q01, q10)
-
-            # Root probability: first entry in dict is the root (preorder)
-            root_key = next(iter(node_p1))
-            p_root   = node_p1[root_key]
-
-            results.append(dict(
-                og=og,
-                n_present=n_present,
-                n_total=n_total,
-                q01=round(q01, 6),
-                q10=round(q10, 6),
-                lnL=round(lnL, 4),
-                P_at_root=round(p_root, 4),
-                support=classify_support(p_root),
-            ))
-
-            for node_label, p1 in node_p1.items():
-                node_rows.append(dict(og=og, node=node_label, P_present=round(p1, 4)))
-
-        except Exception as exc:
-            print(f"  WARNING: OG {og} failed — {exc}", file=sys.stderr)
-            results.append(dict(
-                og=og, n_present=n_present, n_total=n_total,
-                q01=float("nan"), q10=float("nan"), lnL=float("nan"),
-                P_at_root=float("nan"), support="failed",
-            ))
-
-    # ── Write outputs ──────────────────────────────────────────────────────────
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(args.output, sep="\t", index=False)
     print(f"Written: {args.output}", file=sys.stderr)
-
-    node_df = pd.DataFrame(node_rows)
-    node_df.to_csv(args.node_probs, sep="\t", index=False)
     print(f"Written: {args.node_probs}", file=sys.stderr)
 
-    # ── Summary ───────────────────────────────────────────────────────────────
+    # Summary
+    results_df = pd.DataFrame(results)
     if not results_df.empty:
         counts = results_df["support"].value_counts()
         print("\nSupport summary:", file=sys.stderr)

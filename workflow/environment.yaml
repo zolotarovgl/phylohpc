@@ -157,6 +157,7 @@ dependencies:
   - toml=0.10.2=pyhd8ed1ab_1
   - tomli=2.2.1=pyhd8ed1ab_1
   - tqdm=4.67.1=pyhd8ed1ab_1
+  - pastml
   - pytest
   - pytest-cov
   - tree=2.2.1=hb9d3cd8_0
