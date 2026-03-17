@@ -312,7 +312,7 @@ function showTip(event, d) {
       html += '<div class="tt-row"><span>Species</span><strong style="color:'+spColor(sp)+'">'+sp+'</strong></div>';
       if (currentDetail) {
         for (const [og,genes] of Object.entries(activeOgs())) {
-          if (genes.includes(d.data.name)) {
+          if (genes.includes(d.data.gene_id||d.data.name)) {
             html += '<div class="tt-row"><span>OG</span><strong>'+og+'</strong></div>'; break;
           }
         }
@@ -409,7 +409,9 @@ function drawHeatmap() {
     data=HG_DATA.filter(d=>d.family===hmActiveFamily).filter(d=>prefix==="all"||d.pref===prefix).sort((a,b)=>b.total-a.total);
   }
 
-  const cW=18, cH=12, ROW_LABEL_W=110;
+  const cW=18, cH=12;
+  const maxNameLen=speciesOrder.reduce((m,s)=>Math.max(m,s.length),0);
+  const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
   const svgW=data.length*cW+ROW_LABEL_W+20, svgH=speciesOrder.length*14+TOP_MARGIN+40;
   const panel=document.getElementById("heatmap-panel");
   const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
@@ -674,6 +676,16 @@ let rootNode=null, gMain=null, _uid=0;
 
 function isOGNode(d){ return !d.data.leaf && d.data.name && d.data.name!==""; }
 
+/** Return the MRCA node for a list of d3-hierarchy leaf nodes. */
+function findMRCA(leaves){
+  if(!leaves.length) return null;
+  if(leaves.length===1) return leaves[0].parent||leaves[0];
+  const pathsToRoot=leaves.map(l=>{const p=[];let n=l;while(n){p.push(n);n=n.parent;}return p;});
+  const sets=pathsToRoot.map(p=>new Set(p));
+  for(const anc of pathsToRoot[0]){if(sets.every(s=>s.has(anc)))return anc;}
+  return null;
+}
+
 function countDescLeaves(children){
   if(!children)return 0; let n=0;
   for(const c of children){
@@ -685,7 +697,8 @@ function countDescLeaves(children){
 
 function collapsedLabel(d){
   const n=countDescLeaves(d._children);
-  if(d.data.name) return d.data.name+"\u00a0["+n+"]";
+  const lbl=d.data.name||d.data._og_label||"";
+  if(lbl) return lbl+"\u00a0["+n+"]";
   // derive label from leaf species composition
   const sc={};
   (function cnt(ch){ if(!ch)return; for(const c of ch){
@@ -786,10 +799,26 @@ function collapseToOGs(){
   if(!rootNode)return;
   // pass 1: expand all
   rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
-  // pass 2: collapse each OG node
+  // pass 2a: collapse named OG internal nodes (POSSVM trees with annotated internals)
+  let found=false;
   rootNode.each(d=>{
-    if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;}
+    if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;found=true;}
   });
+  // pass 2b: fallback – derive OGs from pipe-separated tip names (gene_id|og|ref)
+  if(!found){
+    const ogGroups={};
+    rootNode.leaves().forEach(l=>{
+      const og=l.data.og;
+      if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);
+    });
+    for(const [og,leaves] of Object.entries(ogGroups)){
+      const mrca=findMRCA(leaves);
+      if(mrca&&!mrca.data.leaf&&mrca.children){
+        mrca.data._og_label=og;
+        mrca._children=mrca.children; mrca.children=null;
+      }
+    }
+  }
   renderTree();
 }
 function collapseAll(){

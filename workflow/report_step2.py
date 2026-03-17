@@ -31,10 +31,17 @@ from pathlib import Path
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def get_species_prefix(gene_id: str) -> str:
-    """Return species prefix from a gene ID such as 'Mmus_ENSG123' → 'Mmus'."""
+    """Return species prefix from a gene ID such as 'Mmus_ENSG123' → 'Mmus'.
+
+    Also strips pipe-separated annotations (e.g. 'Mmus_ENSG123 | OG001 | ref')
+    before extracting the prefix.
+    """
+    # Strip pipe-separated tip annotations produced by POSSVM
+    gene_id = gene_id.split("|")[0].strip()
     for sep in ("_", "."):
-        if sep in gene_id:
-            return gene_id.split(sep)[0]
+        idx = gene_id.find(sep)
+        if idx > 0:  # require a non-empty prefix
+            return gene_id[:idx]
     return gene_id
 
 
@@ -161,12 +168,23 @@ def _sp_tree_to_dict(node) -> dict:
 # ── Gene-tree / POSSVM loaders ───────────────────────────────────────────────
 
 def gene_tree_to_dict(node) -> dict:
-    """Recursively convert an ete3 node to a JSON-serialisable dict."""
+    """Recursively convert an ete3 node to a JSON-serialisable dict.
+
+    Supports pipe-separated POSSVM tip annotations of the form:
+        gene_id | orthogroup_name | reference_ortholog
+    The full name is kept for display; gene_id and og are stored separately so
+    that JavaScript can perform OG-based collapsing and tooltip lookups.
+    """
     name = node.name or ""
     d: dict = {"name": name, "dist": round(float(node.dist), 6)}
     if node.is_leaf():
         d["leaf"] = True
-        d["species"] = get_species_prefix(name) if name else ""
+        parts = [p.strip() for p in name.split("|")]
+        gene_id = parts[0]
+        d["gene_id"] = gene_id
+        d["species"] = get_species_prefix(gene_id) if gene_id else ""
+        if len(parts) >= 2 and parts[1]:
+            d["og"] = parts[1]
     else:
         d["children"] = [gene_tree_to_dict(c) for c in node.children]
     return d
@@ -541,7 +559,7 @@ function showTip(event, d) {
       html += '<div class="tt-row"><span>Species</span><strong style="color:'+spColor(sp)+'">'+sp+'</strong></div>';
       if (currentDetail) {
         for (const [og,genes] of Object.entries(activeOgs())) {
-          if (genes.includes(d.data.name)) {
+          if (genes.includes(d.data.gene_id||d.data.name)) {
             html += '<div class="tt-row"><span>OG</span><strong>'+og+'</strong></div>'; break;
           }
         }
@@ -638,7 +656,9 @@ function drawHeatmap() {
     data=HG_DATA.filter(d=>d.family===hmActiveFamily).filter(d=>prefix==="all"||d.pref===prefix).sort((a,b)=>b.total-a.total);
   }
 
-  const cW=18, cH=12, ROW_LABEL_W=110;
+  const cW=18, cH=12;
+  const maxNameLen=speciesOrder.reduce((m,s)=>Math.max(m,s.length),0);
+  const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
   const svgW=data.length*cW+ROW_LABEL_W+20, svgH=speciesOrder.length*14+TOP_MARGIN+40;
   const panel=document.getElementById("heatmap-panel");
   const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
@@ -903,6 +923,16 @@ let rootNode=null, gMain=null, _uid=0;
 
 function isOGNode(d){ return !d.data.leaf && d.data.name && d.data.name!==""; }
 
+/** Return the MRCA node for a list of d3-hierarchy leaf nodes. */
+function findMRCA(leaves){
+  if(!leaves.length) return null;
+  if(leaves.length===1) return leaves[0].parent||leaves[0];
+  const pathsToRoot=leaves.map(l=>{const p=[];let n=l;while(n){p.push(n);n=n.parent;}return p;});
+  const sets=pathsToRoot.map(p=>new Set(p));
+  for(const anc of pathsToRoot[0]){if(sets.every(s=>s.has(anc)))return anc;}
+  return null;
+}
+
 function countDescLeaves(children){
   if(!children)return 0; let n=0;
   for(const c of children){
@@ -914,7 +944,8 @@ function countDescLeaves(children){
 
 function collapsedLabel(d){
   const n=countDescLeaves(d._children);
-  if(d.data.name) return d.data.name+"\u00a0["+n+"]";
+  const lbl=d.data.name||d.data._og_label||"";
+  if(lbl) return lbl+"\u00a0["+n+"]";
   // derive label from leaf species composition
   const sc={};
   (function cnt(ch){ if(!ch)return; for(const c of ch){
@@ -1015,10 +1046,26 @@ function collapseToOGs(){
   if(!rootNode)return;
   // pass 1: expand all
   rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
-  // pass 2: collapse each OG node
+  // pass 2a: collapse named OG internal nodes (POSSVM trees with annotated internals)
+  let found=false;
   rootNode.each(d=>{
-    if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;}
+    if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;found=true;}
   });
+  // pass 2b: fallback – derive OGs from pipe-separated tip names (gene_id|og|ref)
+  if(!found){
+    const ogGroups={};
+    rootNode.leaves().forEach(l=>{
+      const og=l.data.og;
+      if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);
+    });
+    for(const [og,leaves] of Object.entries(ogGroups)){
+      const mrca=findMRCA(leaves);
+      if(mrca&&!mrca.data.leaf&&mrca.children){
+        mrca.data._og_label=og;
+        mrca._children=mrca.children; mrca.children=null;
+      }
+    }
+  }
   renderTree();
 }
 function collapseAll(){
