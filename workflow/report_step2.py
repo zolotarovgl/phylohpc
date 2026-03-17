@@ -312,6 +312,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:12px;background:#f7f7f7;color:#333}
+body{display:flex;flex-direction:column}
 
 /* ── shared header bar ── */
 .top-bar{padding:8px 14px;background:#2c3e50;color:#ecf0f1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:42px}
@@ -321,17 +322,26 @@ html,body{height:100%;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Ari
 .top-bar select{font-size:11px;padding:2px 5px;border:1px solid #7f8c8d;border-radius:3px;background:#34495e;color:#ecf0f1}
 .top-bar label{font-size:11px;color:#bdc3c7}
 
-/* ── Heatmap view ── */
-#view-heatmap{display:flex;flex-direction:column;height:100vh}
+/* ── Tab strip ── */
+#body-wrap{display:flex;flex:1;overflow:hidden}
+#tab-strip{width:36px;display:flex;flex-direction:column;background:#2c3e50;gap:2px;padding-top:4px;flex-shrink:0}
+.tab-btn{writing-mode:vertical-rl;transform:rotate(180deg);padding:10px 6px;cursor:pointer;background:transparent;border:none;border-left:3px solid transparent;color:#95a5a6;font-size:11px;font-weight:600;white-space:nowrap;text-align:center}
+.tab-btn.active{color:#ecf0f1;border-left-color:#1abc9c;background:#34495e}
+.tab-btn:hover:not(.active){color:#ecf0f1;background:#3d5166}
+.tab-pane{display:none;flex:1;overflow:hidden;flex-direction:column}
+.tab-pane.active{display:flex}
+
+/* ── Heatmap pane ── */
+#pane-heatmap{flex-direction:row}
 #hm-layout{display:flex;flex:1;overflow:hidden}
-#tree-panel{width:280px;overflow-y:auto;border-right:1px solid #ccc;background:#fff;flex-shrink:0}
+#tree-panel{width:200px;overflow-y:auto;border-right:1px solid #ccc;background:#fff;flex-shrink:0}
 #heatmap-panel{flex:1;overflow:auto;background:#fff}
 .hm-col{font-size:9px;cursor:pointer}
 .hm-col:hover{font-weight:700}
 .hm-cell:hover{stroke:#000;stroke-width:1px}
 
-/* ── Tree view ── */
-#view-tree{display:none;flex-direction:column;height:100vh}
+/* ── Tree pane ── */
+#pane-trees{flex-direction:column}
 #app{display:flex;flex:1;overflow:hidden}
 
 /* sidebar */
@@ -384,61 +394,70 @@ html,body{height:100%;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Ari
 </head>
 <body>
 
-<!-- ════════ Heatmap view ════════ -->
-<div id="view-heatmap">
-  <div class="top-bar">
-    <h2>Step 2 Report</h2>
-    <button class="btn" id="hm-back" style="display:none" onclick="hmBack()">&#8592; Back</button>
-    <span id="hm-breadcrumb" style="font-size:11px"></span>
-    <label style="margin-left:auto">Prefix:
-      <select id="prefixSelect"></select>
-    </label>
-  </div>
-  <div id="hm-layout">
-    <div id="tree-panel"></div>
-    <div id="heatmap-panel"></div>
-  </div>
+<!-- ════════ Single top bar ════════ -->
+<div class="top-bar">
+  <h2>Step 2 Report</h2>
+  <button class="btn" id="hm-back" style="display:none" onclick="hmBack()">&#8592; Back</button>
+  <span id="hm-breadcrumb" style="font-size:11px"></span>
+  <span id="tree-count" style="font-size:11px;color:#95a5a6;display:none"></span>
+  <label style="margin-left:auto">Prefix:
+    <select id="prefixSelect"></select>
+  </label>
 </div>
 
-<!-- ════════ Tree view ════════ -->
-<div id="view-tree">
-  <div class="top-bar" id="tr-header">
-    <button class="btn" onclick="backToHeatmap()">&#8592; Heatmap</button>
-    <h2>Gene Tree Explorer</h2>
-    <span id="tree-count" style="font-size:11px;color:#95a5a6"></span>
+<!-- ════════ Body: tab strip + panes ════════ -->
+<div id="body-wrap">
+
+  <!-- vertical tab strip -->
+  <div id="tab-strip">
+    <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">Heatmap</button>
+    <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">Gene Trees</button>
   </div>
-  <div id="app">
-    <div id="sidebar">
-      <div id="sidebar-top">
-        <input id="hg-search" type="text" placeholder="Search HG / family…">
-        <div id="hg-count"></div>
-      </div>
-      <div id="hg-list"></div>
-    </div>
-    <div id="main">
-      <div id="controls">
-        <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
-        <button class="ctrl-btn" onclick="collapseToOGs()">Collapse to OGs</button>
-        <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
-        <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
-        <span id="tree-title"></span>
-        <span id="n-ogs-label"></span>
-        <span style="flex:1"></span>
-        <label style="font-size:11px;color:#555">Color:
-          <select id="color-by" style="font-size:11px;padding:2px 4px;border:1px solid #bbb;border-radius:3px">
-            <option value="species">by species</option>
-          </select>
-        </label>
-        <input id="hl-search" list="hl-list" placeholder="Highlight species or clade…">
-        <datalist id="hl-list"></datalist>
-        <button id="hl-clear" onclick="clearHighlight()">&#10005;</button>
-      </div>
-      <div id="species-legend"></div>
-      <div id="tree-wrap">
-        <svg id="tree-svg"></svg>
-      </div>
+
+  <!-- ── Heatmap pane ── -->
+  <div class="tab-pane active" id="pane-heatmap">
+    <div id="hm-layout">
+      <div id="tree-panel"></div>
+      <div id="heatmap-panel"></div>
     </div>
   </div>
+
+  <!-- ── Gene tree pane ── -->
+  <div class="tab-pane" id="pane-trees">
+    <div id="app">
+      <div id="sidebar">
+        <div id="sidebar-top">
+          <input id="hg-search" type="text" placeholder="Search HG / family…">
+          <div id="hg-count"></div>
+        </div>
+        <div id="hg-list"></div>
+      </div>
+      <div id="main">
+        <div id="controls">
+          <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
+          <button class="ctrl-btn" onclick="collapseToOGs()">Collapse to OGs</button>
+          <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
+          <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
+          <span id="tree-title"></span>
+          <span id="n-ogs-label"></span>
+          <span style="flex:1"></span>
+          <label style="font-size:11px;color:#555">Color:
+            <select id="color-by" style="font-size:11px;padding:2px 4px;border:1px solid #bbb;border-radius:3px">
+              <option value="species">by species</option>
+            </select>
+          </label>
+          <input id="hl-search" list="hl-list" placeholder="Highlight species or clade…">
+          <datalist id="hl-list"></datalist>
+          <button id="hl-clear" onclick="clearHighlight()">&#10005;</button>
+        </div>
+        <div id="species-legend"></div>
+        <div id="tree-wrap">
+          <svg id="tree-svg"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div id="tooltip"></div>
@@ -490,15 +509,21 @@ function leafColor(sp) {
 let hmViewMode     = "family";
 let hmActiveFamily = null;
 
-function showHeatmapView() {
-  document.getElementById("view-heatmap").style.display = "flex";
-  document.getElementById("view-tree").style.display    = "none";
+function switchTab(name) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab===name));
+  document.querySelectorAll(".tab-pane").forEach(p => p.classList.toggle("active", p.id==="pane-"+name));
+  const tc = document.getElementById("tree-count");
+  const hb = document.getElementById("hm-back");
+  const cr = document.getElementById("hm-breadcrumb");
+  if (name==="trees") {
+    tc.style.display = "inline";
+    hb.style.display = "none"; cr.textContent = "";
+    if (!currentIndex && TREE_INDEX.length) { renderSidebar(""); selectTree(TREE_INDEX[0]); }
+  } else {
+    tc.style.display = "none";
+    drawCladogram(); drawHeatmap();
+  }
 }
-function showTreeViewPanel() {
-  document.getElementById("view-heatmap").style.display = "none";
-  document.getElementById("view-tree").style.display    = "flex";
-}
-function backToHeatmap() { showHeatmapView(); }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TOOLTIP (shared)
@@ -598,10 +623,6 @@ function drawCladogram() {
     });
   }
   drawB(tree);
-  speciesOrder.forEach(s=>{
-    svg.append("text").attr("x",W-5).attr("y",leafY[s]+4)
-      .attr("text-anchor","end").attr("font-size",11).text(s);
-  });
 }
 
 function drawHeatmap() {
@@ -617,8 +638,8 @@ function drawHeatmap() {
     data=HG_DATA.filter(d=>d.family===hmActiveFamily).filter(d=>prefix==="all"||d.pref===prefix).sort((a,b)=>b.total-a.total);
   }
 
-  const cW=18, cH=12;
-  const svgW=data.length*cW+80, svgH=speciesOrder.length*14+TOP_MARGIN+40;
+  const cW=18, cH=12, ROW_LABEL_W=110;
+  const svgW=data.length*cW+ROW_LABEL_W+20, svgH=speciesOrder.length*14+TOP_MARGIN+40;
   const panel=document.getElementById("heatmap-panel");
   const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
 
@@ -638,7 +659,7 @@ function drawHeatmap() {
       const count=rec.species_counts[sp]||0;
       const z=zMat[ci][ri];
       svg.append("rect").attr("class","hm-cell")
-        .attr("x",ci*cW+60).attr("y",ri*14+TOP_MARGIN).attr("width",cW-2).attr("height",cH)
+        .attr("x",ci*cW+ROW_LABEL_W).attr("y",ri*14+TOP_MARGIN).attr("width",cW-2).attr("height",cH)
         .attr("fill",color(z))
         .on("mouseover", ev=>{
           const label=hmViewMode==="family"?rec.family:rec.id;
@@ -648,16 +669,24 @@ function drawHeatmap() {
     });
   });
 
+  // row labels (species names)
+  speciesOrder.forEach((sp,ri)=>{
+    svg.append("text")
+      .attr("x",ROW_LABEL_W-4).attr("y",ri*14+TOP_MARGIN+9)
+      .attr("text-anchor","end").attr("font-size",11).attr("fill","#333")
+      .text(sp);
+  });
+
   // column headers
   svg.selectAll("text.hm-col").data(data).enter().append("text").attr("class","hm-col")
-    .attr("transform",(d,i)=>`translate(${i*cW+60},${TOP_MARGIN-10}) rotate(-65)`)
+    .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W},${TOP_MARGIN-10}) rotate(-65)`)
     .attr("font-size",9).style("cursor","pointer")
     .text(d=>hmViewMode==="family"?d.family:(d.hg||d.id))
     .on("click",(ev,d)=>{
       if(hmViewMode==="family"){ hmViewMode="hg"; hmActiveFamily=d.family; drawHeatmap(); }
       else {
         const treeRec=TREE_INDEX.find(r=>r.id===d.id);
-        if(treeRec){ showTreeViewPanel(); selectTree(treeRec); renderSidebar(""); }
+        if(treeRec){ switchTab("trees"); selectTree(treeRec); renderSidebar(""); }
         else { console.warn("No gene tree for",d.id); }
       }
     });
@@ -671,9 +700,6 @@ function hmBack(){ hmViewMode="family"; hmActiveFamily=null; drawHeatmap(); }
 let currentIndex  = null;
 let currentDetail = null;
 let treeSource    = "generax";   // "generax" | "original"
-
-document.getElementById("tree-count").textContent =
-  TREE_INDEX.length+" gene tree"+(TREE_INDEX.length!==1?"s":"");
 
 function loadDetail(id) {
   const el=document.getElementById("treedata-"+id);
@@ -1007,17 +1033,22 @@ function collapseAll(){
 // ═══════════════════════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════════════════════
-if (hasHeatmapData) {
-  showHeatmapView();
-  drawCladogram();
-  drawHeatmap();
-} else if (TREE_INDEX.length > 0) {
-  // no heatmap data – jump straight to tree explorer
-  showTreeViewPanel();
-  renderSidebar("");
-  selectTree(TREE_INDEX[0]);
+// scroll sync between species-tree panel and heatmap panel
+(function(){
+  const tp=document.getElementById("tree-panel");
+  const hp=document.getElementById("heatmap-panel");
+  let syncing=false;
+  tp.addEventListener("scroll",()=>{ if(!syncing){syncing=true;hp.scrollTop=tp.scrollTop;syncing=false;} });
+  hp.addEventListener("scroll",()=>{ if(!syncing){syncing=true;tp.scrollTop=hp.scrollTop;syncing=false;} });
+})();
+
+document.getElementById("tree-count").textContent =
+  TREE_INDEX.length+" gene tree"+(TREE_INDEX.length!==1?"s":"");
+
+if (hasHeatmapData || TREE_INDEX.length > 0) {
+  switchTab(hasHeatmapData ? "heatmap" : "trees");
 } else {
-  document.getElementById("view-heatmap").innerHTML =
+  document.getElementById("pane-heatmap").innerHTML =
     '<div style="padding:40px;color:#999;text-align:center">No data found.<br>'+
     'Pass <code>--possvm_dir</code> and/or <code>--search_dir</code> / <code>--cluster_dir</code>.</div>';
 }
