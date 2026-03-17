@@ -27,3 +27,4 @@ genefam.csv
 workflow/__pycache__/
 pep2hg
 __pycache__
+demo/
