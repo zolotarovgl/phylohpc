@@ -111,15 +111,29 @@ process PHY {
 
     output:
     tuple val(id), path("${id}.treefile"), path(aln)
+    path("${id}.ckp.gz"), optional: true
 
     script:
 
-    def existing = file("${params.OUTDIR}/gene_trees/${id}.treefile")
+    def existing     = file("${params.OUTDIR}/gene_trees/${id}.treefile")
+    def existing_ckp = file("${params.OUTDIR}/gene_trees/${id}.ckp.gz")
 
     if (existing.exists()) {
         """
         echo "Using existing tree for ${id}"
         ln -sf ${existing} ${id}.treefile
+        """
+    }
+    else if (params.TREE_METHOD == "iqtree2" && existing_ckp.exists()) {
+        """
+        echo "Resuming IQ-TREE2 from checkpoint for ${id}"
+        cp ${existing_ckp} ${id}.ckp.gz
+        python ${projectDir}/phylogeny/main.py phylogeny \
+            -f ${aln} \
+            --outprefix ${id} \
+            -c ${task.cpus} \
+            --method ${params.TREE_METHOD} \
+            --iqtree2_model ${params.IQTREE2_MODEL}
         """
     }
     else {
