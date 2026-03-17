@@ -1,24 +1,8 @@
 nextflow.enable.dsl=2
-params.ids = "${projectDir}/ids.txt"
-params.config = "${projectDir}/configs/config.txt"
+params.ids           = "${projectDir}/ids.txt"
 params.resources_tsv = "${projectDir}/resources.tsv"
-params.run_generax = params.run_generax ?: false
-
-def cfg = [:]
-file(params.config).eachLine { line ->
-	line = line.trim()
-	if( line && !line.startsWith('#') && line.contains('=') ) {
-		def (k,v) = line.split('=',2)
-		cfg[k.trim()] = v.trim()
-	}
-}
-
-params.ALIGN_DIR = cfg.ALIGN_DIR
-params.TREE_DIR = cfg.TREE_DIR
-params.SPECIES_TREE = cfg.SPECIES_TREE
-params.REFSPECIES = cfg.REFSPECIES
-params.REFNAMES = cfg.REFNAMES
-params.OUTDIR = "${projectDir}/results"
+params.run_generax   = params.run_generax ?: false
+params.OUTDIR        = "${projectDir}/results"
 //params.MAFFT_OPT = "--maxiterate 1000 --localpair"
 
 
