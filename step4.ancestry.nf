@@ -142,12 +142,10 @@ process BUILD_PAM {
     """
 }
 
-// ── Process 4 — Mk-model ancestral state reconstruction ──────────────────────
+// ── Process 4 — Ancestral state reconstruction via PastML ────────────────────
 //
-// Fits a two-rate (q01 = gain, q10 = loss) continuous-time Markov model
-// by maximum likelihood for each OG column in the PAM, then computes the
-// marginal probability P(present) at every internal node of the pruned
-// species tree using the two-pass (Felsenstein pruning + peeling) algorithm.
+// Runs PastML (MPPA + F81) on the PAM to estimate marginal P(present) at
+// every internal node of the pruned species tree, including the LCA.
 
 process ANCESTRAL_RECON {
 
@@ -220,5 +218,44 @@ workflow {
         )
     // asr_input: tuple(node, pam.tsv, pruned.tree)
 
-    asr_input | ANCESTRAL_RECON
+    asr_out = asr_input | ANCESTRAL_RECON
+    // asr_out: tuple(node, ancestral_states.tsv, node_probs.tsv)
+
+    // Step 5: generate interactive HTML visualisation
+    viz_input = asr_out
+        .join( pam_out )
+        .join( clade_info.map { node, in_sp, ign_sp, pruned -> tuple(node, pruned) } )
+    // viz_input: tuple(node, ancestral_states.tsv, node_probs.tsv, pam.tsv, pruned.tree)
+
+    viz_input | VISUALIZE
+}
+
+// ── Process 5 — Interactive D3.js HTML visualisation ─────────────────────────
+
+process VISUALIZE {
+
+    tag "${node}"
+
+    publishDir "${params.OUTDIR}/ancestry/${node}", mode: 'copy'
+
+    input:
+    tuple val(node),
+          path(states),
+          path(node_probs),
+          path(pam),
+          path(pruned_tree)
+
+    output:
+    path("${node}.html")
+
+    script:
+    """
+    python ${projectDir}/workflow/visualize_ancestry.py \
+        --tree       ${pruned_tree} \
+        --node_probs ${node_probs} \
+        --states     ${states} \
+        --pam        ${pam} \
+        --output     ${node}.html \
+        --node       ${node}
+    """
 }
