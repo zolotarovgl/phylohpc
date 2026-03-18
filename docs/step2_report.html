@@ -280,8 +280,10 @@ function leafColor(sp) {
   if (hlSet !== null) return hlSet.has(sp) ? base : "#ccc";
   return base;
 }
-function ogLeafColor(geneId) {
-  return ogLeaf2Color[geneId] || "#ccc";
+function ogLeafColor(geneId, species) {
+  const base = ogLeaf2Color[geneId] || "#ccc";
+  if (hlSet !== null) return hlSet.has(species||"") ? base : "#ccc";
+  return base;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -906,7 +908,7 @@ function renderTree(animate){
     .attr("r",d=>d.data.leaf?4:isOGNode(d)?5.5:2.8)
     .attr("fill",d=>{
       if(d.data.leaf){
-        if(colorMode==="og") return ogLeafColor(d.data.gene_id||d.data.name);
+        if(colorMode==="og") return ogLeafColor(d.data.gene_id||d.data.name, d.data.species);
         const c=leafColor(d.data.species||"");
         return hlSet&&!hlSet.has(d.data.species||"")?"#e8e8e8":c;
       }
@@ -938,7 +940,7 @@ function renderTree(animate){
   nodeSel.select(".leaf-label")
     .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
     .attr("font-size",d=>d.data.leaf?Math.min(11,rowH-2):0)
-    .attr("fill",d=>colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name):leafColor(d.data.species||""))
+    .attr("fill",d=>colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||""))
     .attr("display",d=>d.data.leaf?null:"none")
     .text(d=>{
       if(!d.data.leaf) return "";
