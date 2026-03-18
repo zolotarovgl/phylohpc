@@ -691,11 +691,7 @@ function drawHeatmap() {
                 .sort((a,b)=>b.total-a.total);
     back.style.display="inline"; crumb.textContent=hmActiveClass;
     colLabel=d=>d.hg||d.id;
-    clickHandler=(_ev,d)=>{
-      hmViewMode="og"; hmActiveHG=d.id; drawHeatmap();
-      const treeRec=TREE_INDEX.find(r=>r.id===d.id);
-      if(treeRec){ switchTab("trees"); selectTree(treeRec); renderSidebar(""); }
-    };
+    clickHandler=(_ev,d)=>{ hmViewMode="og"; hmActiveHG=d.id; drawHeatmap(); };
 
   } else { // og
     const treeRec=TREE_INDEX.find(r=>r.id===hmActiveHG);
@@ -804,7 +800,7 @@ function renderSidebar(filter){
   const groups=groupByFamily(subset);
   let total=0;
   for(const [fam,recs] of Object.entries(groups).sort()){
-    const matching=lc?recs.filter(r=>r.hg.toLowerCase().includes(lc)||r.family.toLowerCase().includes(lc)):recs;
+    const matching=lc?recs.filter(r=>r.hg.toLowerCase().includes(lc)||r.family.toLowerCase().includes(lc)||(r.og_names||[]).some(o=>o.toLowerCase().includes(lc))):recs;
     if(!matching.length)continue;
     total+=matching.length;
     const forceOpen=lc.length>0;
@@ -849,10 +845,15 @@ function populateColorBy(){
 
 document.getElementById("color-by").addEventListener("change",function(){
   const v=this.value;
-  if(v==="species"){ colorMode="species"; cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; }
-  else if(v==="og"){
+  if(v==="species"){
+    colorMode="species"; cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={};
+    // expand so leaf colours are visible
+    if(rootNode) rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
+  } else if(v==="og"){
     colorMode="og"; cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={};
     rebuildOgColors();
+    // re-collapse to OG level
+    collapseToOGs(); return;
   } else {
     colorMode="clade"; ogLeaf2Color={}; ogName2Color={};
     const cd=CLADE_DATA[+v];
@@ -865,8 +866,10 @@ document.getElementById("color-by").addEventListener("change",function(){
       cladeSp2Color[sp]=cladeGrpColor[grp]||"#ccc";
       cladeSp2Group[sp]=grp;
     }
+    // expand so leaf colours are visible
+    if(rootNode) rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
   }
-  renderTree();
+  renderTree(true);
 });
 
 function populateDatalist(){
@@ -917,7 +920,6 @@ function selectTree(rec){
   hlSet=null; document.getElementById("hl-search").value="";
   cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   colorMode="og";
-  document.getElementById("color-by").value="og";
 
   // reset tree source toggle
   treeSource="generax";
@@ -931,6 +933,7 @@ function selectTree(rec){
 
   renderSidebar(document.getElementById("hg-search").value);
   populateColorBy();
+  document.getElementById("color-by").value="og"; // set after options are added
   populateDatalist();
   document.getElementById("tree-title").textContent=rec.id+" \u00b7 "+rec.n_leaves+" genes";
   document.getElementById("n-ogs-label").textContent=rec.n_ogs+" orthogroups";
