@@ -329,8 +329,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:12px;background:#f7f7f7;color:#333}
-body{display:flex;flex-direction:column}
+html{height:100%;height:-webkit-fill-available}
+body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:12px;background:#f7f7f7;color:#333;display:flex;flex-direction:column}
 
 /* ── shared header bar ── */
 .top-bar{padding:8px 14px;background:#2c3e50;color:#ecf0f1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:42px}
@@ -341,12 +341,12 @@ body{display:flex;flex-direction:column}
 .top-bar label{font-size:11px;color:#bdc3c7}
 
 /* ── Tab strip ── */
-#body-wrap{display:flex;flex:1;overflow:hidden}
+#body-wrap{display:flex;flex:1;overflow:hidden;min-height:0}
 #tab-strip{width:36px;display:flex;flex-direction:column;background:#2c3e50;gap:2px;padding-top:4px;flex-shrink:0}
 .tab-btn{writing-mode:vertical-rl;transform:rotate(180deg);padding:10px 6px;cursor:pointer;background:transparent;border:none;border-left:3px solid transparent;color:#95a5a6;font-size:11px;font-weight:600;white-space:nowrap;text-align:center}
 .tab-btn.active{color:#ecf0f1;border-left-color:#1abc9c;background:#34495e}
 .tab-btn:hover:not(.active){color:#ecf0f1;background:#3d5166}
-.tab-pane{display:none;flex:1;overflow:hidden;flex-direction:column}
+.tab-pane{display:none;flex:1;overflow:hidden;flex-direction:column;min-height:0}
 .tab-pane.active{display:flex}
 
 /* ── Heatmap pane ── */
