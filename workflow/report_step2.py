@@ -491,6 +491,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <input id="hl-search" list="hl-list" placeholder="Highlight species or clade…">
           <datalist id="hl-list"></datalist>
           <button id="hl-clear" onclick="clearHighlight()">&#10005;</button>
+          <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
         </div>
         <div id="tree-wrap">
           <svg id="tree-svg"></svg>
@@ -1016,7 +1017,8 @@ function applyHighlight(query){
       if(!hlSet.size) hlSet=null;
     }
   }
-  if(currentIndex){ renderTree(); }
+  document.getElementById("btn-focus-hl").style.display = hlSet ? "inline" : "none";
+  if(currentIndex){ renderTree(); requestAnimationFrame(fitTree); }
 }
 function clearHighlight(){ document.getElementById("hl-search").value=""; applyHighlight(""); }
 
@@ -1353,6 +1355,7 @@ function collapseToOGs(){
     }
   }
   renderTree(true);
+  requestAnimationFrame(fitTree);
 }
 function collapseAll(){
   if(!rootNode)return;
@@ -1361,6 +1364,25 @@ function collapseAll(){
   });
   if(rootNode._children){rootNode.children=rootNode._children;rootNode._children=null;}
   renderTree(true);
+  requestAnimationFrame(fitTree);
+}
+
+function focusHighlighted(){
+  if(!hlSet||!rootNode)return;
+  // expand all
+  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
+  // mark nodes that have ≥1 highlighted descendant (post-order)
+  const hasHl=new Map();
+  rootNode.eachAfter(d=>{
+    if(d.data.leaf){ hasHl.set(d,hlSet.has(d.data.species||"")); }
+    else { hasHl.set(d,(d.children||[]).some(c=>hasHl.get(c))); }
+  });
+  // collapse subtrees with no highlighted leaf
+  rootNode.each(d=>{
+    if(!d.data.leaf&&d.children&&!hasHl.get(d)){d._children=d.children;d.children=null;}
+  });
+  renderTree(true);
+  requestAnimationFrame(fitTree);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
