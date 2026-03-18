@@ -357,6 +357,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .hm-col:hover{font-weight:700}
 .hm-cell:hover{stroke:#000;stroke-width:1px}
 
+/* ── Coverage matrix pane ── */
+#pane-matrix{flex-direction:column}
+#matrix-panel{flex:1;overflow:auto;background:#fff;padding:12px}
+
 /* ── Tree pane ── */
 #pane-trees{flex-direction:column}
 #app{display:flex;flex:1;overflow:hidden}
@@ -400,13 +404,23 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .badge-bg{fill:#fff7ed;stroke:#e8913a;stroke-width:1.3px;cursor:pointer}
 .badge-bg:hover{fill:#ffecd4}
 .leaf-label{pointer-events:none;font-family:monospace}
-.og-label{fill:#b5371f;pointer-events:none;font-style:italic;font-weight:600}
+.og-label{fill:#b5371f;pointer-events:none}
 .ctrl-btn.active-btn{background:#d5f5e3;border-color:#1abc9c;color:#1a6b4a}
 .scale-bar-g line{stroke:#999;stroke-width:1.5px}
 .scale-bar-g text{font-size:9px;fill:#888;text-anchor:middle}
 
 /* tooltip */
 #tooltip{position:fixed;display:none;pointer-events:none;background:rgba(255,255,255,.97);border:1px solid #bbb;border-radius:5px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:100;max-width:260px}
+/* collapsed-node popup */
+#collapsed-popup{position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:10px 12px;font-size:11px;box-shadow:0 3px 10px rgba(0,0,0,.2);z-index:200;min-width:230px}
+#collapsed-popup .cp-title{font-weight:700;margin-bottom:7px;font-size:12px;color:#333}
+#collapsed-popup .cp-row{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+#collapsed-popup .cp-row input{flex:1;font-size:11px;padding:2px 5px;border:1px solid #ccc;border-radius:3px}
+#collapsed-popup .cp-genes-label{font-size:10px;color:#888;margin-bottom:2px}
+#collapsed-popup textarea{width:100%;height:80px;font-size:9px;font-family:monospace;resize:vertical;border:1px solid #ddd;border-radius:3px;padding:3px;box-sizing:border-box}
+#collapsed-popup .cp-actions{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
+#collapsed-popup .cp-btn{font-size:10px;padding:3px 8px;border:1px solid #bbb;border-radius:3px;background:#f8f8f8;cursor:pointer}
+#collapsed-popup .cp-btn:hover{background:#e8e8e8}
 .tt-name{font-weight:700;margin-bottom:4px;font-size:12px}
 .tt-row{display:flex;justify-content:space-between;gap:10px;color:#555;margin-top:2px}
 </style>
@@ -430,6 +444,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <!-- vertical tab strip -->
   <div id="tab-strip">
     <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">Heatmap</button>
+    <button class="tab-btn" data-tab="matrix" onclick="switchTab('matrix')">Coverage</button>
     <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">Gene Trees</button>
   </div>
 
@@ -439,6 +454,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
       <div id="tree-panel"></div>
       <div id="heatmap-panel"></div>
     </div>
+  </div>
+
+  <!-- ── Coverage matrix pane ── -->
+  <div class="tab-pane" id="pane-matrix">
+    <div id="matrix-panel"></div>
   </div>
 
   <!-- ── Gene tree pane ── -->
@@ -482,6 +502,18 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 </div>
 
 <div id="tooltip"></div>
+<div id="collapsed-popup">
+  <div class="cp-title">Collapsed node</div>
+  <div class="cp-row"><span>Name:</span><input id="cp-name" type="text"></div>
+  <div class="cp-genes-label" id="cp-genes-label"></div>
+  <textarea id="cp-genes" readonly></textarea>
+  <div class="cp-actions">
+    <button class="cp-btn" onclick="cpRename()">Rename</button>
+    <button class="cp-btn" onclick="cpCopy()">Copy genes</button>
+    <button class="cp-btn" onclick="cpExpand()">Expand</button>
+    <button class="cp-btn" onclick="cpClose()">Close</button>
+  </div>
+</div>
 
 <!-- ── Per-HG lazy data ── -->
 <div id="lazy-data" style="display:none">
@@ -558,6 +590,10 @@ function switchTab(name) {
     tc.style.display = "inline";
     hb.style.display = "none"; cr.textContent = "";
     if (!currentIndex && TREE_INDEX.length) { renderSidebar(""); selectTree(TREE_INDEX[0]); }
+  } else if (name==="matrix") {
+    tc.style.display = "none";
+    hb.style.display = "none"; cr.textContent = "";
+    drawMatrix();
   } else {
     tc.style.display = "none";
     drawCladogram(); drawHeatmap();
@@ -603,6 +639,65 @@ function moveTip(event) {
   tooltipEl.style.top  = Math.min(y, window.innerHeight-tooltipEl.offsetHeight-5)+"px";
 }
 function hideTip() { tooltipEl.style.display = "none"; }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COLLAPSED NODE POPUP
+// ═══════════════════════════════════════════════════════════════════════════════
+const cpEl = document.getElementById("collapsed-popup");
+const customNodeNames = {};
+let cpActiveNode = null;
+
+function collectLeafGenes(children) {
+  const genes = [];
+  (function walk(ch) {
+    if (!ch) return;
+    for (const c of ch) {
+      if (c.data && c.data.leaf) genes.push(c.data.gene_id || c.data.name);
+      else { walk(c.children); walk(c._children); }
+    }
+  })(children);
+  return genes;
+}
+
+function showCollapsedPopup(event, d) {
+  event.stopPropagation();
+  cpActiveNode = d;
+  const nodeKey = d.data.name || "";
+  const currentName = (nodeKey && customNodeNames[nodeKey]) || nodeKey || collapsedLabel(d);
+  const genes = collectLeafGenes(d._children);
+  document.getElementById("cp-name").value = currentName;
+  document.getElementById("cp-genes-label").textContent = genes.length + " genes:";
+  document.getElementById("cp-genes").value = genes.join("\\n");
+  cpEl.style.display = "block";
+  const x = Math.min(event.clientX + 12, window.innerWidth  - cpEl.offsetWidth  - 10);
+  const y = Math.min(event.clientY + 12, window.innerHeight - cpEl.offsetHeight - 10);
+  cpEl.style.left = Math.max(4, x) + "px";
+  cpEl.style.top  = Math.max(4, y) + "px";
+}
+
+function cpClose() { cpEl.style.display = "none"; cpActiveNode = null; }
+
+function cpRename() {
+  if (!cpActiveNode) return;
+  const nodeKey = cpActiveNode.data.name || "";
+  const newName = document.getElementById("cp-name").value.trim();
+  if (nodeKey && newName) customNodeNames[nodeKey] = newName;
+  cpClose();
+  renderTree(false);
+}
+
+function cpCopy() {
+  const txt = document.getElementById("cp-genes").value;
+  navigator.clipboard ? navigator.clipboard.writeText(txt).catch(()=>{}) : (() => {
+    const ta = document.getElementById("cp-genes"); ta.select(); document.execCommand("copy");
+  })();
+}
+
+function cpExpand() {
+  const d = cpActiveNode;
+  cpClose();
+  if (d && d._children) { d.children = d._children; d._children = null; renderTree(true); }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // HEATMAP VIEW
@@ -746,11 +841,12 @@ function drawHeatmap() {
       const z=zMat[ci][ri];
       svg.append("rect").attr("class","hm-cell")
         .attr("x",ci*cW+ROW_LABEL_W).attr("y",ri*14+TOP_MARGIN).attr("width",cW-2).attr("height",cH)
-        .attr("fill",color(z))
+        .attr("fill",color(z)).style("cursor","pointer")
         .on("mouseover",ev=>{
           showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b><br>z: <b>'+z.toFixed(2)+'</b>');
         })
-        .on("mousemove",moveTip).on("mouseout",hideTip);
+        .on("mousemove",moveTip).on("mouseout",hideTip)
+        .on("click",ev=>clickHandler(ev,rec));
     });
   });
 
@@ -768,6 +864,12 @@ function drawHeatmap() {
     .attr("font-size",9).style("cursor","pointer")
     .text(colLabel)
     .on("click",clickHandler);
+
+  // hint
+  svg.append("text")
+    .attr("x",ROW_LABEL_W).attr("y",TOP_MARGIN-92)
+    .attr("font-size",9).attr("fill","#aaa").attr("font-style","italic")
+    .text("Click a column label or cell to drill down \u2193");
 }
 
 function hmBack(){
@@ -1017,6 +1119,8 @@ function countDescLeaves(children){
 
 function collapsedLabel(d){
   const n=countDescLeaves(d._children);
+  const nodeKey=d.data.name||"";
+  if(nodeKey&&customNodeNames[nodeKey]) return customNodeNames[nodeKey]+" ["+n+"]";
   const lbl=d.data._og_label||d.data.name||"";
   if(lbl) return lbl+" ["+n+"]";
   const sc={};
@@ -1180,9 +1284,8 @@ function renderTree(animate){
     .attr("stroke-width",d=>isOGNode(d)?1.8:0.8)
     .on("click",(event,d)=>{
       if(d.data.leaf)return; event.stopPropagation();
-      if(d.children){d._children=d.children;d.children=null;}
-      else if(d._children){d.children=d._children;d._children=null;}
-      renderTree(true);
+      if(d._children){ showCollapsedPopup(event,d); }
+      else if(d.children){d._children=d.children;d.children=null; renderTree(true);}
     })
     .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
 
@@ -1192,8 +1295,7 @@ function renderTree(animate){
     .attr("x",5).attr("width",BADGE_W)
     .on("click",(event,d)=>{
       if(d.data.leaf)return; event.stopPropagation();
-      if(d._children){d.children=d._children;d._children=null;}
-      renderTree(true);
+      if(d._children) showCollapsedPopup(event,d);
     })
     .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
 
