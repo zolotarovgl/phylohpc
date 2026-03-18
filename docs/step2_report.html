@@ -443,7 +443,11 @@ function drawHeatmap() {
                 .sort((a,b)=>b.total-a.total);
     back.style.display="inline"; crumb.textContent=hmActiveClass;
     colLabel=d=>d.hg||d.id;
-    clickHandler=(_ev,d)=>{ hmViewMode="og"; hmActiveHG=d.id; drawHeatmap(); };
+    clickHandler=(_ev,d)=>{
+      hmViewMode="og"; hmActiveHG=d.id; drawHeatmap();
+      const treeRec=TREE_INDEX.find(r=>r.id===d.id);
+      if(treeRec){ switchTab("trees"); selectTree(treeRec); renderSidebar(""); }
+    };
 
   } else { // og
     const treeRec=TREE_INDEX.find(r=>r.id===hmActiveHG);
