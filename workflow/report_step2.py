@@ -1017,15 +1017,16 @@ function assignBranchLenPos(node, cum){
 /** Horizontal (x) pixel position of a node, honouring branch-length mode. */
 function nodeX(d, mg){ return (useBranchLen?(d._by||0)*_phyloScale:d.y)+mg.left; }
 
-/** Rounded-corner elbow path for a cladogram/phylogram link. */
+/** Rounded-corner elbow path for a cladogram/phylogram link.
+ *  Correct cladogram shape: vertical stem first, then horizontal to child. */
 function elbowPath(s, t, mg, r){
   const sx=nodeX(s,mg), sy=s.x+mg.top;
   const tx=nodeX(t,mg), ty=t.x+mg.top;
   const dy=ty-sy;
-  if(Math.abs(dy)<r*2) return `M${sx},${sy}H${tx}V${ty}`;
+  if(Math.abs(dy)<r*2) return `M${sx},${sy}V${ty}H${tx}`;
   return dy>0
-    ? `M${sx},${sy}H${tx-r}A${r},${r} 0 0,1 ${tx},${sy+r}V${ty}`
-    : `M${sx},${sy}H${tx-r}A${r},${r} 0 0,0 ${tx},${sy-r}V${ty}`;
+    ? `M${sx},${sy}V${ty-r}A${r},${r} 0 0,1 ${sx+r},${ty}H${tx}`
+    : `M${sx},${sy}V${ty+r}A${r},${r} 0 0,0 ${sx+r},${ty}H${tx}`;
 }
 
 function toggleLengths(){
