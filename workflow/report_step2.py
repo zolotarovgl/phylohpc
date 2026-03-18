@@ -533,8 +533,16 @@ function ogLeafColor(geneId) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION STATE
 // ═══════════════════════════════════════════════════════════════════════════════
-let hmViewMode     = "family";
-let hmActiveFamily = null;
+let hmViewMode    = "class";   // "class" | "hg" | "og"
+let hmActiveClass = null;
+let hmActiveHG    = null;
+
+function getSpeciesPfx(geneId){
+  const g=(geneId||"").split("|")[0].trim();
+  const ui=g.indexOf("_"), di=g.indexOf(".");
+  const idx=[ui,di].filter(x=>x>0).reduce((a,b)=>Math.min(a,b),Infinity);
+  return idx===Infinity?g:g.slice(0,idx);
+}
 
 function switchTab(name) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab===name));
@@ -657,13 +665,48 @@ function drawHeatmap() {
   const prefix = document.getElementById("prefixSelect").value;
   const back   = document.getElementById("hm-back");
   const crumb  = document.getElementById("hm-breadcrumb");
-  let data;
-  if (hmViewMode==="family") {
+  let data, colLabel, clickHandler;
+
+  if (hmViewMode==="class") {
+    // aggregate HG_DATA by class
+    const map={};
+    HG_DATA.filter(d=>prefix==="all"||d.pref===prefix).forEach(d=>{
+      const cls=d.class||d.pref||"other";
+      if(!map[cls]) map[cls]={id:cls,class:cls,species_counts:{}};
+      for(const [sp,n] of Object.entries(d.species_counts))
+        map[cls].species_counts[sp]=(map[cls].species_counts[sp]||0)+n;
+    });
+    data=Object.values(map).sort((a,b)=>
+      Object.values(b.species_counts).reduce((x,y)=>x+y,0)-
+      Object.values(a.species_counts).reduce((x,y)=>x+y,0));
     back.style.display="none"; crumb.textContent="";
-    data=FAMILY_DATA.filter(d=>prefix==="all"||d.pref===prefix).sort((a,b)=>b.total-a.total);
-  } else {
-    back.style.display="inline"; crumb.textContent=hmActiveFamily;
-    data=HG_DATA.filter(d=>d.family===hmActiveFamily).filter(d=>prefix==="all"||d.pref===prefix).sort((a,b)=>b.total-a.total);
+    colLabel=d=>d.id;
+    clickHandler=(_ev,d)=>{ hmViewMode="hg"; hmActiveClass=d.id; drawHeatmap(); };
+
+  } else if (hmViewMode==="hg") {
+    data=HG_DATA.filter(d=>(d.class||d.pref)===hmActiveClass)
+                .filter(d=>prefix==="all"||d.pref===prefix)
+                .sort((a,b)=>b.total-a.total);
+    back.style.display="inline"; crumb.textContent=hmActiveClass;
+    colLabel=d=>d.hg||d.id;
+    clickHandler=(_ev,d)=>{ hmViewMode="og"; hmActiveHG=d.id; drawHeatmap(); };
+
+  } else { // og
+    const treeRec=TREE_INDEX.find(r=>r.id===hmActiveHG);
+    const detail=treeRec?loadDetail(treeRec.id):null;
+    if(detail&&detail.ogs){
+      data=Object.entries(detail.ogs).map(([og,gids])=>{
+        const sc={};
+        gids.forEach(g=>{ const sp=getSpeciesPfx(g); if(sp) sc[sp]=(sc[sp]||0)+1; });
+        return {id:og,class:og,species_counts:sc,total:gids.length};
+      }).sort((a,b)=>b.total-a.total);
+    } else { data=[]; }
+    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveHG;
+    colLabel=d=>d.id;
+    clickHandler=(_ev,d)=>{
+      const treeRec=TREE_INDEX.find(r=>r.id===hmActiveHG);
+      if(treeRec){ switchTab("trees"); selectTree(treeRec); renderSidebar(""); }
+    };
   }
 
   const cW=18, cH=12;
@@ -691,15 +734,14 @@ function drawHeatmap() {
       svg.append("rect").attr("class","hm-cell")
         .attr("x",ci*cW+ROW_LABEL_W).attr("y",ri*14+TOP_MARGIN).attr("width",cW-2).attr("height",cH)
         .attr("fill",color(z))
-        .on("mouseover", ev=>{
-          const label=hmViewMode==="family"?rec.family:rec.id;
-          showTip(ev,'<b>'+sp+'</b><br>'+label+'<br>class: '+rec.class+'<br>count: <b>'+count+'</b><br>z: <b>'+z.toFixed(2)+'</b>');
+        .on("mouseover",ev=>{
+          showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b><br>z: <b>'+z.toFixed(2)+'</b>');
         })
         .on("mousemove",moveTip).on("mouseout",hideTip);
     });
   });
 
-  // row labels (species names)
+  // row labels
   speciesOrder.forEach((sp,ri)=>{
     svg.append("text")
       .attr("x",ROW_LABEL_W-4).attr("y",ri*14+TOP_MARGIN+9)
@@ -711,18 +753,15 @@ function drawHeatmap() {
   svg.selectAll("text.hm-col").data(data).enter().append("text").attr("class","hm-col")
     .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W},${TOP_MARGIN-10}) rotate(-65)`)
     .attr("font-size",9).style("cursor","pointer")
-    .text(d=>hmViewMode==="family"?d.family:(d.hg||d.id))
-    .on("click",(ev,d)=>{
-      if(hmViewMode==="family"){ hmViewMode="hg"; hmActiveFamily=d.family; drawHeatmap(); }
-      else {
-        const treeRec=TREE_INDEX.find(r=>r.id===d.id);
-        if(treeRec){ switchTab("trees"); selectTree(treeRec); renderSidebar(""); }
-        else { console.warn("No gene tree for",d.id); }
-      }
-    });
+    .text(colLabel)
+    .on("click",clickHandler);
 }
 
-function hmBack(){ hmViewMode="family"; hmActiveFamily=null; drawHeatmap(); }
+function hmBack(){
+  if(hmViewMode==="og"){ hmViewMode="hg"; hmActiveHG=null; }
+  else { hmViewMode="class"; hmActiveClass=null; hmActiveHG=null; }
+  drawHeatmap();
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TREE VIEW – SIDEBAR
