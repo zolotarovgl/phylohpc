@@ -357,10 +357,6 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .hm-col:hover{font-weight:700}
 .hm-cell:hover{stroke:#000;stroke-width:1px}
 
-/* ── Coverage matrix pane ── */
-#pane-matrix{flex-direction:column}
-#matrix-panel{flex:1;overflow:auto;background:#fff;padding:12px}
-
 /* ── Tree pane ── */
 #pane-trees{flex-direction:column}
 #app{display:flex;flex:1;overflow:hidden}
@@ -444,7 +440,6 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <!-- vertical tab strip -->
   <div id="tab-strip">
     <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">Heatmap</button>
-    <button class="tab-btn" data-tab="matrix" onclick="switchTab('matrix')">Coverage</button>
     <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">Gene Trees</button>
   </div>
 
@@ -454,11 +449,6 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
       <div id="tree-panel"></div>
       <div id="heatmap-panel"></div>
     </div>
-  </div>
-
-  <!-- ── Coverage matrix pane ── -->
-  <div class="tab-pane" id="pane-matrix">
-    <div id="matrix-panel"></div>
   </div>
 
   <!-- ── Gene tree pane ── -->
@@ -591,10 +581,6 @@ function switchTab(name) {
     tc.style.display = "inline";
     hb.style.display = "none"; cr.textContent = "";
     if (!currentIndex && TREE_INDEX.length) { renderSidebar(""); selectTree(TREE_INDEX[0]); }
-  } else if (name==="matrix") {
-    tc.style.display = "none";
-    hb.style.display = "none"; cr.textContent = "";
-    drawMatrix();
   } else {
     tc.style.display = "none";
     drawCladogram(); drawHeatmap();
@@ -1062,6 +1048,7 @@ function selectTree(rec){
   });
   drawGeneTree(currentDetail.tree);
   collapseToOGs();
+  requestAnimationFrame(fitTree);
 }
 
 function rebuildOgColors(){
