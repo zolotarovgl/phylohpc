@@ -654,7 +654,7 @@ function showCollapsedPopup(event, d) {
   const genes = collectLeafGenes(d._children);
   document.getElementById("cp-name").value = currentName;
   document.getElementById("cp-genes-label").textContent = genes.length + " genes:";
-  document.getElementById("cp-genes").value = genes.join("\\n");
+  document.getElementById("cp-genes").value = genes.join("\n");
   cpEl.style.display = "block";
   const x = Math.min(event.clientX + 12, window.innerWidth  - cpEl.offsetWidth  - 10);
   const y = Math.min(event.clientY + 12, window.innerHeight - cpEl.offsetHeight - 10);
