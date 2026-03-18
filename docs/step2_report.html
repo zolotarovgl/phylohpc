@@ -275,6 +275,7 @@ let cladeSp2Group = {};
 let cladeGrpColor = {};
 let ogLeaf2Color  = {};   // gene_id → color
 let ogName2Color  = {};   // og_name → color
+let ogGene2Name   = {};   // gene_id → og_name
 let hlSet         = null;        // null = off;  Set<species> when active
 
 function leafColor(sp) {
@@ -658,7 +659,7 @@ function selectTree(rec){
   if(!currentDetail){ console.warn("No detail data for",rec.id); return; }
   // reset colour state – default to OG colouring
   hlSet=null; document.getElementById("hl-search").value="";
-  cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={};
+  cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   colorMode="og";
   document.getElementById("color-by").value="og";
 
@@ -682,7 +683,7 @@ function selectTree(rec){
   const _ogs=currentDetail.ogs||{};
   Object.keys(_ogs).sort().forEach((og,i)=>{
     const col=palette[i%palette.length]; ogName2Color[og]=col;
-    for(const gid of _ogs[og]) ogLeaf2Color[gid]=col;
+    for(const gid of _ogs[og]){ ogLeaf2Color[gid]=col; ogGene2Name[gid]=og; }
   });
   drawGeneTree(currentDetail.tree);
   collapseToOGs();
@@ -691,11 +692,11 @@ function selectTree(rec){
 
 function rebuildOgColors(){
   if(colorMode!=="og")return;
-  ogLeaf2Color={}; ogName2Color={};
+  ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   const ogs=activeOgs();
   Object.keys(ogs).sort().forEach((og,i)=>{
     const col=palette[i%palette.length]; ogName2Color[og]=col;
-    for(const gid of ogs[og]) ogLeaf2Color[gid]=col;
+    for(const gid of ogs[og]){ ogLeaf2Color[gid]=col; ogGene2Name[gid]=og; }
   });
 }
 function toggleTreeSource(){
@@ -926,13 +927,18 @@ function renderTree(animate){
     })
     .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
 
-  // leaf labels (gene_id only for pipe-format names)
+  // leaf labels: gene_id + OG name
   nodeSel.select(".leaf-label")
     .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
     .attr("font-size",d=>d.data.leaf?Math.min(11,rowH-2):0)
     .attr("fill",d=>colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name):leafColor(d.data.species||""))
     .attr("display",d=>d.data.leaf?null:"none")
-    .text(d=>d.data.leaf?(d.data.gene_id||d.data.name):"");
+    .text(d=>{
+      if(!d.data.leaf) return "";
+      const gid=d.data.gene_id||d.data.name;
+      const og=d.data.og||ogGene2Name[gid]||"";
+      return og ? gid+" \u00b7 "+og : gid;
+    });
 
   // OG labels (inside badge when collapsed, beside node when OG-named internal)
   nodeSel.select(".og-label")
