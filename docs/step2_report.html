@@ -292,7 +292,8 @@ function ogLeafColor(geneId, species) {
 let hmViewMode    = "class";   // "class" | "family" | "hg" | "og"
 let hmActiveClass  = null;
 let hmActiveFamily = null;
-let hmActiveHG     = null;
+let hmActiveHG     = null;   // id string from HG_DATA
+let hmActiveHGRec  = null;   // full HG_DATA record (for fallback lookup)
 
 function getSpeciesPfx(geneId){
   const g=(geneId||"").split("|")[0].trim();
@@ -454,22 +455,23 @@ function drawHeatmap() {
                 .sort((a,b)=>b.total-a.total);
     back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily;
     colLabel=d=>d.hg||d.id;
-    clickHandler=(_ev,d)=>{ hmViewMode="og"; hmActiveHG=d.id; drawHeatmap(); };
+    clickHandler=(_ev,d)=>{ hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap(); };
 
   } else { // og
-    const treeRec=TREE_INDEX.find(r=>r.id===hmActiveHG);
+    // robust lookup: try id first, fall back to family+hg match
+    const r=hmActiveHGRec;
+    const treeRec=TREE_INDEX.find(t=>t.id===hmActiveHG)
+      ||(r&&TREE_INDEX.find(t=>t.family===r.family&&t.hg===r.hg));
     const detail=treeRec?loadDetail(treeRec.id):null;
-    if(detail&&detail.ogs){
-      data=Object.entries(detail.ogs).map(([og,gids])=>{
-        const sc={};
-        gids.forEach(g=>{ const sp=getSpeciesPfx(g); if(sp) sc[sp]=(sc[sp]||0)+1; });
-        return {id:og,class:og,species_counts:sc,total:gids.length};
-      }).sort((a,b)=>b.total-a.total);
-    } else { data=[]; }
-    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+hmActiveHG;
+    const ogs=detail&&detail.ogs||{};
+    data=Object.entries(ogs).map(([og,gids])=>{
+      const sc={};
+      gids.forEach(g=>{ const sp=getSpeciesPfx(g); if(sp) sc[sp]=(sc[sp]||0)+1; });
+      return {id:og,species_counts:sc,total:gids.length};
+    }).sort((a,b)=>b.total-a.total);
+    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG);
     colLabel=d=>d.id;
-    clickHandler=(_ev,d)=>{
-      const treeRec=TREE_INDEX.find(r=>r.id===hmActiveHG);
+    clickHandler=(_ev,_d)=>{
       if(treeRec){ switchTab("trees"); selectTree(treeRec); renderSidebar(""); }
     };
   }
@@ -523,9 +525,9 @@ function drawHeatmap() {
 }
 
 function hmBack(){
-  if(hmViewMode==="og")     { hmViewMode="hg";     hmActiveHG=null; }
-  else if(hmViewMode==="hg"){ hmViewMode="family";  hmActiveFamily=null; hmActiveHG=null; }
-  else                      { hmViewMode="class";   hmActiveClass=null; hmActiveFamily=null; hmActiveHG=null; }
+  if(hmViewMode==="og")     { hmViewMode="hg";     hmActiveHG=null; hmActiveHGRec=null; }
+  else if(hmViewMode==="hg"){ hmViewMode="family";  hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; }
+  else                      { hmViewMode="class";   hmActiveClass=null; hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; }
   drawHeatmap();
 }
 
