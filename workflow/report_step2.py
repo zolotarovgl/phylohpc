@@ -971,7 +971,7 @@ const treeSvg = d3.select("#tree-svg");
 let rootNode=null, gMain=null, _uid=0, _zoom=null;
 let useBranchLen=false, _phyloScale=1;
 
-function isOGNode(d){ return !d.data.leaf && d.data.name && d.data.name!==""; }
+function isOGNode(d){ return !d.data.leaf && d.data.name && activeOgs()[d.data.name]!==undefined; }
 
 /** Return the MRCA node for a list of d3-hierarchy leaf nodes. */
 function findMRCA(leaves){
@@ -994,7 +994,7 @@ function countDescLeaves(children){
 
 function collapsedLabel(d){
   const n=countDescLeaves(d._children);
-  const lbl=d.data.name||d.data._og_label||"";
+  const lbl=d.data._og_label||d.data.name||"";
   if(lbl) return lbl+" ["+n+"]";
   const sc={};
   (function cnt(ch){ if(!ch)return; for(const c of ch){
