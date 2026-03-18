@@ -76,11 +76,16 @@ body{display:flex;flex-direction:column}
 #tree-wrap{flex:1;overflow:hidden;position:relative;background:#fff}
 #tree-svg{width:100%;height:100%;cursor:grab;display:block}
 #tree-svg:active{cursor:grabbing}
-.link{fill:none;stroke:#d0d0d0;stroke-width:1px}
-.node-g circle{cursor:pointer;transition:r .12s}
-.node-g circle:hover{stroke-width:2px !important}
-.leaf-label{font-size:10px;pointer-events:none}
-.og-label{font-size:9px;fill:#c0392b;pointer-events:none;font-style:italic}
+.link{fill:none;stroke:#d5d5d5;stroke-width:1.3px}
+.node-g circle{cursor:pointer;transition:r .12s,fill .12s}
+.node-g circle:hover{stroke-width:2.5px !important}
+.badge-bg{fill:#fff7ed;stroke:#e8913a;stroke-width:1.3px;cursor:pointer}
+.badge-bg:hover{fill:#ffecd4}
+.leaf-label{pointer-events:none;font-family:monospace}
+.og-label{fill:#b5371f;pointer-events:none;font-style:italic;font-weight:600}
+.ctrl-btn.active-btn{background:#d5f5e3;border-color:#1abc9c;color:#1a6b4a}
+.scale-bar-g line{stroke:#999;stroke-width:1.5px}
+.scale-bar-g text{font-size:9px;fill:#888;text-anchor:middle}
 
 /* tooltip */
 #tooltip{position:fixed;display:none;pointer-events:none;background:rgba(255,255,255,.97);border:1px solid #bbb;border-radius:5px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:100;max-width:260px}
@@ -133,6 +138,8 @@ body{display:flex;flex-direction:column}
           <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
           <button class="ctrl-btn" onclick="collapseToOGs()">Collapse to OGs</button>
           <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
+          <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()">Branch lengths</button>
+          <button class="ctrl-btn" onclick="fitTree()">&#x2922; Fit</button>
           <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
           <span id="tree-title"></span>
           <span id="n-ogs-label"></span>
@@ -672,7 +679,8 @@ function activeOgs(){
 }
 
 const treeSvg = d3.select("#tree-svg");
-let rootNode=null, gMain=null, _uid=0;
+let rootNode=null, gMain=null, _uid=0, _zoom=null;
+let useBranchLen=false, _phyloScale=1;
 
 function isOGNode(d){ return !d.data.leaf && d.data.name && d.data.name!==""; }
 
@@ -698,8 +706,7 @@ function countDescLeaves(children){
 function collapsedLabel(d){
   const n=countDescLeaves(d._children);
   const lbl=d.data.name||d.data._og_label||"";
-  if(lbl) return lbl+"\u00a0["+n+"]";
-  // derive label from leaf species composition
+  if(lbl) return lbl+" ["+n+"]";
   const sc={};
   (function cnt(ch){ if(!ch)return; for(const c of ch){
     if(c.data.leaf){const sp=c.data.species||"?";sc[sp]=(sc[sp]||0)+1;}
@@ -710,80 +717,185 @@ function collapsedLabel(d){
   return top.join(",")+"\u00a0["+n+"]";
 }
 
+/** Assign cumulative branch-length positions (_by) to all nodes. */
+function assignBranchLenPos(node, cum){
+  node._by=cum;
+  (node.children||[]).forEach(c=>assignBranchLenPos(c, cum+(c.data.dist||0)));
+  (node._children||[]).forEach(c=>assignBranchLenPos(c, cum+(c.data.dist||0)));
+}
+
+/** Horizontal (x) pixel position of a node, honouring branch-length mode. */
+function nodeX(d, mg){ return (useBranchLen?(d._by||0)*_phyloScale:d.y)+mg.left; }
+
+/** Rounded-corner elbow path for a cladogram/phylogram link. */
+function elbowPath(s, t, mg, r){
+  const sx=nodeX(s,mg), sy=s.x+mg.top;
+  const tx=nodeX(t,mg), ty=t.x+mg.top;
+  const dy=ty-sy;
+  if(Math.abs(dy)<r*2) return `M${sx},${sy}H${tx}V${ty}`;
+  return dy>0
+    ? `M${sx},${sy}H${tx-r}A${r},${r} 0 0,1 ${tx},${sy+r}V${ty}`
+    : `M${sx},${sy}H${tx-r}A${r},${r} 0 0,0 ${tx},${sy-r}V${ty}`;
+}
+
+function toggleLengths(){
+  useBranchLen=!useBranchLen;
+  const btn=document.getElementById("btn-lengths");
+  btn.classList.toggle("active-btn", useBranchLen);
+  if(rootNode){ assignBranchLenPos(rootNode,0); renderTree(false); }
+}
+
+function fitTree(){
+  if(!gMain||!_zoom) return;
+  const wrap=document.getElementById("tree-wrap");
+  const W=wrap.clientWidth||800, H=wrap.clientHeight||600;
+  const b=gMain.node().getBBox();
+  if(!b.width||!b.height) return;
+  const pad=24;
+  const sc=Math.min((W-pad*2)/b.width,(H-pad*2)/b.height,2);
+  const tx=(W-b.width*sc)/2-b.x*sc, ty=(H-b.height*sc)/2-b.y*sc;
+  treeSvg.transition().duration(350)
+    .call(_zoom.transform, d3.zoomIdentity.translate(tx,ty).scale(sc));
+}
+
+function drawScaleBar(mg, iW, tH){
+  const maxBL=iW/_phyloScale;
+  const raw=maxBL*0.15;
+  const mag=Math.pow(10,Math.floor(Math.log10(raw||1)));
+  const nice=[1,2,5].map(x=>x*mag).find(x=>x>=raw*0.5)||mag;
+  const barPx=nice*_phyloScale;
+  const x0=mg.left+10, y0=mg.top+tH+14;
+  const g=gMain.append("g").attr("class","scale-bar-g");
+  g.append("line").attr("x1",x0).attr("y1",y0).attr("x2",x0+barPx).attr("y2",y0);
+  g.append("line").attr("x1",x0).attr("y1",y0-4).attr("x2",x0).attr("y2",y0+4);
+  g.append("line").attr("x1",x0+barPx).attr("y1",y0-4).attr("x2",x0+barPx).attr("y2",y0+4);
+  g.append("text").attr("x",x0+barPx/2).attr("y",y0+13).text(nice.toPrecision(2));
+}
+
 function drawGeneTree(treeData){
   treeSvg.selectAll("*").remove(); _uid=0;
   const wrap=document.getElementById("tree-wrap");
   const W=wrap.clientWidth||800, H=wrap.clientHeight||600;
   treeSvg.attr("width",W).attr("height",H);
-  const zoom=d3.zoom().scaleExtent([0.05,20]).on("zoom",e=>{gMain.attr("transform",e.transform);});
-  treeSvg.call(zoom).on("dblclick.zoom",null);
+  _zoom=d3.zoom().scaleExtent([0.03,30]).on("zoom",e=>{gMain.attr("transform",e.transform);});
+  treeSvg.call(_zoom).on("dblclick.zoom",null);
   gMain=treeSvg.append("g");
   rootNode=d3.hierarchy(treeData,d=>d.children);
   rootNode.each(d=>{d._uid=++_uid;});
-  renderTree();
-  // fit
-  const b=gMain.node().getBBox();
-  if(b.width&&b.height){
-    const sc=Math.min((W-10)/b.width,(H-10)/b.height,1.5);
-    const tx=(W-b.width*sc)/2-b.x*sc, ty=(H-b.height*sc)/2-b.y*sc;
-    treeSvg.call(zoom.transform,d3.zoomIdentity.translate(tx,ty).scale(sc));
-  }
+  if(useBranchLen) assignBranchLenPos(rootNode,0);
+  renderTree(false);
+  // auto-fit after layout
+  requestAnimationFrame(fitTree);
 }
 
-function renderTree(){
-  if(!rootNode)return;
+const BADGE_W=96, BADGE_H=17;
+
+function renderTree(animate){
+  if(!rootNode) return;
   const wrap=document.getElementById("tree-wrap");
   const W=wrap.clientWidth||800, H=wrap.clientHeight||600;
-  const mg={top:20,right:200,bottom:20,left:30};
+  const mg={top:20,right:240,bottom:36,left:36};
   const iW=W-mg.left-mg.right, iH=H-mg.top-mg.bottom;
   const nVis=rootNode.leaves().length;
-  const rowH=Math.max(13,Math.min(24,Math.floor(iH/Math.max(nVis,1))));
+  const rowH=Math.max(13,Math.min(26,Math.floor(iH/Math.max(nVis,1))));
   const tH=Math.max(iH,nVis*rowH);
   d3.cluster().size([tH,iW])(rootNode);
 
+  if(useBranchLen){
+    assignBranchLenPos(rootNode,0);
+    const maxBL=d3.max(rootNode.leaves(),d=>d._by)||1;
+    _phyloScale=iW/maxBL;
+  }
+
+  const dur=animate?240:0;
+
+  // ── Links ──
   gMain.selectAll(".link")
     .data(rootNode.links(),d=>d.target._uid)
-    .join("path").attr("class","link")
-    .attr("d",d=>`M${d.source.y+mg.left},${d.source.x+mg.top}H${d.target.y+mg.left}V${d.target.x+mg.top}`);
+    .join(
+      enter=>enter.append("path").attr("class","link")
+        .attr("d",d=>elbowPath(d.source,d.source,mg,3)),
+      update=>update,
+      exit=>exit.transition().duration(dur*0.5).style("opacity",0).remove()
+    )
+    .transition().duration(dur)
+    .attr("d",d=>elbowPath(d.source,d.target,mg,3));
 
-  const nodeSel=gMain.selectAll(".node-g").data(rootNode.descendants(),d=>d._uid);
-  const entered=nodeSel.enter().append("g").attr("class","node-g");
-  entered.append("circle");
-  entered.append("text").attr("class","leaf-label");
-  entered.append("text").attr("class","og-label");
-  nodeSel.exit().remove();
-  const merged=nodeSel.merge(entered)
-    .attr("transform",d=>`translate(${d.y+mg.left},${d.x+mg.top})`);
+  // ── Scale bar ──
+  gMain.selectAll(".scale-bar-g").remove();
+  if(useBranchLen) drawScaleBar(mg,iW,tH);
 
-  merged.select("circle")
-    .attr("r",d=>d.data.leaf?3.5:d._children?7:isOGNode(d)?5:3)
+  // ── Nodes ──
+  const nodeSel=gMain.selectAll(".node-g")
+    .data(rootNode.descendants(),d=>d._uid)
+    .join(
+      enter=>{
+        const g=enter.append("g").attr("class","node-g")
+          .attr("transform",d=>{const p=d.parent||d;return `translate(${nodeX(p,mg)},${p.x+mg.top})`;})
+          .style("opacity",0);
+        g.append("circle");
+        g.append("rect").attr("class","badge-bg")
+          .attr("y",-BADGE_H/2).attr("height",BADGE_H).attr("rx",BADGE_H/2).attr("ry",BADGE_H/2);
+        g.append("text").attr("class","leaf-label");
+        g.append("text").attr("class","og-label");
+        return g;
+      },
+      update=>update,
+      exit=>exit.transition().duration(dur*0.5)
+        .attr("transform",d=>{const p=d.parent||d;return `translate(${nodeX(p,mg)},${p.x+mg.top})`;})
+        .style("opacity",0).remove()
+    );
+
+  nodeSel.transition().duration(dur)
+    .attr("transform",d=>`translate(${nodeX(d,mg)},${d.x+mg.top})`)
+    .style("opacity",1);
+
+  // circle (leaves and expanded internals)
+  nodeSel.select("circle")
+    .attr("display",d=>d._children?"none":null)
+    .attr("r",d=>d.data.leaf?4:isOGNode(d)?5.5:2.8)
     .attr("fill",d=>{
-      if(d.data.leaf)return leafColor(d.data.species||"");
-      if(d._children)return "#e67e22";
+      if(d.data.leaf){
+        const c=leafColor(d.data.species||"");
+        return hlSet&&!hlSet.has(d.data.species||"")?"#e8e8e8":c;
+      }
       if(isOGNode(d))return "#e74c3c";
-      return "#bbb";
+      return "#ccc";
     })
-    .attr("stroke",d=>(d._children||isOGNode(d))?"#c0392b":"#888")
-    .attr("stroke-width",d=>(d._children||isOGNode(d))?1.5:0.8)
+    .attr("stroke",d=>d.data.leaf?"none":isOGNode(d)?"#b03a2e":"#aaa")
+    .attr("stroke-width",d=>isOGNode(d)?1.8:0.8)
     .on("click",(event,d)=>{
       if(d.data.leaf)return; event.stopPropagation();
       if(d.children){d._children=d.children;d.children=null;}
       else if(d._children){d.children=d._children;d._children=null;}
-      renderTree();
+      renderTree(true);
     })
     .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
 
-  merged.select(".leaf-label")
-    .attr("x",d=>d.data.leaf?6:0).attr("dy","0.32em")
-    .attr("text-anchor","start")
-    .attr("font-size",d=>d.data.leaf?Math.min(11,rowH-1):0)
+  // badge rectangle (collapsed nodes)
+  nodeSel.select(".badge-bg")
+    .attr("display",d=>d._children?null:"none")
+    .attr("x",5).attr("width",BADGE_W)
+    .on("click",(event,d)=>{
+      if(d.data.leaf)return; event.stopPropagation();
+      if(d._children){d.children=d._children;d._children=null;}
+      renderTree(true);
+    })
+    .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
+
+  // leaf labels (gene_id only for pipe-format names)
+  nodeSel.select(".leaf-label")
+    .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
+    .attr("font-size",d=>d.data.leaf?Math.min(11,rowH-2):0)
     .attr("fill",d=>leafColor(d.data.species||""))
     .attr("display",d=>d.data.leaf?null:"none")
-    .text(d=>d.data.leaf?d.data.name:"");
+    .text(d=>d.data.leaf?(d.data.gene_id||d.data.name):"");
 
-  merged.select(".og-label")
-    .attr("x",d=>d._children?9:-7).attr("dy","0.32em")
-    .attr("text-anchor",d=>d._children?"start":"end")
+  // OG labels (inside badge when collapsed, beside node when OG-named internal)
+  nodeSel.select(".og-label")
+    .attr("x",d=>d._children?BADGE_W/2+5:-7)
+    .attr("dy","0.35em")
+    .attr("text-anchor",d=>d._children?"middle":"end")
     .attr("font-size",9)
     .attr("display",d=>(!d.data.leaf&&(isOGNode(d)||d._children))?null:"none")
     .text(d=>d._children?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
@@ -793,7 +905,7 @@ function renderTree(){
 function expandAll(){
   if(!rootNode)return;
   rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
-  renderTree();
+  renderTree(true);
 }
 function collapseToOGs(){
   if(!rootNode)return;
@@ -819,7 +931,7 @@ function collapseToOGs(){
       }
     }
   }
-  renderTree();
+  renderTree(true);
 }
 function collapseAll(){
   if(!rootNode)return;
@@ -827,7 +939,7 @@ function collapseAll(){
     if(d.depth>0&&!d.data.leaf&&d.children){d._children=d.children;d.children=null;}
   });
   if(rootNode._children){rootNode.children=rootNode._children;rootNode._children=null;}
-  renderTree();
+  renderTree(true);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
