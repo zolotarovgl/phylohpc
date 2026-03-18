@@ -447,6 +447,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <div id="app">
       <div id="sidebar">
         <div id="sidebar-top">
+          <select id="class-filter" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid #ccc;border-radius:3px;margin-bottom:4px"><option value="">All classes</option></select>
           <input id="hg-search" type="text" placeholder="Search HG / family…">
           <div id="hg-count"></div>
         </div>
@@ -743,10 +744,20 @@ function groupByFamily(records){
   return g;
 }
 
+// populate class filter once
+(function(){
+  const sel=document.getElementById("class-filter");
+  const classes=[...new Set(TREE_INDEX.map(r=>r.class||"").filter(Boolean))].sort();
+  classes.forEach(c=>{ const o=document.createElement("option"); o.value=c; o.textContent=c; sel.appendChild(o); });
+  sel.addEventListener("change",()=>renderSidebar(document.getElementById("hg-search").value));
+})();
+
 function renderSidebar(filter){
   const lc=(filter||"").toLowerCase().trim();
+  const cls=document.getElementById("class-filter").value;
   const list=document.getElementById("hg-list"); list.innerHTML="";
-  const groups=groupByFamily(TREE_INDEX);
+  const subset=cls?TREE_INDEX.filter(r=>(r.class||"")=== cls):TREE_INDEX;
+  const groups=groupByFamily(subset);
   let total=0;
   for(const [fam,recs] of Object.entries(groups).sort()){
     const matching=lc?recs.filter(r=>r.hg.toLowerCase().includes(lc)||r.family.toLowerCase().includes(lc)):recs;
@@ -1289,6 +1300,7 @@ def main(argv=None):
     for rec in records:
         idx = {k: v for k, v in rec.items() if k not in ("tree_dict", "ogs")}
         idx["has_prev"] = rec["id"] in prev_records
+        idx["class"] = family_info.get(rec["family"], rec.get("prefix", ""))
         index_records.append(idx)
 
     # Build per-HG lazy <script> tags
