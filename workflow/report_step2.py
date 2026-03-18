@@ -312,10 +312,9 @@ def parse_clade_groupings(species_tree_path: Path) -> list:
             "_n": len(species_map),
         })
 
-    groupings.sort(key=lambda x: -x["_n"])
     for g in groupings:
         del g["_n"]
-    return groupings
+    return groupings  # levelorder already gives most-basal (root-proximal) splits first
 
 
 # ── HTML template ─────────────────────────────────────────────────────────────
