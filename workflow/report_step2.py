@@ -1203,7 +1203,7 @@ function renderTree(animate){
   const mg={top:20,right:240,bottom:36,left:36};
   const iW=W-mg.left-mg.right, iH=H-mg.top-mg.bottom;
   const nVis=rootNode.leaves().length;
-  const rowH=Math.max(13,Math.min(26,Math.floor(iH/Math.max(nVis,1))));
+  const rowH=Math.max(18,Math.min(32,Math.floor(iH/Math.max(nVis,1))));
   const tH=Math.max(iH,nVis*rowH);
   d3.cluster().size([tH,iW])(rootNode);
 
