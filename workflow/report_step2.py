@@ -535,9 +535,10 @@ function ogLeafColor(geneId, species) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION STATE
 // ═══════════════════════════════════════════════════════════════════════════════
-let hmViewMode    = "class";   // "class" | "hg" | "og"
-let hmActiveClass = null;
-let hmActiveHG    = null;
+let hmViewMode    = "class";   // "class" | "family" | "hg" | "og"
+let hmActiveClass  = null;
+let hmActiveFamily = null;
+let hmActiveHG     = null;
 
 function getSpeciesPfx(geneId){
   const g=(geneId||"").split("|")[0].trim();
@@ -670,9 +671,9 @@ function drawHeatmap() {
   let data, colLabel, clickHandler;
 
   if (hmViewMode==="class") {
-    // aggregate HG_DATA by class
+    // aggregate FAMILY_DATA by class
     const map={};
-    HG_DATA.filter(d=>prefix==="all"||d.pref===prefix).forEach(d=>{
+    FAMILY_DATA.filter(d=>prefix==="all"||d.pref===prefix).forEach(d=>{
       const cls=d.class||d.pref||"other";
       if(!map[cls]) map[cls]={id:cls,class:cls,species_counts:{}};
       for(const [sp,n] of Object.entries(d.species_counts))
@@ -683,13 +684,21 @@ function drawHeatmap() {
       Object.values(a.species_counts).reduce((x,y)=>x+y,0));
     back.style.display="none"; crumb.textContent="";
     colLabel=d=>d.id;
-    clickHandler=(_ev,d)=>{ hmViewMode="hg"; hmActiveClass=d.id; drawHeatmap(); };
+    clickHandler=(_ev,d)=>{ hmViewMode="family"; hmActiveClass=d.id; drawHeatmap(); };
+
+  } else if (hmViewMode==="family") {
+    data=FAMILY_DATA.filter(d=>(d.class||d.pref)===hmActiveClass)
+                    .filter(d=>prefix==="all"||d.pref===prefix)
+                    .sort((a,b)=>b.total-a.total);
+    back.style.display="inline"; crumb.textContent=hmActiveClass;
+    colLabel=d=>d.family;
+    clickHandler=(_ev,d)=>{ hmViewMode="hg"; hmActiveFamily=d.family; drawHeatmap(); };
 
   } else if (hmViewMode==="hg") {
-    data=HG_DATA.filter(d=>(d.class||d.pref)===hmActiveClass)
+    data=HG_DATA.filter(d=>d.family===hmActiveFamily)
                 .filter(d=>prefix==="all"||d.pref===prefix)
                 .sort((a,b)=>b.total-a.total);
-    back.style.display="inline"; crumb.textContent=hmActiveClass;
+    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily;
     colLabel=d=>d.hg||d.id;
     clickHandler=(_ev,d)=>{ hmViewMode="og"; hmActiveHG=d.id; drawHeatmap(); };
 
@@ -703,7 +712,7 @@ function drawHeatmap() {
         return {id:og,class:og,species_counts:sc,total:gids.length};
       }).sort((a,b)=>b.total-a.total);
     } else { data=[]; }
-    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveHG;
+    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+hmActiveHG;
     colLabel=d=>d.id;
     clickHandler=(_ev,d)=>{
       const treeRec=TREE_INDEX.find(r=>r.id===hmActiveHG);
@@ -760,8 +769,9 @@ function drawHeatmap() {
 }
 
 function hmBack(){
-  if(hmViewMode==="og"){ hmViewMode="hg"; hmActiveHG=null; }
-  else { hmViewMode="class"; hmActiveClass=null; hmActiveHG=null; }
+  if(hmViewMode==="og")     { hmViewMode="hg";     hmActiveHG=null; }
+  else if(hmViewMode==="hg"){ hmViewMode="family";  hmActiveFamily=null; hmActiveHG=null; }
+  else                      { hmViewMode="class";   hmActiveClass=null; hmActiveFamily=null; hmActiveHG=null; }
   drawHeatmap();
 }
 
