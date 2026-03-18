@@ -395,6 +395,7 @@ function drawCladogram() {
   function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
   assignY(tree); assignX(tree);
   const maxD=d3.max(flat(tree),d=>d._d)||1;
+  flat(tree).forEach(n=>{ if(!n.children) n._d=maxD; }); // align all tips
   const sx=d=>10+(d/maxD)*150;
 
   function drawB(n){
