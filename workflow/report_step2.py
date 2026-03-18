@@ -390,9 +390,6 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 #hl-search{font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px;width:180px}
 #hl-clear{padding:2px 6px;border:1px solid #bbb;border-radius:3px;cursor:pointer;background:#fff;font-size:11px}
 #hl-clear:hover{background:#eee}
-#species-legend{padding:4px 10px;background:#fafafa;border-bottom:1px solid #eee;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:10px;min-height:24px}
-.leg-item{display:flex;align-items:center;gap:3px}
-.leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 
 /* tree svg */
 #tree-wrap{flex:1;overflow:hidden;position:relative;background:#fff}
@@ -475,7 +472,6 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <datalist id="hl-list"></datalist>
           <button id="hl-clear" onclick="clearHighlight()">&#10005;</button>
         </div>
-        <div id="species-legend"></div>
         <div id="tree-wrap">
           <svg id="tree-svg"></svg>
         </div>
@@ -815,7 +811,7 @@ document.getElementById("color-by").addEventListener("change",function(){
       cladeSp2Group[sp]=grp;
     }
   }
-  renderTree(); buildLegend(currentIndex?currentIndex.species:[]);
+  renderTree();
 });
 
 function populateDatalist(){
@@ -848,55 +844,12 @@ function applyHighlight(query){
       if(!hlSet.size) hlSet=null;
     }
   }
-  if(currentIndex){ renderTree(); buildLegend(currentIndex.species); }
+  if(currentIndex){ renderTree(); }
 }
 function clearHighlight(){ document.getElementById("hl-search").value=""; applyHighlight(""); }
 
 document.getElementById("hl-search").addEventListener("input",function(){ applyHighlight(this.value); });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// TREE VIEW – LEGEND
-// ═══════════════════════════════════════════════════════════════════════════════
-function buildLegend(species){
-  const el=document.getElementById("species-legend"); el.innerHTML="";
-  if(colorMode==="og"){
-    Object.entries(ogName2Color).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([og,col])=>{
-      const item=document.createElement("div"); item.className="leg-item";
-      item.innerHTML='<div class="leg-dot" style="background:'+col+'"></div>'+og;
-      el.appendChild(item);
-    });
-    const hasUnassigned=currentDetail&&rootNode&&rootNode.leaves().some(l=>!ogLeaf2Color[l.data.gene_id||l.data.name]);
-    if(hasUnassigned){
-      const item=document.createElement("div"); item.className="leg-item";
-      item.innerHTML='<div class="leg-dot" style="background:#ccc"></div><em>unassigned</em>'; el.appendChild(item);
-    }
-  } else if(colorMode==="species"){
-    species.forEach(sp=>{
-      const col=leafColor(sp);
-      const item=document.createElement("div"); item.className="leg-item";
-      item.innerHTML='<div class="leg-dot" style="background:'+col+'"></div>'+sp;
-      el.appendChild(item);
-    });
-  } else {
-    const shown=new Set();
-    for(const sp of species){
-      const grp=cladeSp2Group[sp]; if(!grp||shown.has(grp))continue; shown.add(grp);
-      const col=hlSet?(hlSet.has(sp)?cladeSp2Color[sp]:"#ccc"):(cladeSp2Color[sp]||"#ccc");
-      const item=document.createElement("div"); item.className="leg-item";
-      item.innerHTML='<div class="leg-dot" style="background:'+col+'"></div>'+grp;
-      el.appendChild(item);
-    }
-    if(species.some(sp=>!cladeSp2Group[sp])){
-      const item=document.createElement("div"); item.className="leg-item";
-      item.innerHTML='<div class="leg-dot" style="background:#ccc"></div>Other'; el.appendChild(item);
-    }
-  }
-  if(hlSet!==null){
-    const item=document.createElement("div"); item.className="leg-item"; item.style.color="#999";
-    item.innerHTML='<div class="leg-dot" style="background:#ccc"></div><em>others greyed</em>';
-    el.appendChild(item);
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TREE VIEW – SELECTION & D3 RENDERING
@@ -935,7 +888,6 @@ function selectTree(rec){
   });
   drawGeneTree(currentDetail.tree);
   collapseToOGs();
-  buildLegend(rec.species);
 }
 
 function rebuildOgColors(){
@@ -961,7 +913,6 @@ function toggleTreeSource(){
     rebuildOgColors();
     drawGeneTree(currentDetail.tree);
   }
-  if(currentIndex) buildLegend(currentIndex.species);
 }
 
 function activeOgs(){
