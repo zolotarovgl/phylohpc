@@ -418,8 +418,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .link{fill:none;stroke:#d5d5d5;stroke-width:1.3px}
 .node-g circle{cursor:pointer;transition:r .12s,fill .12s}
 .node-g circle:hover{stroke-width:2.5px !important}
-.badge-bg{fill:#f0f0f0;stroke:#bbb;stroke-width:1px;cursor:pointer}
-.badge-bg:hover{fill:#e4e4e4}
+.col-tri{fill:rgba(90,130,170,0.13);stroke:#7a9ab8;stroke-width:1px;cursor:pointer}
+.col-tri:hover{fill:rgba(90,130,170,0.25)}
 .leaf-label{pointer-events:none;font-family:monospace}
 .og-label{fill:#b5371f;pointer-events:none}
 .ctrl-btn.active-btn{background:#d5f5e3;border-color:#1abc9c;color:#1a6b4a}
@@ -768,8 +768,8 @@ function cpExpand() {
 // HEATMAP VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
 const TOP_MARGIN = 110;
-const HM_BAR_H  = 72;   // height reserved above heatmap rows for the column-sum bar chart
-const HM_TOP    = TOP_MARGIN + HM_BAR_H;  // first row y-coord in the heatmap SVG
+const HM_TOP     = TOP_MARGIN;   // first row y-coord in the heatmap SVG
+const HM_BAR_H   = 55;           // height of column-sum bar chart below the heatmap
 
 // species order: tree order filtered to species present in data
 const dataSpecies = new Set([...FAMILY_DATA,...HG_DATA].flatMap(d=>Object.keys(d.species_counts)));
@@ -786,6 +786,8 @@ const hasHeatmapData = FAMILY_DATA.length > 0 || HG_DATA.length > 0;
   prefs.forEach(p => { const o=document.createElement("option"); o.value=p; o.textContent=p; sel.appendChild(o); });
   sel.addEventListener("change", drawHeatmap);
 })();
+
+const cladoCollapsed = new Set();  // stable node keys of collapsed cladogram nodes
 
 function drawCladogram() {
   const tp = document.getElementById("tree-panel");
@@ -810,13 +812,20 @@ function drawCladogram() {
   function assignY(n){ if(!n.children){n._y=leafY[n.name]||0;return n._y;} const ys=n.children.map(assignY); n._y=d3.mean(ys);return n._y; }
   function assignX(n,d=0){ n._d=d; if(n.children) n.children.forEach(c=>assignX(c,d+1)); }
   function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
+  // stable key for a node: sorted leaf names (survives re-renders)
+  function nodeKey(n){ return flat(n).filter(x=>!x.children).map(x=>x.name).sort().join(","); }
+  // y-range of all leaves in a subtree
+  function yRange(n){ const ys=flat(n).filter(x=>!x.children).map(x=>leafY[x.name]||0); return [d3.min(ys),d3.max(ys)]; }
+
   assignY(tree); assignX(tree);
   const maxD=d3.max(flat(tree),d=>d._d)||1;
   flat(tree).forEach(n=>{ if(!n.children) n._d=maxD; }); // align all tips
   const sx=d=>10+(d/maxD)*150;
 
+  // ── branches (skip into collapsed subtrees) ──────────────────────────────
   function drawB(n){
-    if(!n.children)return;
+    if(!n.children) return;
+    if(cladoCollapsed.has(nodeKey(n))) return;
     const ys=n.children.map(c=>c._y);
     svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d)).attr("y1",d3.min(ys)).attr("y2",d3.max(ys)).attr("stroke","#aaa");
     n.children.forEach(c=>{
@@ -826,26 +835,56 @@ function drawCladogram() {
   }
   drawB(tree);
 
-  // ── interactive internal nodes (hover = name, shift+click = heatmap split) ──
+  // ── collapsed triangles ───────────────────────────────────────────────────
+  function drawCollapsedTriangles(n){
+    if(!n.children) return;
+    const key=nodeKey(n);
+    if(cladoCollapsed.has(key)){
+      const [y0,y1]=yRange(n);
+      svg.append("polygon")
+        .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
+        .attr("fill","rgba(90,130,170,0.15)").attr("stroke","#7a9ab8").attr("stroke-width",1)
+        .style("cursor","pointer")
+        .on("mouseover",ev=>showTip(ev,(n.name||"clade")+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand</div>'))
+        .on("mousemove",moveTip).on("mouseout",hideTip)
+        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); });
+      if(n.name)
+        svg.append("text").attr("x",sx(n._d)+6).attr("y",n._y).attr("dy","0.35em")
+          .attr("font-size",9).attr("fill","#5a7090").attr("font-style","italic")
+          .style("pointer-events","none").text(n.name);
+      return;
+    }
+    n.children.forEach(drawCollapsedTriangles);
+  }
+  drawCollapsedTriangles(tree);
+
+  // ── interactive internal nodes (click=collapse, shift+click=heatmap split) ─
   function drawCladoNodes(n){
     if(!n.children) return;
+    const key=nodeKey(n);
+    if(cladoCollapsed.has(key)) return;
     const nodeLabel = n.name || "(unnamed)";
-    const cleavesSet = new Set(n.children ? flat(n).filter(x=>!x.children).map(x=>x.name) : []);
+    const cleavesSet = new Set(flat(n).filter(x=>!x.children).map(x=>x.name));
     const splitIdx = hmSplitSets.findIndex(s=>s.size===cleavesSet.size&&[...cleavesSet].every(v=>s.has(v)));
     const isSplit = splitIdx >= 0;
     const nodeCol = isSplit ? hmSplitLineColors[splitIdx%hmSplitLineColors.length] : "#aaa";
+    const tip = nodeLabel+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to collapse &nbsp;·&nbsp; shift+click to split heatmap</div>';
     svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
       .attr("fill", isSplit ? hmSplitColors[splitIdx%hmSplitColors.length] : "#fff")
       .attr("stroke",nodeCol).attr("stroke-width", isSplit?2:1)
       .style("cursor","pointer")
-      .on("mouseover",ev=>showTip(ev,nodeLabel+'<div style="font-size:9px;color:#aaa;margin-top:2px">shift+click to split heatmap</div>'))
+      .on("mouseover",ev=>showTip(ev,tip))
       .on("mousemove",moveTip).on("mouseout",hideTip)
       .on("click",(ev)=>{
-        if(!ev.shiftKey) return;
-        ev.stopPropagation();
-        if(isSplit){ hmSplitSets.splice(splitIdx,1); hmSplitLabels.splice(splitIdx,1); }
-        else { hmSplitSets.push(cleavesSet); hmSplitLabels.push(nodeLabel); }
-        updateHmSplitBar(); hideTip(); drawCladogram(); drawHeatmap();
+        hideTip();
+        if(ev.shiftKey){
+          ev.stopPropagation();
+          if(isSplit){ hmSplitSets.splice(splitIdx,1); hmSplitLabels.splice(splitIdx,1); }
+          else { hmSplitSets.push(cleavesSet); hmSplitLabels.push(nodeLabel); }
+          updateHmSplitBar(); drawCladogram(); drawHeatmap();
+        } else {
+          cladoCollapsed.add(key); drawCladogram();
+        }
       });
     n.children.forEach(drawCladoNodes);
   }
@@ -1096,8 +1135,14 @@ function drawHeatmap() {
     }).sort((a,b)=>b.total-a.total);
     back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG);
     colLabel=d=>d.id+" ["+d.total+"]";
-    clickHandler=(_ev,_d)=>{
-      if(treeRec){ switchTab("trees"); selectTree(treeRec); renderSidebar(""); }
+    // third arg 'sp': species clicked (from cell), undefined for column-header click
+    clickHandler=(_ev,_d,sp)=>{
+      if(!treeRec) return;
+      if(sp && _d.species_counts[sp]){
+        hlQueries=[sp]; rebuildHlSet();
+      }
+      switchTab("trees"); selectTree(treeRec); renderSidebar("");
+      if(hlSet) setTimeout(focusHighlighted,60);
     };
   }
 
@@ -1128,39 +1173,16 @@ function drawHeatmap() {
   const cW=18, cH=12;
   const maxNameLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
   const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
-  const BAR_MAX_H=HM_BAR_H-22;   // usable bar pixel height within the reserved zone
-  const hmTM=HM_TOP;              // alias used throughout drawHeatmap
-  const svgW=data.length*cW+ROW_LABEL_W+20, svgH=hmOrder.length*14+hmTM+60;
+  const hmTM=HM_TOP;
+  const nRows=hmOrder.length;
+  const CELLS_BOTTOM=nRows*14+hmTM;   // y just below the last cell row
+  const BAR_TOP=CELLS_BOTTOM+10;      // bar chart starts here
+  const svgW=data.length*cW+ROW_LABEL_W+20;
+  const svgH=BAR_TOP+HM_BAR_H+50;    // extra room for colorbar legend
   const panel=document.getElementById("heatmap-panel");
   const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
 
   if(!data.length){ svg.append("text").attr("x",40).attr("y",hmTM+30).attr("fill","#999").text("No data for this selection."); return; }
-
-  // ── column-sum bar chart ──────────────────────────────────────────────────
-  const colTotals=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
-  const maxTotal=d3.max(colTotals)||1;
-  const BAR_BASELINE=hmTM-15;           // x-axis line y-coord
-  svg.append("line")
-    .attr("x1",ROW_LABEL_W).attr("x2",ROW_LABEL_W+data.length*cW)
-    .attr("y1",BAR_BASELINE).attr("y2",BAR_BASELINE)
-    .attr("stroke","#ccc").attr("stroke-width",0.8);
-  // "total" y-axis label
-  svg.append("text").attr("x",ROW_LABEL_W-4).attr("y",BAR_BASELINE-BAR_MAX_H/2)
-    .attr("text-anchor","end").attr("font-size",8).attr("fill","#aaa")
-    .attr("dominant-baseline","middle").text("total \u2193");
-  data.forEach((_rec,ci)=>{
-    const total=colTotals[ci];
-    const bH=Math.max(total>0?1:0,(total/maxTotal)*BAR_MAX_H);
-    svg.append("rect")
-      .attr("x",ci*cW+ROW_LABEL_W+1).attr("y",BAR_BASELINE-bH)
-      .attr("width",cW-2).attr("height",bH)
-      .attr("fill","#7fb3d3").attr("opacity",0.8);
-    if(total>0)
-      svg.append("text")
-        .attr("x",ci*cW+ROW_LABEL_W+cW/2).attr("y",BAR_BASELINE-bH-2)
-        .attr("text-anchor","middle").attr("font-size",6.5).attr("fill","#555")
-        .text(total>=10000?(total/1000).toFixed(0)+"k":total);
-  });
 
   // draw group background bands before cells (SVG paint order: back to front)
   if (nSplitGroups > 0) {
@@ -1211,7 +1233,7 @@ function drawHeatmap() {
           showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b><br>z: <b>'+z.toFixed(2)+'</b>');
         })
         .on("mousemove",moveTip).on("mouseout",hideTip)
-        .on("click",ev=>clickHandler(ev,rec));
+        .on("click",ev=>clickHandler(ev,rec,sp));
       if(count>0){
         const fc=d3.color(color(z));
         const lum=fc?(0.2126*fc.r+0.7152*fc.g+0.0722*fc.b)/255:1;
@@ -1248,6 +1270,31 @@ function drawHeatmap() {
     .attr("x",ROW_LABEL_W).attr("y",TOP_MARGIN-8)
     .attr("font-size",9).attr("fill","#aaa").attr("font-style","italic")
     .text("Click a column label or cell to drill down \u2193");
+
+  // ── column-sum bar chart (below cells) ───────────────────────────────────
+  const colTotals=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
+  const maxTotal=d3.max(colTotals)||1;
+  // baseline
+  svg.append("line")
+    .attr("x1",ROW_LABEL_W).attr("x2",ROW_LABEL_W+data.length*cW)
+    .attr("y1",BAR_TOP).attr("y2",BAR_TOP)
+    .attr("stroke","#ccc").attr("stroke-width",0.8);
+  svg.append("text").attr("x",ROW_LABEL_W-4).attr("y",BAR_TOP+HM_BAR_H/2)
+    .attr("text-anchor","end").attr("font-size",8).attr("fill","#aaa")
+    .attr("dominant-baseline","middle").text("total \u2191");
+  data.forEach((_rec,ci)=>{
+    const total=colTotals[ci];
+    const bH=Math.max(total>0?1:0,(total/maxTotal)*HM_BAR_H);
+    svg.append("rect")
+      .attr("x",ci*cW+ROW_LABEL_W+1).attr("y",BAR_TOP)
+      .attr("width",cW-2).attr("height",bH)
+      .attr("fill","#7fb3d3").attr("opacity",0.8);
+    if(total>0)
+      svg.append("text")
+        .attr("x",ci*cW+ROW_LABEL_W+cW/2).attr("y",BAR_TOP+bH+8)
+        .attr("text-anchor","middle").attr("font-size",6.5).attr("fill","#555")
+        .text(total>=10000?(total/1000).toFixed(0)+"k":total);
+  });
 
   // colorbar legend
   const cbW=120, cbH=10, cbX=ROW_LABEL_W, cbY=svgH-28;
@@ -1455,7 +1502,7 @@ document.getElementById("hl-search").addEventListener("change",function(){
 document.getElementById("tip-font-slider").addEventListener("input",function(){
   tipFontSize=+this.value;
   document.getElementById("tip-font-val").textContent=this.value;
-  if(currentIndex) renderTree();
+  applyTipFontSize();
 });
 
 document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
@@ -1552,8 +1599,16 @@ function activeOgs(){
 }
 
 const treeSvg = d3.select("#tree-svg");
-let rootNode=null, gMain=null, _uid=0, _zoom=null;
+let rootNode=null, gMain=null, _uid=0, _zoom=null, _zoomScale=1;
 let useBranchLen=false, _phyloScale=1;
+
+function tipFontSVG(){ return (tipFontSize!==null?tipFontSize:11)/_zoomScale; }
+function applyTipFontSize(){
+  if(!gMain) return;
+  const fs=tipFontSVG();
+  gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?fs:0);
+  gMain.selectAll(".og-label").attr("font-size",fs);
+}
 
 function isOGNode(d){ return !d.data.leaf && d.data.name && activeOgs()[d.data.name]!==undefined; }
 
@@ -1652,7 +1707,12 @@ function drawGeneTree(treeData){
   const wrap=document.getElementById("tree-wrap");
   const W=wrap.clientWidth||800, H=wrap.clientHeight||600;
   treeSvg.attr("width",W).attr("height",H);
-  _zoom=d3.zoom().scaleExtent([0.03,30]).on("zoom",e=>{gMain.attr("transform",e.transform);});
+  _zoomScale=1;
+  _zoom=d3.zoom().scaleExtent([0.03,30]).on("zoom",e=>{
+    gMain.attr("transform",e.transform);
+    _zoomScale=e.transform.k;
+    applyTipFontSize();
+  });
   treeSvg.call(_zoom).on("dblclick.zoom",null);
   gMain=treeSvg.append("g");
   rootNode=d3.hierarchy(treeData,d=>d.children);
@@ -1713,8 +1773,7 @@ function renderTree(animate){
           .attr("transform",d=>{const p=d.parent||d;return `translate(${nodeX(p,mg)},${p.x+mg.top})`;})
           .style("opacity",0);
         g.append("circle");
-        g.append("rect").attr("class","badge-bg")
-          .attr("y",-BADGE_H/2).attr("height",BADGE_H).attr("rx",BADGE_H/2).attr("ry",BADGE_H/2);
+        g.append("polygon").attr("class","col-tri");
         g.append("text").attr("class","leaf-label");
         g.append("text").attr("class","og-label");
         return g;
@@ -1746,25 +1805,32 @@ function renderTree(animate){
     .attr("stroke-width",d=>isOGNode(d)?1.8:0.8)
     .on("click",(event,d)=>{
       if(d.data.leaf)return; event.stopPropagation();
-      if(d._children){ showCollapsedPopup(event,d); }
+      if(d._children){ d.children=d._children; d._children=null; renderTree(true); }
       else if(d.children){d._children=d.children;d.children=null; renderTree(true);}
     })
     .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
 
-  // badge rectangle (collapsed nodes)
-  nodeSel.select(".badge-bg")
+  // collapsed triangle (replaces badge pill)
+  nodeSel.select(".col-tri")
     .attr("display",d=>d._children?null:"none")
-    .attr("x",5).attr("width",BADGE_W)
-    .on("click",(event,d)=>{
-      if(d.data.leaf)return; event.stopPropagation();
-      if(d._children) showCollapsedPopup(event,d);
+    .attr("points",d=>{
+      if(!d._children) return "";
+      const nL=countAllLeaves(d);
+      const halfH=Math.min(Math.max(rowH*0.6, rowH*nL/2), iH*0.35);
+      return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
     })
-    .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
+    .on("click",(event,d)=>{
+      if(d.data.leaf||!d._children) return; event.stopPropagation();
+      d.children=d._children; d._children=null; renderTree(true);
+    })
+    .on("mouseover",(ev,d)=>{
+      if(d._children) showTip(ev,collapsedLabel(d)+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand</div>');
+    }).on("mousemove",moveTip).on("mouseout",hideTip);
 
   // leaf labels: gene_id + OG name
   nodeSel.select(".leaf-label")
     .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
-    .attr("font-size",d=>d.data.leaf?(tipFontSize!==null?tipFontSize:Math.min(11,rowH-2)):0)
+    .attr("font-size",d=>d.data.leaf?tipFontSVG():0)
     .attr("display",d=>{
       if(!d.data.leaf) return "none";
       if(hideNonHl && hlSet!==null && !hlSet.has(d.data.species||"")) return "none";
@@ -1792,12 +1858,13 @@ function renderTree(animate){
 
   // OG labels (inside badge when collapsed, beside node when OG-named internal)
   nodeSel.select(".og-label")
-    .attr("x",d=>d._children?BADGE_W/2+5:-7)
+    .attr("x",d=>d._children?BADGE_W+6:-7)
     .attr("dy","0.35em")
-    .attr("text-anchor",d=>d._children?"middle":"end")
-    .attr("font-size",9)
+    .attr("text-anchor",d=>d._children?"start":"end")
+    .attr("font-size",tipFontSVG())
     .attr("display",d=>(!d.data.leaf&&(isOGNode(d)||d._children))?null:"none")
     .text(d=>d._children?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
+  applyTipFontSize();
 }
 
 // ── tree controls ──
