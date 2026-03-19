@@ -489,6 +489,12 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         </label>
       </div>
     </div>
+    <div id="hm-help" style="padding:5px 14px 6px;font-size:10px;color:#888;background:#fafafa;border-bottom:1px solid #eee;display:flex;gap:20px;flex-wrap:wrap">
+      <span><b style="color:#666">Navigate:</b> click a <i>column header</i> to drill into a family/HG &rarr; OG level</span>
+      <span><b style="color:#666">Open tree:</b> click a <i>cell</i> to jump to the gene tree and highlight that species</span>
+      <span><b style="color:#666">Row groups:</b> <i>shift+click</i> a node in the Species Tree tab to split rows by clade</span>
+      <span><b style="color:#666">Legend:</b> colour intensity = gene count per species in that OG</span>
+    </div>
     <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
       <span style="font-weight:600">Row groups:</span>
       <span id="hm-split-tags"></span>
