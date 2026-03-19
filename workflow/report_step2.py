@@ -1791,8 +1791,9 @@ function applyTipFontSize(){
   const fs=tipFontSVG();
   gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?fs:0);
   gMain.selectAll(".og-label").attr("font-size",fs);
-  gMain.selectAll(".count-label").attr("font-size",fs);
-  gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",Math.max(10,fs*0.9));
+  const colR2=Math.max(10,fs*0.9), leafR2=fs*0.36, colCx2=-(colR2-leafR2);
+  gMain.selectAll(".count-label").attr("font-size",fs).attr("x",d=>d&&d._children&&!d._isOgCol?colCx2:null);
+  gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",colR2).attr("cx",colCx2);
   gMain.selectAll("circle").filter(d=>d&&!d._children).attr("r",d=>d.data&&d.data.leaf?fs*0.36:isOGNode(d)?fs*0.5:fs*0.26);
   gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
 }
@@ -2006,6 +2007,7 @@ function renderTree(animate){
   // circle (leaves and expanded internals)
   nodeSel.select("circle")
     .attr("display",d=>d._children?"none":null)
+    .attr("cx",0)   // reset any offset from manual-collapse state
     .attr("r",d=>d.data.leaf?tipFontSVG()*0.36:isOGNode(d)?tipFontSVG()*0.5:tipFontSVG()*0.26)
     .attr("fill",d=>{
       if(d.data.leaf){
@@ -2056,15 +2058,23 @@ function renderTree(animate){
     }).on("mousemove",moveTip).on("mouseout",hideTip);
 
   // manual-collapse: larger circle + leaf count label
-  nodeSel.select("circle")
-    .filter(d=>d._children&&!d._isOgCol)
-    .attr("r",d=>Math.max(10, tipFontSVG()*0.9))
-    .attr("fill","#f5f5f5").attr("stroke","#999").attr("stroke-width",1.2)
-    .attr("display",null);
-  nodeSel.select(".count-label")
-    .attr("display",d=>(d._children&&!d._isOgCol)?null:"none")
-    .attr("font-size",tipFontSVG())
-    .text(d=>(d._children&&!d._isOgCol)?countAllLeaves(d):"");
+  // Shift circle leftward so its RIGHT edge aligns with the normal leaf column,
+  // preventing it from protruding into neighbouring nodes' label zones.
+  {
+    const leafR = tipFontSVG()*0.36;
+    const colR  = d => Math.max(10, tipFontSVG()*0.9);
+    const colCx = d => { const r=colR(d); return -(r-leafR); };
+    nodeSel.select("circle")
+      .filter(d=>d._children&&!d._isOgCol)
+      .attr("r",colR).attr("cx",colCx)
+      .attr("fill","#f5f5f5").attr("stroke","#999").attr("stroke-width",1.2)
+      .attr("display",null);
+    nodeSel.select(".count-label")
+      .attr("display",d=>(d._children&&!d._isOgCol)?null:"none")
+      .attr("font-size",tipFontSVG())
+      .attr("x",d=>(d._children&&!d._isOgCol)?colCx(d):0)
+      .text(d=>(d._children&&!d._isOgCol)?countAllLeaves(d):"");
+  }
 
   // leaf labels: gene_id + OG name
   nodeSel.select(".leaf-label")
