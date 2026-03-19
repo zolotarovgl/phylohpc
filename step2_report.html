@@ -1,0 +1,1888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Step 2 Report</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{height:100%;height:-webkit-fill-available}
+body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:12px;background:#f7f7f7;color:#333;display:flex;flex-direction:column}
+
+/* ── shared header bar ── */
+.top-bar{padding:8px 14px;background:#2c3e50;color:#ecf0f1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:42px}
+.top-bar h2{font-size:14px;font-weight:600;white-space:nowrap}
+.top-bar .btn{padding:3px 10px;border:1px solid #7f8c8d;border-radius:3px;background:transparent;color:#ecf0f1;cursor:pointer;font-size:11px}
+.top-bar .btn:hover{background:#34495e}
+.top-bar select{font-size:11px;padding:2px 5px;border:1px solid #7f8c8d;border-radius:3px;background:#34495e;color:#ecf0f1}
+.top-bar label{font-size:11px;color:#bdc3c7}
+
+/* ── Tab strip ── */
+#body-wrap{display:flex;flex:1;overflow:hidden;min-height:0}
+#tab-strip{width:36px;display:flex;flex-direction:column;background:#2c3e50;gap:2px;padding-top:4px;flex-shrink:0}
+.tab-btn{writing-mode:vertical-rl;transform:rotate(180deg);padding:10px 6px;cursor:pointer;background:transparent;border:none;border-left:3px solid transparent;color:#95a5a6;font-size:11px;font-weight:600;white-space:nowrap;text-align:center}
+.tab-btn.active{color:#ecf0f1;border-left-color:#1abc9c;background:#34495e}
+.tab-btn:hover:not(.active){color:#ecf0f1;background:#3d5166}
+.tab-pane{display:none;flex:1;overflow:hidden;flex-direction:column;min-height:0}
+.tab-pane.active{display:flex}
+
+/* ── Species tree pane ── */
+#pane-sptree{flex-direction:column}
+#sptree-controls{display:flex;align-items:center;gap:12px;padding:6px 14px;background:#f5f5f5;border-bottom:1px solid #ddd;flex-shrink:0}
+#sp-tree-wrap{flex:1;overflow:auto;background:#fff;padding:16px}
+#sp-tree-wrap svg{display:block}
+
+/* ── Heatmap pane ── */
+#pane-heatmap{flex-direction:row}
+#hm-layout{display:flex;flex:1;overflow:hidden}
+#tree-panel{width:200px;overflow-y:auto;border-right:1px solid #ccc;background:#fff;flex-shrink:0}
+#heatmap-panel{flex:1;overflow:auto;background:#fff}
+.hm-col{font-size:9px;cursor:pointer}
+.hm-col:hover{font-weight:700}
+.hm-cell:hover{stroke:#000;stroke-width:1px}
+
+/* ── Tree pane ── */
+#pane-trees{flex-direction:column}
+#app{display:flex;flex:1;overflow:hidden}
+
+/* sidebar */
+#sidebar{flex:0 0 220px;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fff}
+#sidebar-top{padding:8px;border-bottom:1px solid #eee}
+#hg-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:3px}
+#hg-count{font-size:10px;color:#999;margin-top:4px}
+#hg-list{flex:1;overflow-y:auto}
+.fam-header{padding:5px 8px;background:#ecf0f1;border-bottom:1px solid #ddd;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#444;user-select:none}
+.fam-header:hover{background:#dce4ec}
+.fam-arrow{font-size:9px;transition:transform .15s}
+.fam-header.open .fam-arrow{transform:rotate(90deg)}
+.fam-body{display:none}
+.fam-body.open{display:block}
+.hg-item{padding:5px 10px 5px 16px;cursor:pointer;border-bottom:1px solid #f0f0f0;line-height:1.35}
+.hg-item:hover{background:#f5f5f5}
+.hg-item.selected{background:#d5f5e3;border-left:3px solid #1abc9c;padding-left:13px}
+.hg-item .hg-name{font-weight:600;font-size:11px}
+.hg-item .hg-meta{font-size:10px;color:#888}
+.hg-cov{height:3px;background:#e8e8e8;border-radius:2px;margin:3px 0 1px}
+.hg-cov-bar{height:3px;background:#1abc9c;border-radius:2px}
+.src-badge{font-size:8px;padding:1px 4px;border-radius:3px;background:#dceeff;color:#2a6fa8;font-weight:600;margin-left:5px;vertical-align:middle;letter-spacing:0.02em}
+
+/* main tree panel */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#controls{padding:5px 10px;background:#f5f5f5;border-bottom:1px solid #ddd;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctrl-btn{padding:3px 9px;border:1px solid #bbb;border-radius:3px;cursor:pointer;background:#fff;font-size:11px}
+.ctrl-btn:hover{background:#eee}
+#tree-title{font-size:11px;color:#555;margin-left:4px}
+#n-ogs-label{font-size:10px;color:#888}
+#hl-search{font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px;width:180px}
+#hl-clear{padding:2px 6px;border:1px solid #bbb;border-radius:3px;cursor:pointer;background:#fff;font-size:11px}
+#hl-clear:hover{background:#eee}
+#hl-tags{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.hl-tag{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:10px;color:#fff;white-space:nowrap;cursor:default}
+.hl-tag-x{cursor:pointer;opacity:.7;font-size:12px;line-height:1}
+.hl-tag-x:hover{opacity:1}
+
+/* tree svg */
+#tree-wrap{flex:1;overflow:hidden;position:relative;background:#fff}
+#tree-svg{width:100%;height:100%;cursor:grab;display:block}
+#tree-svg:active{cursor:grabbing}
+.link{fill:none;stroke:#d5d5d5}
+.node-g circle{cursor:pointer;transition:r .12s,fill .12s}
+.node-g circle:hover{stroke-width:2.5px !important}
+.col-tri{fill:rgba(90,130,170,0.13);stroke:#222;stroke-width:1px;cursor:pointer}
+.col-tri:hover{fill:rgba(90,130,170,0.25)}
+.leaf-label{pointer-events:none;font-family:monospace}
+.og-label{fill:#b5371f;pointer-events:none}
+.ctrl-btn.active-btn{background:#d5f5e3;border-color:#1abc9c;color:#1a6b4a}
+.scale-bar-g line{stroke:#999;stroke-width:1.5px}
+.scale-bar-g text{font-size:9px;fill:#888;text-anchor:middle}
+
+/* tooltip */
+#tooltip{position:fixed;display:none;pointer-events:none;background:rgba(255,255,255,.97);border:1px solid #bbb;border-radius:5px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:100;max-width:260px}
+/* collapsed-node popup */
+#collapsed-popup{position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:10px 12px;font-size:11px;box-shadow:0 3px 10px rgba(0,0,0,.2);z-index:200;min-width:230px}
+#collapsed-popup .cp-title{font-weight:700;margin-bottom:7px;font-size:12px;color:#333}
+#collapsed-popup .cp-row{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+#collapsed-popup .cp-row input{flex:1;font-size:11px;padding:2px 5px;border:1px solid #ccc;border-radius:3px}
+#collapsed-popup .cp-genes-label{font-size:10px;color:#888;margin-bottom:2px}
+#collapsed-popup textarea{width:100%;height:80px;font-size:9px;font-family:monospace;resize:vertical;border:1px solid #ddd;border-radius:3px;padding:3px;box-sizing:border-box}
+#collapsed-popup .cp-actions{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
+#collapsed-popup .cp-btn{font-size:10px;padding:3px 8px;border:1px solid #bbb;border-radius:3px;background:#f8f8f8;cursor:pointer}
+#collapsed-popup .cp-btn:hover{background:#e8e8e8}
+.tt-name{font-weight:700;margin-bottom:4px;font-size:12px}
+.tt-row{display:flex;justify-content:space-between;gap:10px;color:#555;margin-top:2px}
+</style>
+</head>
+<body>
+
+<!-- ════════ Single top bar ════════ -->
+<div class="top-bar">
+  <h2>Step 2 Report</h2>
+  <button class="btn" id="hm-back" style="display:none" onclick="hmBack()">&#8592; Back</button>
+  <span id="hm-breadcrumb" style="font-size:11px"></span>
+  <span id="tree-count" style="font-size:11px;color:#95a5a6;display:none"></span>
+  <label style="margin-left:auto">Prefix:
+    <select id="prefixSelect"></select>
+  </label>
+</div>
+
+<!-- ════════ Body: tab strip + panes ════════ -->
+<div id="body-wrap">
+
+  <!-- vertical tab strip -->
+  <div id="tab-strip">
+    <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">&#9639; Counts</button>
+    <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">&#11044; Gene Trees</button>
+    <button class="tab-btn" data-tab="sptree" onclick="switchTab('sptree')">&#10022; Species Tree</button>
+  </div>
+
+  <!-- ── Heatmap pane ── -->
+  <div class="tab-pane active" id="pane-heatmap">
+    <div id="hm-controls" style="border-bottom:1px solid #ddd;background:#f5f5f5;flex-shrink:0">
+      <div style="display:flex;align-items:center;padding:3px 10px;gap:8px">
+        <button onclick="toggleHmColCtrl()" id="hm-col-ctrl-btn" style="font-size:11px;padding:1px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;display:flex;align-items:center;gap:4px">
+          <span id="hm-col-ctrl-arrow" style="font-size:9px">&#9654;</span> Column labels control
+        </button>
+        <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click a column label or cell to drill down &darr;</span>
+      </div>
+      <div id="hm-col-ctrl-body" style="display:none;padding:5px 14px 7px;gap:14px">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Label size:
+            <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="hm-col-font-val" style="width:20px;text-align:right">9</span>px
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Rotation:
+            <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
+          </label>
+        </div>
+        <div style="font-size:10px;color:#999;line-height:1.7;margin-top:3px">
+          <div><b style="color:#777">Navigate:</b> click a <i>column header</i> to drill into family &rarr; HG &rarr; OG</div>
+          <div><b style="color:#777">Open tree:</b> click a <i>cell</i> to open the gene tree and highlight that species</div>
+          <div><b style="color:#777">Row groups:</b> shift+click a node in the Species Tree tab to split rows by clade</div>
+          <div><b style="color:#777">Colour:</b> intensity = gene count; grey = absent</div>
+        </div>
+      </div>
+    </div>
+    <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
+      <span style="font-weight:600">Row groups:</span>
+      <span id="hm-split-tags"></span>
+      <button onclick="clearHmSplits()" style="margin-left:4px;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">&#10005; Clear</button>
+      <span style="font-size:10px;color:#aaa">(shift+click a node in the Species Tree tab to add a group)</span>
+    </div>
+    <div id="hm-layout">
+      <div id="tree-panel"></div>
+      <div id="heatmap-panel"></div>
+    </div>
+  </div>
+
+  <!-- ── Gene tree pane ── -->
+  <div class="tab-pane" id="pane-trees">
+    <div id="app">
+      <div id="sidebar">
+        <div id="sidebar-top">
+          <select id="class-filter" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid #ccc;border-radius:3px;margin-bottom:4px"><option value="">All classes</option></select>
+          <input id="hg-search" type="text" placeholder="Search HG / family…">
+          <div id="hg-count"></div>
+        </div>
+        <div id="hg-list"></div>
+      </div>
+      <div id="main">
+        <div id="controls">
+          <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
+          <button class="ctrl-btn" onclick="collapseToOGs()">Collapse to OGs</button>
+          <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
+          <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()">Branch lengths</button>
+          <button class="ctrl-btn" onclick="fitTree()">&#x2922; Fit</button>
+          <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
+          <span id="tree-title"></span>
+          <span id="n-ogs-label"></span>
+          <span style="flex:1"></span>
+          <label style="font-size:11px;color:#555">Color:
+            <select id="color-by" style="font-size:11px;padding:2px 4px;border:1px solid #bbb;border-radius:3px">
+              <option value="species">by species</option>
+            </select>
+          </label>
+          <div id="hl-tags"></div>
+          <input id="hl-search" list="hl-list" placeholder="Species… (Enter to add)">
+          <datalist id="hl-list"></datalist>
+          <button id="hl-clear" onclick="clearHighlight()" title="Clear all species highlights">&#10005;</button>
+          <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
+          <span style="border-left:1px solid #ddd;margin:0 4px;height:16px;align-self:center"></span>
+          <div id="og-hl-tags"></div>
+          <input id="og-hl-search" list="og-hl-list" placeholder="OG name… (Enter to add)" style="width:130px">
+          <datalist id="og-hl-list"></datalist>
+          <button id="og-hl-clear" onclick="clearOgHighlight()" title="Clear OG highlights">&#10005;</button>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Label size:
+            <input type="range" id="tip-font-slider" min="6" max="24" step="1" value="11" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="tip-font-val" style="width:20px;text-align:right">11</span>px
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px;margin-left:8px">
+            Line width:
+            <input type="range" id="line-width-slider" min="1" max="8" step="0.5" value="1.3" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="line-width-val" style="width:20px;text-align:right">1.3</span>px
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px;margin-left:8px">
+            Tree height:
+            <input type="range" id="tree-height-slider" min="0.5" max="5" step="0.1" value="1" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="tree-height-val" style="width:24px;text-align:right">1</span>&times;
+          </label>
+          <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:8px;margin-left:4px">
+            Show:
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-geneid" checked> gene&nbsp;ID</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-og" checked> OG</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-ref" checked> ref&nbsp;ortholog</label>
+            <span style="margin-left:6px;border-left:1px solid #ddd;padding-left:8px">
+              <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
+            </span>
+          </span>
+        </div>
+        <div id="tree-wrap">
+          <svg id="tree-svg"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Species tree pane ── -->
+  <div class="tab-pane" id="pane-sptree">
+    <div id="sptree-controls">
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:6px">
+        Tree width:
+        <input type="range" id="sptree-width-slider" min="20" max="100" step="5" value="50" style="width:90px;cursor:pointer;accent-color:#4a90d9">
+        <span id="sptree-width-val">50</span>%
+      </label>
+      <button class="ctrl-btn" id="btn-dl-newick" onclick="downloadNewick()">&#11015; Newick</button>
+    </div>
+    <div id="sp-tree-wrap"></div>
+  </div>
+
+</div>
+
+<div id="tooltip"></div>
+<div id="collapsed-popup">
+  <div class="cp-title">Collapsed node</div>
+  <div class="cp-row"><span>Name:</span><input id="cp-name" type="text"></div>
+  <div class="cp-genes-label" id="cp-genes-label"></div>
+  <textarea id="cp-genes" readonly></textarea>
+  <div class="cp-actions">
+    <button class="cp-btn" onclick="cpRename()">Rename</button>
+    <button class="cp-btn" onclick="cpCopy()">Copy genes</button>
+    <button class="cp-btn" onclick="cpExpand()">Expand</button>
+    <button class="cp-btn" onclick="cpClose()">Close</button>
+  </div>
+</div>
+
+<!-- ── Per-HG lazy data ── -->
+<div id="lazy-data" style="display:none">
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATA (injected by Python)
+// ═══════════════════════════════════════════════════════════════════════════════
+const SPECIES_ORDER = [];
+const SP_TREE_DATA  = {"name": "Root", "dist": 0, "children": [{"name": "Bilateria", "dist": 1, "children": [{"name": "Vertebrata", "dist": 1, "children": [{"name": "Mammalia", "dist": 1, "children": [{"name": "Mmus", "dist": 1, "leaf": true}, {"name": "Hsap", "dist": 1, "leaf": true}]}, {"name": "Actinopterygii", "dist": 1, "children": [{"name": "Drer", "dist": 1, "leaf": true}, {"name": "Xentro", "dist": 1, "leaf": true}]}]}, {"name": "Ecdysozoa", "dist": 1, "children": [{"name": "Diptera", "dist": 1, "children": [{"name": "Dmel", "dist": 1, "leaf": true}, {"name": "Aedaeg", "dist": 1, "leaf": true}]}, {"name": "Cele", "dist": 1, "leaf": true}]}]}, {"name": "Cnidaria_like", "dist": 1, "children": [{"name": "Nvec", "dist": 1, "leaf": true}, {"name": "Mlei", "dist": 1, "leaf": true}]}, {"name": "Invertebrata", "dist": 1, "children": [{"name": "Aque", "dist": 1, "leaf": true}, {"name": "Lophotrochozoa", "dist": 1, "children": [{"name": "Spur", "dist": 1, "leaf": true}, {"name": "Cgig", "dist": 1, "leaf": true}]}]}]};
+const FAMILY_DATA   = [];
+const HG_DATA       = [];
+const TREE_INDEX    = [];
+const ALL_SPECIES   = [];
+const CLADE_DATA    = [{"name": "Root", "groups": {"Mmus": "Bilateria", "Hsap": "Bilateria", "Drer": "Bilateria", "Xentro": "Bilateria", "Dmel": "Bilateria", "Aedaeg": "Bilateria", "Cele": "Bilateria", "Nvec": "Cnidaria_like", "Mlei": "Cnidaria_like", "Aque": "Invertebrata", "Spur": "Invertebrata", "Cgig": "Invertebrata"}}, {"name": "Bilateria", "groups": {"Mmus": "Vertebrata", "Hsap": "Vertebrata", "Drer": "Vertebrata", "Xentro": "Vertebrata", "Dmel": "Ecdysozoa", "Aedaeg": "Ecdysozoa", "Cele": "Ecdysozoa"}}, {"name": "Vertebrata", "groups": {"Mmus": "Mammalia", "Hsap": "Mammalia", "Drer": "Actinopterygii", "Xentro": "Actinopterygii"}}];
+const NEWICK_RAW    = %%NEWICK_RAW%%;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COLOUR SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════
+const palette = [
+  "#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd",
+  "#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf",
+  "#aec7e8","#ffbb78","#98df8a","#ff9896","#c5b0d5"
+];
+const SP_COLORS = {};
+ALL_SPECIES.forEach((sp,i) => { SP_COLORS[sp] = palette[i % palette.length]; });
+function spColor(sp) { return SP_COLORS[sp] || "#aaa"; }
+
+let colorMode     = "species";   // "species" | "clade" | "og"
+let cladeSp2Color = {};
+let cladeSp2Group = {};
+let cladeGrpColor = {};
+let ogLeaf2Color  = {};   // gene_id → color
+let ogName2Color  = {};   // og_name → color
+let ogGene2Name   = {};   // gene_id → og_name
+let hlSet         = null;        // null = off; union Set<species> when active
+let hlQueries     = [];          // committed query strings (tags)
+let hlGroupIndex  = new Map();   // species → group index (for per-group color)
+let hlQueryColors = {};          // query string → custom hex color override
+let ogHlSet       = null;        // null = off; Set<og_name> when active
+let ogHlQueries   = [];          // committed OG query strings
+let ogHlQueryColors = {};        // og query string → custom hex color override
+let ogHlGroupIndex= new Map();   // og_name → group index
+let tipFontSize    = null;        // null = auto; number = user override (px)
+let treeLinkWidth  = 1.3;        // branch stroke-width in screen px
+let treeHeightMult = 1.0;        // vertical stretch multiplier for the tree
+let showGeneId    = true;        // tip label parts
+let showOGName    = true;
+let showRefOrtho  = true;
+let hideNonHl     = false;   // hide non-highlighted tip labels when hlSet active
+let hmSplitSets   = [];      // array of Set<species> for heatmap row splitting
+let hmSplitLabels = [];      // display label for each split group
+let hmColFontSize = 9;       // column label font size (px)
+let hmColRotation = 65;      // column label rotation angle (degrees)
+const spCollapsed = new Set();   // node _ids collapsed in species tree
+let spTreeWidthPct = 50;         // % of pane width used by species tree SVG
+const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
+function hlTagColor(gi){ const q=hlQueries[gi]; return (q&&hlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
+function ogHlTagColor(gi){ const q=ogHlQueries[gi]; return (q&&ogHlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
+
+function openColorPicker(currentCol, onPick){
+  const inp=document.createElement("input"); inp.type="color";
+  inp.value=currentCol; inp.style.cssText="position:fixed;opacity:0;pointer-events:none";
+  document.body.appendChild(inp);
+  inp.addEventListener("input",()=>onPick(inp.value));
+  inp.addEventListener("change",()=>{ onPick(inp.value); document.body.removeChild(inp); });
+  inp.addEventListener("blur",()=>{ if(inp.parentNode) document.body.removeChild(inp); });
+  inp.click();
+}
+
+function leafColor(sp) {
+  if (hlSet !== null) {
+    if (!hlSet.has(sp)) return "#ccc";
+    const gi = hlGroupIndex.get(sp);
+    return gi !== undefined ? hlTagColor(gi)
+                            : (colorMode === "species" ? spColor(sp) : (cladeSp2Color[sp] || "#ccc"));
+  }
+  return colorMode === "species" ? spColor(sp) : (cladeSp2Color[sp] || "#ccc");
+}
+function ogLeafColor(geneId, species) {
+  if (hlSet !== null) {
+    if (!hlSet.has(species||"")) return "#ccc";
+    const gi = hlGroupIndex.get(species||"");
+    return gi !== undefined ? hlTagColor(gi) : (ogLeaf2Color[geneId] || "#ccc");
+  }
+  return ogLeaf2Color[geneId] || "#ccc";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NAVIGATION STATE
+// ═══════════════════════════════════════════════════════════════════════════════
+let hmViewMode    = "class";   // "class" | "family" | "hg" | "og"
+let hmActiveClass  = null;
+let hmActiveFamily = null;
+let hmActiveHG     = null;   // id string from HG_DATA
+let hmActiveHGRec  = null;   // full HG_DATA record (for fallback lookup)
+
+function getSpeciesPfx(geneId){
+  const g=(geneId||"").split("|")[0].trim();
+  const ui=g.indexOf("_"), di=g.indexOf(".");
+  const idx=[ui,di].filter(x=>x>0).reduce((a,b)=>Math.min(a,b),Infinity);
+  return idx===Infinity?g:g.slice(0,idx);
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab===name));
+  document.querySelectorAll(".tab-pane").forEach(p => p.classList.toggle("active", p.id==="pane-"+name));
+  const tc  = document.getElementById("tree-count");
+  const hb  = document.getElementById("hm-back");
+  const cr  = document.getElementById("hm-breadcrumb");
+  const pfx = document.getElementById("prefixSelect").parentElement; // the <label>
+  if (name==="trees") {
+    tc.style.display = "inline"; pfx.style.display = "none";
+    hb.style.display = "none"; cr.textContent = "";
+    if (!currentIndex && TREE_INDEX.length) { renderSidebar(""); selectTree(TREE_INDEX[0]); }
+  } else if (name==="sptree") {
+    tc.style.display = "none"; pfx.style.display = "none";
+    drawSpeciesTree();
+  } else {
+    tc.style.display = "none"; pfx.style.display = "";
+    drawHeatmap(); // drawCladogram() is called at the end of drawHeatmap()
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOOLTIP (shared)
+// ═══════════════════════════════════════════════════════════════════════════════
+const tooltipEl = document.getElementById("tooltip");
+
+function showTip(event, d) {
+  let html;
+  if (typeof d === "string") { html = d; }
+  else {
+    const name = d.data.name || (d.data.leaf ? "leaf" : "internal");
+    html = '<div class="tt-name">' + name + '</div>';
+    if (d.data.leaf) {
+      const sp = d.data.species || "?";
+      html += '<div class="tt-row"><span>Species</span><strong style="color:'+spColor(sp)+'">'+sp+'</strong></div>';
+      if (currentDetail) {
+        for (const [og,genes] of Object.entries(activeOgs())) {
+          if (genes.includes(d.data.gene_id||d.data.name)) {
+            html += '<div class="tt-row"><span>OG</span><strong>'+og+'</strong></div>'; break;
+          }
+        }
+      }
+    } else {
+      const nL = d._children ? countDescLeaves(d._children) : d.leaves().length;
+      html += '<div class="tt-row"><span>Subtree leaves</span><strong>'+nL+'</strong></div>';
+      html += '<div class="tt-row" style="color:#888"><span>'+(d._children?"collapsed":"expanded")+'</span><span>click to '+(d._children?"expand":"collapse")+'</span></div>';
+      if (isOGNode(d) && currentDetail && activeOgs()[d.data.name])
+        html += '<div class="tt-row"><span>OG members</span><strong>'+activeOgs()[d.data.name].length+'</strong></div>';
+    }
+  }
+  tooltipEl.innerHTML = html;
+  tooltipEl.style.display = "block";
+  moveTip(event);
+}
+function moveTip(event) {
+  const x = event.clientX+14, y = event.clientY-10;
+  tooltipEl.style.left = Math.min(x, window.innerWidth -tooltipEl.offsetWidth -5)+"px";
+  tooltipEl.style.top  = Math.min(y, window.innerHeight-tooltipEl.offsetHeight-5)+"px";
+}
+function hideTip() { tooltipEl.style.display = "none"; }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COLLAPSED NODE POPUP
+// ═══════════════════════════════════════════════════════════════════════════════
+const cpEl = document.getElementById("collapsed-popup");
+const customNodeNames = {};
+let cpActiveNode = null;
+
+function collectLeafGenes(children) {
+  const genes = [];
+  (function walk(ch) {
+    if (!ch) return;
+    for (const c of ch) {
+      if (c.data && c.data.leaf) genes.push(c.data.gene_id || c.data.name);
+      else { walk(c.children); walk(c._children); }
+    }
+  })(children);
+  return genes;
+}
+
+function showCollapsedPopup(event, d) {
+  event.stopPropagation();
+  cpActiveNode = d;
+  const currentName = customNodeNames[d._uid] || d.data.name || collapsedLabel(d);
+  const genes = collectLeafGenes(d._children);
+  document.getElementById("cp-name").value = currentName;
+  document.getElementById("cp-genes-label").textContent = genes.length + " genes:";
+  document.getElementById("cp-genes").value = genes.join("\n");
+  cpEl.style.display = "block";
+  const x = Math.min(event.clientX + 12, window.innerWidth  - cpEl.offsetWidth  - 10);
+  const y = Math.min(event.clientY + 12, window.innerHeight - cpEl.offsetHeight - 10);
+  cpEl.style.left = Math.max(4, x) + "px";
+  cpEl.style.top  = Math.max(4, y) + "px";
+}
+
+function cpClose() { cpEl.style.display = "none"; cpActiveNode = null; }
+
+function cpRename() {
+  if (!cpActiveNode) return;
+  const newName = document.getElementById("cp-name").value.trim();
+  if (newName) customNodeNames[cpActiveNode._uid] = newName;
+  cpClose();
+  renderTree(false);
+}
+
+function cpCopy() {
+  const txt = document.getElementById("cp-genes").value;
+  navigator.clipboard ? navigator.clipboard.writeText(txt).catch(()=>{}) : (() => {
+    const ta = document.getElementById("cp-genes"); ta.select(); document.execCommand("copy");
+  })();
+}
+
+function cpExpand() {
+  const d = cpActiveNode;
+  cpClose();
+  if (d && d._children) { d.children = d._children; d._children = null; renderTree(true); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HEATMAP VIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+const TOP_MARGIN = 110;
+const HM_TOP     = TOP_MARGIN;   // minimum first-row y-coord (may grow with label height)
+const HM_BAR_H   = 55;           // height of column-sum bar chart below the heatmap
+let   hmTopActual = HM_TOP;      // actual top margin, synced between heatmap and cladogram
+
+// species order: tree order filtered to species present in data
+const dataSpecies = new Set([...FAMILY_DATA,...HG_DATA].flatMap(d=>Object.keys(d.species_counts)));
+let speciesOrder = SPECIES_ORDER.filter(s=>dataSpecies.has(s));
+for (const s of dataSpecies) { if (!speciesOrder.includes(s)) speciesOrder.push(s); }
+
+// If no heatmap data but we have POSSVM trees, fall back to tree view
+const hasHeatmapData = FAMILY_DATA.length > 0 || HG_DATA.length > 0;
+
+// prefix selector
+(function(){
+  const sel = document.getElementById("prefixSelect");
+  const prefs = ["all",...new Set(FAMILY_DATA.map(d=>d.pref).filter(Boolean).sort())];
+  prefs.forEach(p => { const o=document.createElement("option"); o.value=p; o.textContent=p; sel.appendChild(o); });
+  sel.addEventListener("change", drawHeatmap);
+})();
+
+const cladoCollapsed  = new Set();   // stable node keys of collapsed cladogram nodes
+const cladoNames      = new Map();   // key → custom display name (user-editable)
+
+function drawCladogram() {
+  const tp = document.getElementById("tree-panel");
+  tp.innerHTML = "";
+  if (!SP_TREE_DATA || !SP_TREE_DATA.children || !speciesOrder.length) return;
+
+  const W = 270, H = speciesOrder.length*14+hmTopActual+40;
+  const svg = d3.select(tp).append("svg").attr("width",W).attr("height",H);
+  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=hmTopActual+i*14; });
+
+  function clone(n){ return JSON.parse(JSON.stringify(n)); }
+  function prune(n){
+    if(!n.children) return speciesOrder.includes(n.name)?n:null;
+    const k=n.children.map(prune).filter(Boolean);
+    if(!k.length) return null;
+    if(k.length===1) return k[0];
+    n.children=k; return n;
+  }
+  let tree=prune(clone(SP_TREE_DATA));
+  if(!tree) return;
+
+  function assignY(n){ if(!n.children){n._y=leafY[n.name]||0;return n._y;} const ys=n.children.map(assignY); n._y=d3.mean(ys);return n._y; }
+  function assignX(n,d=0){ n._d=d; if(n.children) n.children.forEach(c=>assignX(c,d+1)); }
+  function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
+  // stable key for a node: sorted leaf names (survives re-renders)
+  function nodeKey(n){ return flat(n).filter(x=>!x.children).map(x=>x.name).sort().join(","); }
+  // y-range of all leaves in a subtree
+  function yRange(n){ const ys=flat(n).filter(x=>!x.children).map(x=>leafY[x.name]||0); return [d3.min(ys),d3.max(ys)]; }
+
+  assignY(tree); assignX(tree);
+  const maxD=d3.max(flat(tree),d=>d._d)||1;
+  flat(tree).forEach(n=>{ if(!n.children) n._d=maxD; }); // align all tips
+  const sx=d=>10+(d/maxD)*150;
+
+  // ── branches (skip into collapsed subtrees) ──────────────────────────────
+  function drawB(n){
+    if(!n.children) return;
+    if(cladoCollapsed.has(nodeKey(n))) return;
+    const ys=n.children.map(c=>c._y);
+    svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d)).attr("y1",d3.min(ys)).attr("y2",d3.max(ys)).attr("stroke","#aaa");
+    n.children.forEach(c=>{
+      svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(c._d)).attr("y1",c._y).attr("y2",c._y).attr("stroke","#aaa");
+      drawB(c);
+    });
+  }
+  drawB(tree);
+
+  // ── collapsed triangles ───────────────────────────────────────────────────
+  function drawCollapsedTriangles(n){
+    if(!n.children) return;
+    const key=nodeKey(n);
+    if(cladoCollapsed.has(key)){
+      const [y0,y1]=yRange(n);
+      const displayName=cladoNames.get(key)||(n.name||"clade");
+      svg.append("polygon")
+        .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
+        .attr("fill","#e8e8e8").attr("stroke","#333").attr("stroke-width",1.2)
+        .style("cursor","pointer")
+        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand &nbsp;·&nbsp; dbl-click label to rename</div>'))
+        .on("mousemove",moveTip).on("mouseout",hideTip)
+        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); });
+      // editable label — double-click opens inline input
+      const labelEl=svg.append("text")
+        .attr("x",sx(n._d)+6).attr("y",n._y).attr("dy","0.35em")
+        .attr("font-size",9).attr("fill","#333").attr("font-style","italic")
+        .style("cursor","text").text(displayName);
+      labelEl.on("dblclick",(ev)=>{
+        ev.stopPropagation();
+        // build a tiny foreignObject with an <input> for inline editing
+        const fo=svg.append("foreignObject")
+          .attr("x",sx(n._d)+4).attr("y",n._y-9)
+          .attr("width",sx(maxD)-sx(n._d)+60).attr("height",18);
+        const inp=fo.append("xhtml:input")
+          .attr("value",displayName)
+          .style("font-size","9px").style("font-style","italic")
+          .style("width","100%").style("border","1px solid #4a90d9")
+          .style("border-radius","2px").style("padding","0 2px").style("outline","none");
+        const inpNode=inp.node(); inpNode.focus(); inpNode.select();
+        function commit(){ cladoNames.set(key,inpNode.value.trim()||displayName); fo.remove(); drawCladogram(); }
+        inp.on("blur",commit).on("keydown",(e)=>{ if(e.key==="Enter") commit(); if(e.key==="Escape"){ fo.remove(); } });
+      });
+      return;
+    }
+    n.children.forEach(drawCollapsedTriangles);
+  }
+  drawCollapsedTriangles(tree);
+
+  // ── interactive internal nodes (click=collapse, shift+click=heatmap split) ─
+  function drawCladoNodes(n){
+    if(!n.children) return;
+    const key=nodeKey(n);
+    if(cladoCollapsed.has(key)) return;
+    const nodeLabel = n.name || "(unnamed)";
+    const cleavesSet = new Set(flat(n).filter(x=>!x.children).map(x=>x.name));
+    const splitIdx = hmSplitSets.findIndex(s=>s.size===cleavesSet.size&&[...cleavesSet].every(v=>s.has(v)));
+    const isSplit = splitIdx >= 0;
+    const nodeCol = isSplit ? hmSplitLineColors[splitIdx%hmSplitLineColors.length] : "#aaa";
+    const tip = nodeLabel+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to collapse &nbsp;·&nbsp; shift+click to split heatmap</div>';
+    svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
+      .attr("fill", isSplit ? hmSplitColors[splitIdx%hmSplitColors.length] : "#fff")
+      .attr("stroke",nodeCol).attr("stroke-width", isSplit?2:1)
+      .style("cursor","pointer")
+      .on("mouseover",ev=>showTip(ev,tip))
+      .on("mousemove",moveTip).on("mouseout",hideTip)
+      .on("click",(ev)=>{
+        hideTip();
+        if(ev.shiftKey){
+          ev.stopPropagation();
+          if(isSplit){ hmSplitSets.splice(splitIdx,1); hmSplitLabels.splice(splitIdx,1); }
+          else { hmSplitSets.push(cleavesSet); hmSplitLabels.push(nodeLabel); }
+          updateHmSplitBar(); drawHeatmap(); // drawCladogram called at end of drawHeatmap
+        } else {
+          cladoCollapsed.add(key); drawCladogram();
+        }
+      });
+    n.children.forEach(drawCladoNodes);
+  }
+  drawCladoNodes(tree);
+}
+
+// ── helpers for heatmap row splitting ─────────────────────────────────────
+function spNodeLeaves(n) {
+  if (!n.children) return n.name ? [n.name] : [];
+  return n.children.flatMap(spNodeLeaves);
+}
+const hmSplitColors     = ["rgba(231,76,60,0.10)","rgba(52,152,219,0.10)","rgba(39,174,96,0.10)","rgba(243,156,18,0.10)"];
+const hmSplitLineColors = ["#e74c3c","#3498db","#27ae60","#f39c12"];
+function toggleHmColCtrl() {
+  const body = document.getElementById("hm-col-ctrl-body");
+  const arrow = document.getElementById("hm-col-ctrl-arrow");
+  const open = body.style.display === "flex";
+  body.style.display = open ? "none" : "flex";
+  arrow.innerHTML = open ? "&#9654;" : "&#9660;";
+}
+
+function updateHmSplitBar() {
+  const bar = document.getElementById("hm-split-bar");
+  if (!hmSplitSets.length) { bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  document.getElementById("hm-split-tags").innerHTML = hmSplitLabels.map((lbl,i) =>
+    `<span style="display:inline-flex;align-items:center;padding:1px 8px;border-radius:10px;background:${hmSplitLineColors[i%hmSplitLineColors.length]};color:#fff;font-size:10px">${lbl}</span>`
+  ).join(" ");
+}
+function clearHmSplits() {
+  hmSplitSets = []; hmSplitLabels = [];
+  updateHmSplitBar();
+  drawHeatmap();
+}
+
+function drawSpeciesTree() {
+  const wrap = document.getElementById("sp-tree-wrap");
+  wrap.innerHTML = "";
+  if (!SP_TREE_DATA || !SP_TREE_DATA.children || !SPECIES_ORDER.length) {
+    wrap.innerHTML = '<p style="padding:20px;color:#888">No species tree provided (pass --species_tree).</p>';
+    return;
+  }
+
+  const rowH = 22, topM = 16, leftM = 16, rightM = 260;
+  const W = Math.max(Math.floor((wrap.clientWidth || 900) * spTreeWidthPct / 100), 300);
+  const treeW = W - leftM - rightM;
+  const inPhylo = new Set(ALL_SPECIES);
+  const tipColor = n => inPhylo.has(n.name) ? "#111" : "#bbb";
+
+  // ── helpers ──────────────────────────────────────────────────────────
+  function clone(n){ return JSON.parse(JSON.stringify(n)); }
+  function prune(n){
+    if(!n.children) return SPECIES_ORDER.includes(n.name)?n:null;
+    const k=n.children.map(prune).filter(Boolean);
+    if(!k.length) return null;
+    if(k.length===1) return k[0];
+    n.children=k; return n;
+  }
+  function countLeaves(n){ return n.children?n.children.reduce((s,c)=>s+countLeaves(c),0):1; }
+  function getLeaves(n){ return n.children?n.children.flatMap(getLeaves):[n]; }
+  function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
+
+  const tree = prune(clone(SP_TREE_DATA));
+  if(!tree){ wrap.innerHTML='<p style="padding:20px;color:#888">Species tree is empty.</p>'; return; }
+
+  // ── assign stable IDs and depths ──────────────────────────────────────
+  let _uid=0;
+  function assignId(n,d=0){ n._id=String(_uid++); n._d=d; if(n.children) n.children.forEach(c=>assignId(c,d+1)); }
+  assignId(tree);
+  const allNodes = flat(tree);
+  const maxD = d3.max(allNodes,n=>n._d)||1;
+  allNodes.forEach(n=>{ if(!n.children) n._d=maxD; }); // align tips
+  const sx = d => leftM + (d/maxD)*treeW;
+
+  // ── layout: assign _y accounting for collapsed blocks ─────────────────
+  function layout(n, yStart){
+    if(spCollapsed.has(n._id)){
+      n._colH = countLeaves(n)*rowH;
+      n._colY0 = yStart;
+      n._y = yStart + n._colH/2;
+      n._isCol = true;
+      return yStart + n._colH;
+    }
+    n._isCol = false;
+    if(!n.children){ n._y = yStart + rowH/2; return yStart + rowH; }
+    let y = yStart;
+    for(const c of n.children) y = layout(c, y);
+    n._y = d3.mean(n.children.map(c=>c._y));
+    return y;
+  }
+  const totalH = layout(tree, topM);
+  const svg = d3.select(wrap).append("svg").attr("width",W).attr("height",totalH+16);
+
+  // ── branches (skip into collapsed subtrees) ───────────────────────────
+  function drawBranches(n){
+    if(n._isCol||!n.children) return;
+    const ys=n.children.map(c=>c._y);
+    svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d))
+      .attr("y1",d3.min(ys)).attr("y2",d3.max(ys)).attr("stroke","#999").attr("stroke-width",1.5);
+    n.children.forEach(c=>{
+      svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(c._d))
+        .attr("y1",c._y).attr("y2",c._y).attr("stroke","#999").attr("stroke-width",1.5);
+      drawBranches(c);
+    });
+  }
+  drawBranches(tree);
+
+  // ── collapsed triangles ───────────────────────────────────────────────
+  function drawCollapsed(n){
+    if(!n.children) return;
+    if(n._isCol){
+      const x0=sx(n._d), x1=sx(maxD);
+      const y0=n._colY0, y1=n._colY0+n._colH, yM=n._y;
+      const leaves=getLeaves(n);
+      // horizontal branch from parent edge to apex already drawn; draw triangle
+      svg.append("polygon")
+        .attr("points",`${x0},${yM} ${x1},${y0} ${x1},${y1}`)
+        .attr("fill","rgba(90,130,170,0.18)").attr("stroke","#7a9ab8").attr("stroke-width",1)
+        .style("cursor","pointer")
+        .on("click",()=>{ spCollapsed.delete(n._id); drawSpeciesTree(); });
+      // node name badge at apex
+      if(n.name){
+        svg.append("text").attr("x",x0+4).attr("y",yM-3)
+          .attr("font-size",8).attr("fill","#5a7090").attr("font-style","italic")
+          .text(n.name+" ["+leaves.length+"]");
+      }
+      // species names at triangle base
+      const nameH=n._colH/leaves.length;
+      leaves.forEach((l,i)=>{
+        const ly=n._colY0+i*nameH+nameH/2;
+        const tc=tipColor(l);
+        svg.append("circle").attr("cx",x1+4).attr("cy",ly).attr("r",3)
+          .attr("fill",tc);
+        svg.append("text").attr("x",x1+10).attr("y",ly).attr("dy","0.35em")
+          .attr("font-size",Math.max(7,Math.min(11,nameH-2)))
+          .attr("fill",tc).attr("font-family","monospace").text(l.name);
+      });
+      return;
+    }
+    n.children.forEach(drawCollapsed);
+  }
+  drawCollapsed(tree);
+
+  // ── internal nodes (click to collapse) ───────────────────────────────
+  function drawInternals(n){
+    if(n._isCol||!n.children) return;
+    // clickable node dot — only non-root internal nodes
+    if(n._id!==tree._id){
+      const nodeLabel=n.name||"(unnamed)";
+      // check if this clade is already a split group
+      const cleavesSet=new Set(spNodeLeaves(n));
+      const splitIdx=hmSplitSets.findIndex(s=>s.size===cleavesSet.size&&[...cleavesSet].every(v=>s.has(v)));
+      const isSplit=splitIdx>=0;
+      const nodeCol=isSplit?hmSplitLineColors[splitIdx%hmSplitLineColors.length]:"#999";
+      const tip=nodeLabel+'<div style="font-size:9px;color:#aaa;margin-top:3px">click to collapse &nbsp;·&nbsp; shift+click to split heatmap</div>';
+      // always-visible node name label (italic, small, to the right of the dot)
+      if(n.name)
+        svg.append("text").attr("x",sx(n._d)+7).attr("y",n._y).attr("dy","0.35em")
+          .attr("font-size",9).attr("fill",nodeCol).attr("font-style","italic")
+          .style("pointer-events","none").text(n.name);
+      svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
+        .attr("fill",isSplit?hmSplitColors[splitIdx%hmSplitColors.length]:"#fff")
+        .attr("stroke",nodeCol).attr("stroke-width",isSplit?2:1.2)
+        .style("cursor","pointer")
+        .on("mouseover",ev=>showTip(ev,tip))
+        .on("mousemove",moveTip)
+        .on("mouseout",hideTip)
+        .on("click",(ev)=>{
+          if(ev.shiftKey){
+            ev.stopPropagation();
+            if(isSplit){ hmSplitSets.splice(splitIdx,1); hmSplitLabels.splice(splitIdx,1); }
+            else{ hmSplitSets.push(cleavesSet); hmSplitLabels.push(nodeLabel); }
+            updateHmSplitBar();
+            hideTip(); drawSpeciesTree(); drawHeatmap();
+          } else {
+            spCollapsed.add(n._id); hideTip(); drawSpeciesTree();
+          }
+        });
+    }
+    n.children.forEach(drawInternals);
+  }
+  drawInternals(tree);
+
+  // ── tip legend (black = in gene trees, grey = absent) ─────────────────
+  const legX=W-rightM+8, legY=topM;
+  svg.append("circle").attr("cx",legX).attr("cy",legY).attr("r",4).attr("fill","#111");
+  svg.append("text").attr("x",legX+8).attr("y",legY).attr("dy","0.35em").attr("font-size",10).attr("fill","#444").text("in gene trees");
+  svg.append("circle").attr("cx",legX).attr("cy",legY+16).attr("r",4).attr("fill","#bbb");
+  svg.append("text").attr("x",legX+8).attr("y",legY+16).attr("dy","0.35em").attr("font-size",10).attr("fill","#888").text("absent");
+
+  // ── leaf tips ─────────────────────────────────────────────────────────
+  function drawLeaves(n){
+    if(n._isCol) return;
+    if(!n.children){
+      const tc=tipColor(n);
+      svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
+        .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.5);
+      svg.append("text").attr("x",sx(n._d)+8).attr("y",n._y).attr("dy","0.35em")
+        .attr("font-size",12).attr("fill",tc).attr("font-family","monospace").text(n.name);
+      return;
+    }
+    n.children.forEach(drawLeaves);
+  }
+  drawLeaves(tree);
+}
+
+function drawHeatmap() {
+  const prefix = document.getElementById("prefixSelect").value;
+  const back   = document.getElementById("hm-back");
+  const crumb  = document.getElementById("hm-breadcrumb");
+  let data, colLabel, clickHandler;
+
+  if (hmViewMode==="class") {
+    // aggregate FAMILY_DATA by class
+    const map={};
+    FAMILY_DATA.filter(d=>prefix==="all"||d.pref===prefix).forEach(d=>{
+      const cls=d.class||d.pref||"other";
+      if(!map[cls]) map[cls]={id:cls,class:cls,species_counts:{}};
+      for(const [sp,n] of Object.entries(d.species_counts))
+        map[cls].species_counts[sp]=(map[cls].species_counts[sp]||0)+n;
+    });
+    data=Object.values(map).sort((a,b)=>
+      Object.values(b.species_counts).reduce((x,y)=>x+y,0)-
+      Object.values(a.species_counts).reduce((x,y)=>x+y,0));
+    back.style.display="none"; crumb.textContent="";
+    colLabel=d=>d.id;
+    clickHandler=(_ev,d)=>{ hmViewMode="family"; hmActiveClass=d.id; drawHeatmap(); };
+
+  } else if (hmViewMode==="family") {
+    data=FAMILY_DATA.filter(d=>(d.class||d.pref)===hmActiveClass)
+                    .filter(d=>prefix==="all"||d.pref===prefix)
+                    .sort((a,b)=>b.total-a.total);
+    back.style.display="inline"; crumb.textContent=hmActiveClass;
+    colLabel=d=>d.family;
+    clickHandler=(_ev,d)=>{ hmViewMode="hg"; hmActiveFamily=d.family; drawHeatmap(); };
+
+  } else if (hmViewMode==="hg") {
+    data=HG_DATA.filter(d=>d.family===hmActiveFamily)
+                .filter(d=>prefix==="all"||d.pref===prefix)
+                .sort((a,b)=>b.total-a.total);
+    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily;
+    colLabel=d=>d.hg||d.id;
+    clickHandler=(_ev,d)=>{ hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap(); };
+
+  } else { // og
+    // robust lookup: try id first, fall back to family+hg match
+    const r=hmActiveHGRec;
+    const treeRec=TREE_INDEX.find(t=>t.id===hmActiveHG)
+      ||(r&&TREE_INDEX.find(t=>t.family===r.family&&t.hg===r.hg));
+    const detail=treeRec?loadDetail(treeRec.id):null;
+    const ogs=detail&&detail.ogs||{};
+    data=Object.entries(ogs).map(([og,gids])=>{
+      const sc={};
+      gids.forEach(g=>{ const sp=getSpeciesPfx(g); if(sp) sc[sp]=(sc[sp]||0)+1; });
+      return {id:og,species_counts:sc,total:gids.length};
+    }).sort((a,b)=>b.total-a.total);
+    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG);
+    colLabel=d=>d.id+" ["+d.total+"]";
+    // third arg 'sp': species clicked (from cell), undefined for column-header click
+    clickHandler=(_ev,_d,sp)=>{
+      if(!treeRec) return;
+      switchTab("trees"); selectTree(treeRec); renderSidebar("");
+      if(sp && _d.species_counts[sp]){
+        hlQueries=[sp]; rebuildHlSet();
+        setTimeout(focusHighlighted,60);
+      }
+    };
+  }
+
+  // ── heatmap row splitting ──────────────────────────────────────────────
+  // ── row grouping: driven by species-tree splits OR active highlight queries ──
+  // Priority: hmSplitSets > hlSet.  Both reorder rows and draw separator bands.
+  let spSplitGroup = new Map(); // species → group index
+  let bandLineColors = hmSplitLineColors;
+  let bandFillColors = hmSplitColors;
+  let bandLabels     = hmSplitLabels;
+  let nSplitGroups   = 0;
+
+  if (hmSplitSets.length > 0) {
+    hmSplitSets.forEach((sSet,gi) => sSet.forEach(sp => { if (!spSplitGroup.has(sp)) spSplitGroup.set(sp,gi); }));
+    nSplitGroups = hmSplitSets.length;
+  }
+
+  // Local copy — never mutate the global speciesOrder (it drives drawSpeciesTree too)
+  let hmOrder = [...speciesOrder];
+  if (nSplitGroups > 0) {
+    const grouped = [];
+    for (let gi=0; gi<nSplitGroups; gi++)
+      hmOrder.filter(s=>spSplitGroup.get(s)===gi).forEach(s=>grouped.push(s));
+    hmOrder.filter(s=>!spSplitGroup.has(s)).forEach(s=>grouped.push(s));
+    hmOrder = grouped;
+  }
+
+  const cW=18, cH=12;
+  const maxNameLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
+  const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
+  // truncate column labels to 30 chars max
+  const colLabelTrunc = d => { const s=colLabel(d)||""; return s.length>30 ? s.slice(0,28)+"\u2026" : s; };
+  // top margin: enough room for rotated column labels (using truncated length)
+  const maxColLen=Math.min(30, data.reduce((m,d)=>Math.max(m,(colLabel(d)||"").length),0));
+  const hmColLabelH=Math.ceil(Math.sin(hmColRotation*Math.PI/180)*maxColLen*hmColFontSize*0.6)+8;
+  const hmTM=Math.max(HM_TOP, hmColLabelH+14);
+  hmTopActual = hmTM; // always sync before cladogram draws
+  const nRows=hmOrder.length;
+  const CELLS_BOTTOM=nRows*14+hmTM;   // y just below the last cell row
+  const BAR_TOP=CELLS_BOTTOM+10;      // bar chart starts here
+  const svgW=data.length*cW+ROW_LABEL_W+20;
+  const svgH=BAR_TOP+HM_BAR_H+50;    // extra room for colorbar legend
+  const panel=document.getElementById("heatmap-panel");
+  const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
+
+  if(!data.length){ svg.append("text").attr("x",40).attr("y",hmTM+30).attr("fill","#999").text("No data for this selection."); return; }
+
+  // draw group background bands before cells (SVG paint order: back to front)
+  if (nSplitGroups > 0) {
+    let gi0 = spSplitGroup.has(hmOrder[0]) ? spSplitGroup.get(hmOrder[0]) : -1;
+    let bandStart = 0;
+    for (let ri=1; ri<=hmOrder.length; ri++) {
+      const gi1 = ri<hmOrder.length ? (spSplitGroup.has(hmOrder[ri]) ? spSplitGroup.get(hmOrder[ri]) : -1) : -2;
+      if (gi1 !== gi0) {
+        if (gi0 >= 0) {
+          svg.append("rect")
+            .attr("x",0).attr("y",bandStart*14+hmTM)
+            .attr("width",svgW).attr("height",(ri-bandStart)*14)
+            .attr("fill",bandFillColors[gi0%bandFillColors.length]);
+          const midY=bandStart*14+hmTM+(ri-bandStart)*7;
+          svg.append("text").attr("x",4).attr("y",midY).attr("dy","0.35em")
+            .attr("font-size",8).attr("fill",bandLineColors[gi0%bandLineColors.length])
+            .attr("font-weight","bold").text(bandLabels[gi0]||("Group "+(gi0+1)));
+        }
+        if (ri<hmOrder.length) {
+          svg.append("line")
+            .attr("x1",0).attr("x2",svgW)
+            .attr("y1",ri*14+hmTM).attr("y2",ri*14+hmTM)
+            .attr("stroke","#999").attr("stroke-width",1.5).attr("stroke-dasharray","4,2");
+        }
+        gi0 = gi1; bandStart = ri;
+      }
+    }
+  }
+
+  const zMat=data.map(rec=>{
+    const vals=hmOrder.map(s=>rec.species_counts[s]||0);
+    const m=d3.mean(vals), sd=d3.deviation(vals)||1;
+    return vals.map(v=>(v-m)/sd);
+  });
+  const zAll=zMat.flat();
+  const zMax=Math.max(Math.abs(d3.min(zAll)||0),Math.abs(d3.max(zAll)||0),0.01);
+  const color=d3.scaleDiverging().domain([zMax,0,-zMax]).interpolator(d3.interpolateRdBu);
+
+  data.forEach((rec,ci)=>{
+    hmOrder.forEach((sp,ri)=>{
+      const count=rec.species_counts[sp]||0;
+      const z=zMat[ci][ri];
+      const cellX=ci*cW+ROW_LABEL_W, cellY=ri*14+hmTM;
+      svg.append("rect").attr("class","hm-cell")
+        .attr("x",cellX).attr("y",cellY).attr("width",cW-2).attr("height",cH)
+        .attr("fill",color(z)).style("cursor","pointer")
+        .on("mouseover",ev=>{
+          showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b><br>z: <b>'+z.toFixed(2)+'</b>');
+        })
+        .on("mousemove",moveTip).on("mouseout",hideTip)
+        .on("click",ev=>clickHandler(ev,rec,sp));
+      if(count>0){
+        const fc=d3.color(color(z));
+        const lum=fc?(0.2126*fc.r+0.7152*fc.g+0.0722*fc.b)/255:1;
+        svg.append("text")
+          .attr("x",cellX+(cW-2)/2).attr("y",cellY+cH/2).attr("dy","0.35em")
+          .attr("text-anchor","middle").attr("font-size",6.5)
+          .attr("fill",lum>0.45?"#222":"#eee").attr("pointer-events","none")
+          .text(count>999?"≫":count);
+      }
+    });
+  });
+
+  // row labels (coloured by group when grouping is active)
+  hmOrder.forEach((sp,ri)=>{
+    const gi = spSplitGroup.get(sp);
+    const labelCol = gi!==undefined
+      ? bandLineColors[gi%bandLineColors.length]
+      : (nSplitGroups>0 ? "#bbb" : "#333");
+    svg.append("text")
+      .attr("x",ROW_LABEL_W-4).attr("y",ri*14+hmTM+9)
+      .attr("text-anchor","end").attr("font-size",11).attr("fill",labelCol)
+      .text(sp);
+  });
+
+  // column headers
+  svg.selectAll("text.hm-col").data(data).enter().append("text").attr("class","hm-col")
+    .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W+cW/2},${hmTM-6}) rotate(-${hmColRotation})`)
+    .attr("font-size",hmColFontSize).style("cursor","pointer")
+    .attr("text-anchor","start")
+    .text(colLabelTrunc)
+    .on("click",clickHandler);
+
+  // ── column-sum bar chart (below cells) ───────────────────────────────────
+  const colTotals=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
+  const maxTotal=d3.max(colTotals)||1;
+  // baseline
+  svg.append("line")
+    .attr("x1",ROW_LABEL_W).attr("x2",ROW_LABEL_W+data.length*cW)
+    .attr("y1",BAR_TOP).attr("y2",BAR_TOP)
+    .attr("stroke","#ccc").attr("stroke-width",0.8);
+  svg.append("text").attr("x",ROW_LABEL_W-4).attr("y",BAR_TOP+HM_BAR_H/2)
+    .attr("text-anchor","end").attr("font-size",8).attr("fill","#aaa")
+    .attr("dominant-baseline","middle").text("total \u2191");
+  data.forEach((_rec,ci)=>{
+    const total=colTotals[ci];
+    const bH=Math.max(total>0?1:0,(total/maxTotal)*HM_BAR_H);
+    svg.append("rect")
+      .attr("x",ci*cW+ROW_LABEL_W+1).attr("y",BAR_TOP)
+      .attr("width",cW-2).attr("height",bH)
+      .attr("fill","#7fb3d3").attr("opacity",0.8);
+    if(total>0)
+      svg.append("text")
+        .attr("x",ci*cW+ROW_LABEL_W+cW/2).attr("y",BAR_TOP+bH+8)
+        .attr("text-anchor","middle").attr("font-size",6.5).attr("fill","#555")
+        .text(total>=10000?(total/1000).toFixed(0)+"k":total);
+  });
+
+  // colorbar legend
+  const cbW=120, cbH=10, cbX=ROW_LABEL_W, cbY=svgH-28;
+  const gradId="hmgrad"+Date.now();
+  const defs=svg.append("defs");
+  const grad=defs.append("linearGradient").attr("id",gradId).attr("x1","0%").attr("x2","100%");
+  const stops=10;
+  for(let i=0;i<=stops;i++){
+    const t=i/stops;
+    grad.append("stop").attr("offset",(t*100)+"%").attr("stop-color",color(zMax-t*2*zMax));
+  }
+  svg.append("rect").attr("x",cbX).attr("y",cbY).attr("width",cbW).attr("height",cbH)
+    .attr("fill","url(#"+gradId+")").attr("rx",2);
+  svg.append("text").attr("x",cbX).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("high");
+  svg.append("text").attr("x",cbX+cbW/2).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("mean");
+  svg.append("text").attr("x",cbX+cbW).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("low");
+
+  // always redraw cladogram last so it uses the updated hmTopActual
+  drawCladogram();
+}
+
+function hmBack(){
+  if(hmViewMode==="og")     { hmViewMode="hg";     hmActiveHG=null; hmActiveHGRec=null; }
+  else if(hmViewMode==="hg"){ hmViewMode="family";  hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; }
+  else                      { hmViewMode="class";   hmActiveClass=null; hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; }
+  drawHeatmap();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TREE VIEW – SIDEBAR
+// ═══════════════════════════════════════════════════════════════════════════════
+let currentIndex  = null;
+let currentDetail = null;
+let treeSource    = "generax";   // "generax" | "original"
+
+function loadDetail(id) {
+  const el=document.getElementById("treedata-"+id);
+  if(!el)return null;
+  try{ return JSON.parse(el.textContent); }catch(e){ return null; }
+}
+
+function groupByFamily(records){
+  const g={};
+  for(const r of records){ const f=r.family||"(other)"; (g[f]=g[f]||[]).push(r); }
+  return g;
+}
+
+// populate class filter once
+(function(){
+  const sel=document.getElementById("class-filter");
+  const classes=[...new Set(TREE_INDEX.map(r=>r.class||"").filter(Boolean))].sort();
+  classes.forEach(c=>{ const o=document.createElement("option"); o.value=c; o.textContent=c; sel.appendChild(o); });
+  sel.addEventListener("change",()=>renderSidebar(document.getElementById("hg-search").value));
+})();
+
+function renderSidebar(filter){
+  const lc=(filter||"").toLowerCase().trim();
+  const cls=document.getElementById("class-filter").value;
+  const list=document.getElementById("hg-list"); list.innerHTML="";
+  const subset=cls?TREE_INDEX.filter(r=>(r.class||"")=== cls):TREE_INDEX;
+  const groups=groupByFamily(subset);
+  let total=0;
+  for(const [fam,recs] of Object.entries(groups).sort()){
+    const matching=lc?recs.filter(r=>r.hg.toLowerCase().includes(lc)||r.family.toLowerCase().includes(lc)||(r.og_names||[]).some(o=>o.toLowerCase().includes(lc))):recs;
+    if(!matching.length)continue;
+    total+=matching.length;
+    const forceOpen=lc.length>0;
+    const gDiv=document.createElement("div");
+    const hdr=document.createElement("div"); hdr.className="fam-header"+(forceOpen?" open":"");
+    hdr.innerHTML='<span class="fam-arrow">\u25b6</span><span>'+fam+'</span><span style="font-weight:400;color:#888;margin-left:auto">'+matching.length+'</span>';
+    const body=document.createElement("div"); body.className="fam-body"+(forceOpen?" open":"");
+    hdr.addEventListener("click",()=>{ hdr.classList.toggle("open"); body.classList.toggle("open",hdr.classList.contains("open")); });
+    gDiv.appendChild(hdr);
+    for(const rec of matching){
+      const item=document.createElement("div");
+      item.className="hg-item"+(currentIndex&&currentIndex.id===rec.id?" selected":"");
+      const badge=rec.source==="generax"?'<span class="src-badge">GeneRax</span>':'';
+      const covPct=ALL_SPECIES.length?Math.round((rec.species||[]).length/ALL_SPECIES.length*100):0;
+      item.innerHTML='<div class="hg-name">'+rec.hg+' '+badge+'</div>'
+        +'<div class="hg-cov"><div class="hg-cov-bar" style="width:'+covPct+'%"></div></div>'
+        +'<div class="hg-meta">'+rec.n_leaves+' genes \u00b7 '+rec.n_ogs+' OGs \u00b7 '+covPct+'% sp.</div>';
+      item.addEventListener("click",()=>selectTree(rec));
+      body.appendChild(item);
+    }
+    gDiv.appendChild(body); list.appendChild(gDiv);
+  }
+  document.getElementById("hg-count").textContent=total+" shown";
+}
+
+document.getElementById("hg-search").addEventListener("input",function(){ renderSidebar(this.value); });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TREE VIEW – COLOUR-BY & HIGHLIGHT
+// ═══════════════════════════════════════════════════════════════════════════════
+function populateColorBy(){
+  const sel=document.getElementById("color-by");
+  while(sel.options.length>1)sel.remove(1);
+  if(!currentIndex)return;
+  // orthogroup option (always available when a tree is loaded)
+  const oOg=document.createElement("option"); oOg.value="og"; oOg.textContent="by orthogroup"; sel.appendChild(oOg);
+  const tSp=new Set(currentIndex.species);
+  CLADE_DATA.forEach((cd,i)=>{
+    const grps=new Set();
+    for(const sp of tSp){ const g=cd.groups[sp]; if(g)grps.add(g); }
+    if(grps.size<2)return;
+    const o=document.createElement("option"); o.value=i; o.textContent=cd.name+" ("+grps.size+" groups)";
+    sel.appendChild(o);
+  });
+}
+
+document.getElementById("color-by").addEventListener("change",function(){
+  const v=this.value;
+  if(v==="species"){
+    colorMode="species"; cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={};
+  } else if(v==="og"){
+    colorMode="og"; cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={};
+    rebuildOgColors();
+    // re-collapse to OG level
+    collapseToOGs(); return;
+  } else {
+    colorMode="clade"; ogLeaf2Color={}; ogName2Color={};
+    const cd=CLADE_DATA[+v];
+    const tSp=currentIndex?currentIndex.species:[];
+    const grps=new Set(); for(const sp of tSp){const g=cd.groups[sp];if(g)grps.add(g);}
+    const sorted=[...grps].sort(); cladeGrpColor={};
+    sorted.forEach((g,i)=>{cladeGrpColor[g]=palette[i%palette.length];});
+    cladeSp2Color={}; cladeSp2Group={};
+    for(const [sp,grp] of Object.entries(cd.groups)){
+      cladeSp2Color[sp]=cladeGrpColor[grp]||"#ccc";
+      cladeSp2Group[sp]=grp;
+    }
+  }
+  renderTree(true);
+});
+
+function populateDatalist(){
+  const dl=document.getElementById("hl-list"); dl.innerHTML="";
+  for(const cd of CLADE_DATA){
+    const o=document.createElement("option"); o.value=cd.name; dl.appendChild(o);
+  }
+  if(currentIndex){
+    for(const sp of currentIndex.species){
+      const o=document.createElement("option"); o.value=sp; dl.appendChild(o);
+    }
+  }
+}
+
+function resolveQuery(query){
+  const lq=(query||"").toLowerCase().trim();
+  if(!lq) return new Set();
+  const clade=CLADE_DATA.find(c=>c.name.toLowerCase()===lq)||CLADE_DATA.find(c=>c.name.toLowerCase().includes(lq));
+  if(clade) return new Set(Object.keys(clade.groups));
+  const sp=new Set();
+  if(currentIndex) for(const s of currentIndex.species){ if(s.toLowerCase().includes(lq)) sp.add(s); }
+  ALL_SPECIES.forEach(s=>{ if(s.toLowerCase().includes(lq)) sp.add(s); });
+  return sp;
+}
+
+function rebuildHlSet(){
+  hlGroupIndex=new Map();
+  if(!hlQueries.length){ hlSet=null; }
+  else {
+    const union=new Set();
+    hlQueries.forEach((q,i)=>{ resolveQuery(q).forEach(s=>{ union.add(s); if(!hlGroupIndex.has(s)) hlGroupIndex.set(s,i); }); });
+    hlSet=union.size?union:null;
+  }
+  renderHlTags();
+  document.getElementById("btn-focus-hl").style.display=hlSet?"inline":"none";
+  if(currentIndex) renderTree();
+}
+
+function renderHlTags(){
+  const el=document.getElementById("hl-tags"); el.innerHTML="";
+  hlQueries.forEach((q,i)=>{
+    const col=hlTagColor(i);
+    const chip=document.createElement("span"); chip.className="hl-tag";
+    chip.style.background=col; chip.title="Click to change color";
+    chip.style.cursor="pointer";
+    const lbl=document.createTextNode(q+" ");
+    const x=document.createElement("span"); x.className="hl-tag-x"; x.textContent="\u00d7";
+    x.onclick=(e)=>{ e.stopPropagation(); removeHlTag(i); };
+    chip.onclick=()=>openColorPicker(col,c=>{ hlQueryColors[q]=c; rebuildHlSet(); });
+    chip.appendChild(lbl); chip.appendChild(x);
+    el.appendChild(chip);
+  });
+}
+
+function addHlTag(query){
+  query=(query||"").trim();
+  if(!query||hlQueries.includes(query)) return;
+  hlQueries.push(query);
+  document.getElementById("hl-search").value="";
+  rebuildHlSet();
+}
+
+function removeHlTag(i){ delete hlQueryColors[hlQueries[i]]; hlQueries.splice(i,1); rebuildHlSet(); }
+
+function clearHighlight(){ hlQueries=[]; hlQueryColors={}; document.getElementById("hl-search").value=""; rebuildHlSet(); }
+
+// ── OG name highlight system ──────────────────────────────────────────────
+function resolveOgQuery(query){
+  // Returns Set<og_name> whose names contain the query string (case-insensitive)
+  const lq=(query||"").toLowerCase().trim();
+  if(!lq) return new Set();
+  const matched=new Set();
+  // Search through all known OG names in the current tree
+  Object.values(ogGene2Name).forEach(og=>{ if(og.toLowerCase().includes(lq)) matched.add(og); });
+  // Also search ogName2Color keys
+  Object.keys(ogName2Color).forEach(og=>{ if(og.toLowerCase().includes(lq)) matched.add(og); });
+  return matched;
+}
+
+function rebuildOgHlSet(){
+  ogHlGroupIndex=new Map();
+  if(!ogHlQueries.length){ ogHlSet=null; }
+  else {
+    const union=new Set();
+    ogHlQueries.forEach((q,i)=>{ resolveOgQuery(q).forEach(og=>{ union.add(og); if(!ogHlGroupIndex.has(og)) ogHlGroupIndex.set(og,i); }); });
+    ogHlSet=union.size?union:null;
+  }
+  renderOgHlTags();
+  if(currentIndex) renderTree();
+}
+
+function renderOgHlTags(){
+  const el=document.getElementById("og-hl-tags"); el.innerHTML="";
+  ogHlQueries.forEach((q,i)=>{
+    const col=ogHlTagColor(i);
+    const chip=document.createElement("span"); chip.className="hl-tag";
+    chip.style.background=col; chip.title="Click to change color";
+    chip.style.cursor="pointer";
+    const lbl=document.createTextNode(q+" ");
+    const btn=document.createElement("button");
+    btn.textContent="\u00d7"; btn.onclick=(e)=>{ e.stopPropagation(); removeOgHlTag(i); };
+    chip.onclick=()=>openColorPicker(col,c=>{ ogHlQueryColors[q]=c; rebuildOgHlSet(); });
+    chip.append(lbl,btn); el.appendChild(chip);
+  });
+  // populate datalist for autocomplete
+  const dl=document.getElementById("og-hl-list"); dl.innerHTML="";
+  const allOgs=new Set([...Object.values(ogGene2Name),...Object.keys(ogName2Color)]);
+  allOgs.forEach(og=>{ const o=document.createElement("option"); o.value=og; dl.appendChild(o); });
+}
+
+function addOgHlTag(query){
+  query=(query||"").trim();
+  if(!query||ogHlQueries.includes(query)) return;
+  ogHlQueries.push(query);
+  document.getElementById("og-hl-search").value="";
+  rebuildOgHlSet();
+}
+function removeOgHlTag(i){ delete ogHlQueryColors[ogHlQueries[i]]; ogHlQueries.splice(i,1); rebuildOgHlSet(); }
+function clearOgHighlight(){ ogHlQueries=[]; ogHlQueryColors={}; document.getElementById("og-hl-search").value=""; rebuildOgHlSet(); }
+
+document.getElementById("hl-search").addEventListener("keydown",function(e){
+  if(e.key==="Enter"&&this.value.trim()){ addHlTag(this.value); e.preventDefault(); }
+});
+document.getElementById("hl-search").addEventListener("change",function(){
+  if(this.value.trim()) addHlTag(this.value);
+});
+
+document.getElementById("og-hl-search").addEventListener("keydown",function(e){
+  if(e.key==="Enter"&&this.value.trim()){ addOgHlTag(this.value.trim()); e.preventDefault(); }
+});
+document.getElementById("og-hl-search").addEventListener("change",function(){
+  if(this.value.trim()) addOgHlTag(this.value.trim());
+});
+
+document.getElementById("tip-font-slider").addEventListener("input",function(){
+  tipFontSize=+this.value;
+  document.getElementById("tip-font-val").textContent=this.value;
+  applyTipFontSize();
+});
+
+document.getElementById("line-width-slider").addEventListener("input",function(){
+  treeLinkWidth=+this.value;
+  document.getElementById("line-width-val").textContent=this.value;
+  if(gMain) gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
+});
+
+document.getElementById("tree-height-slider").addEventListener("input",function(){
+  treeHeightMult=+this.value;
+  document.getElementById("tree-height-val").textContent=this.value;
+  if(rootNode) renderTree(false);
+});
+
+document.getElementById("hm-col-font-slider").addEventListener("input",function(){
+  hmColFontSize=+this.value;
+  document.getElementById("hm-col-font-val").textContent=this.value;
+  drawHeatmap();
+});
+document.getElementById("hm-col-rot-slider").addEventListener("input",function(){
+  hmColRotation=+this.value;
+  document.getElementById("hm-col-rot-val").textContent=this.value;
+  drawHeatmap();
+});
+
+document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
+document.getElementById("chk-og").addEventListener("change",function(){ showOGName=this.checked; if(currentIndex) renderTree(); });
+document.getElementById("chk-ref").addEventListener("change",function(){ showRefOrtho=this.checked; if(currentIndex) renderTree(); });
+document.getElementById("chk-hide-nonhl").addEventListener("change",function(){ hideNonHl=this.checked; if(currentIndex) renderTree(); });
+
+document.getElementById("sptree-width-slider").addEventListener("input",function(){
+  spTreeWidthPct=+this.value;
+  document.getElementById("sptree-width-val").textContent=this.value;
+  drawSpeciesTree();
+});
+
+function downloadNewick(){
+  if(!NEWICK_RAW){ alert("No species tree loaded."); return; }
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([NEWICK_RAW],{type:"text/plain"}));
+  a.download="species_tree.nwk";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TREE VIEW – SELECTION & D3 RENDERING
+// ═══════════════════════════════════════════════════════════════════════════════
+function selectTree(rec){
+  currentIndex=rec;
+  currentDetail=loadDetail(rec.id);
+  if(!currentDetail){ console.warn("No detail data for",rec.id); return; }
+  // reset colour state – default to OG colouring
+  hlSet=null; hlQueries=[]; hlGroupIndex=new Map(); hlQueryColors={};
+  document.getElementById("hl-search").value="";
+  renderHlTags();
+  ogHlSet=null; ogHlQueries=[]; ogHlGroupIndex=new Map(); ogHlQueryColors={};
+  document.getElementById("og-hl-search").value="";
+  renderOgHlTags();
+  cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
+  colorMode="og";
+
+  // reset tree source toggle
+  treeSource="generax";
+  const toggle=document.getElementById("tree-toggle");
+  if(currentDetail.prev_tree){
+    toggle.style.display="inline";
+    toggle.textContent="Showing: GeneRax";
+  } else {
+    toggle.style.display="none";
+  }
+
+  renderSidebar(document.getElementById("hg-search").value);
+  populateColorBy();
+  document.getElementById("color-by").value="og"; // set after options are added
+  populateDatalist();
+  const srcSuffix=rec.source==="generax"?" (GeneRax)":rec.source==="prev"?" (IQ-Tree)":"";
+  document.getElementById("tree-title").textContent=rec.id+srcSuffix+" \u00b7 "+rec.n_leaves+" genes";
+  document.getElementById("n-ogs-label").textContent=rec.n_ogs+" orthogroups";
+
+  // build OG colour maps (currentDetail already set above)
+  const _ogs=currentDetail.ogs||{};
+  Object.keys(_ogs).sort().forEach((og,i)=>{
+    const col=palette[i%palette.length]; ogName2Color[og]=col;
+    for(const gid of _ogs[og]){ ogLeaf2Color[gid]=col; ogGene2Name[gid]=og; }
+  });
+  drawGeneTree(currentDetail.tree);
+  setTimeout(fitTree, 260);
+}
+
+function rebuildOgColors(){
+  if(colorMode!=="og")return;
+  ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
+  const ogs=activeOgs();
+  Object.keys(ogs).sort().forEach((og,i)=>{
+    const col=palette[i%palette.length]; ogName2Color[og]=col;
+    for(const gid of ogs[og]){ ogLeaf2Color[gid]=col; ogGene2Name[gid]=og; }
+  });
+}
+function toggleTreeSource(){
+  if(!currentDetail||!currentDetail.prev_tree) return;
+  const toggle=document.getElementById("tree-toggle");
+  if(treeSource==="generax"){
+    treeSource="original";
+    toggle.textContent="Showing: Original (bootstrap)";
+    rebuildOgColors();
+    drawGeneTree(currentDetail.prev_tree);
+  } else {
+    treeSource="generax";
+    toggle.textContent="Showing: GeneRax";
+    rebuildOgColors();
+    drawGeneTree(currentDetail.tree);
+  }
+}
+
+function activeOgs(){
+  return (treeSource==="original"&&currentDetail&&currentDetail.prev_ogs)
+    ? currentDetail.prev_ogs : (currentDetail?currentDetail.ogs:{});
+}
+
+const treeSvg = d3.select("#tree-svg");
+let rootNode=null, gMain=null, _uid=0, _zoom=null, _zoomScale=1;
+let useBranchLen=false, _phyloScale=1;
+
+function tipFontSVG(){ return (tipFontSize!==null?tipFontSize:11)/_zoomScale; }
+function applyTipFontSize(){
+  if(!gMain) return;
+  const fs=tipFontSVG();
+  gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?fs:0);
+  gMain.selectAll(".og-label").attr("font-size",fs);
+  const colR2=Math.max(10,fs*0.9), leafR2=fs*0.36, colCx2=-(colR2-leafR2);
+  gMain.selectAll(".count-label").attr("font-size",fs).attr("x",d=>d&&d._children&&!d._isOgCol?colCx2:null);
+  gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",colR2).attr("cx",colCx2);
+  gMain.selectAll("circle").filter(d=>d&&!d._children).attr("r",d=>d.data&&d.data.leaf?fs*0.36:isOGNode(d)?fs*0.5:fs*0.26);
+  gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
+}
+
+function isOGNode(d){ return !d.data.leaf && d.data.name && activeOgs()[d.data.name]!==undefined; }
+
+/** Return the MRCA node for a list of d3-hierarchy leaf nodes. */
+function findMRCA(leaves){
+  if(!leaves.length) return null;
+  if(leaves.length===1) return leaves[0].parent||leaves[0];
+  const pathsToRoot=leaves.map(l=>{const p=[];let n=l;while(n){p.push(n);n=n.parent;}return p;});
+  const sets=pathsToRoot.map(p=>new Set(p));
+  for(const anc of pathsToRoot[0]){if(sets.every(s=>s.has(anc)))return anc;}
+  return null;
+}
+
+function countDescLeaves(children){
+  if(!children)return 0; let n=0;
+  for(const c of children){
+    if(c.data.leaf)n++;
+    else n+=countDescLeaves(c.children)+countDescLeaves(c._children);
+  }
+  return n;
+}
+
+function collapsedLabel(d){
+  const n=countDescLeaves(d._children);
+  if(d._uid&&customNodeNames[d._uid]) return customNodeNames[d._uid]+" ["+n+"]";
+  const lbl=d.data._og_label||d.data.name||"";
+  if(lbl) return lbl+" ["+n+"]";
+  const sc={};
+  (function cnt(ch){ if(!ch)return; for(const c of ch){
+    if(c.data.leaf){const sp=c.data.species||"?";sc[sp]=(sc[sp]||0)+1;}
+    else{cnt(c.children);cnt(c._children);}
+  }})(d._children);
+  const top=Object.entries(sc).sort((a,b)=>b[1]-a[1]).slice(0,3)
+    .map(([sp,c])=>c>1?sp+"\u00d7"+c:sp);
+  return top.join(",")+"\u00a0["+n+"]";
+}
+
+/** Assign cumulative branch-length positions (_by) to all nodes. */
+function assignBranchLenPos(node, cum){
+  node._by=cum;
+  (node.children||[]).forEach(c=>assignBranchLenPos(c, cum+(c.data.dist||0)));
+  (node._children||[]).forEach(c=>assignBranchLenPos(c, cum+(c.data.dist||0)));
+}
+
+/** Horizontal (x) pixel position of a node, honouring branch-length mode. */
+function nodeX(d, mg){ return (useBranchLen?(d._by||0)*_phyloScale:d.y)+mg.left; }
+
+/** Rounded-corner elbow path for a cladogram/phylogram link.
+ *  Correct cladogram shape: vertical stem first, then horizontal to child. */
+function elbowPath(s, t, mg, r){
+  const sx=nodeX(s,mg), sy=s.x+mg.top;
+  const tx=nodeX(t,mg), ty=t.x+mg.top;
+  const dy=ty-sy;
+  if(Math.abs(dy)<r*2) return `M${sx},${sy}V${ty}H${tx}`;
+  return dy>0
+    ? `M${sx},${sy}V${ty-r}A${r},${r} 0 0,1 ${sx+r},${ty}H${tx}`
+    : `M${sx},${sy}V${ty+r}A${r},${r} 0 0,0 ${sx+r},${ty}H${tx}`;
+}
+
+function toggleLengths(){
+  useBranchLen=!useBranchLen;
+  const btn=document.getElementById("btn-lengths");
+  btn.classList.toggle("active-btn", useBranchLen);
+  if(rootNode){ assignBranchLenPos(rootNode,0); renderTree(false); }
+}
+
+function fitTree(){
+  if(!gMain||!_zoom) return;
+  const wrap=document.getElementById("tree-wrap");
+  const W=wrap.clientWidth||800, H=wrap.clientHeight||600;
+  const b=gMain.node().getBBox();
+  if(!b.width||!b.height) return;
+  const pad=24;
+  const sc=Math.min((W-pad*2)/b.width,(H-pad*2)/b.height,2);
+  const tx=(W-b.width*sc)/2-b.x*sc, ty=(H-b.height*sc)/2-b.y*sc;
+  treeSvg.transition().duration(350)
+    .call(_zoom.transform, d3.zoomIdentity.translate(tx,ty).scale(sc));
+}
+
+function drawScaleBar(mg, iW, tH){
+  const maxBL=iW/_phyloScale;
+  const raw=maxBL*0.15;
+  const mag=Math.pow(10,Math.floor(Math.log10(raw||1)));
+  const nice=[1,2,5].map(x=>x*mag).find(x=>x>=raw*0.5)||mag;
+  const barPx=nice*_phyloScale;
+  const x0=mg.left+10, y0=mg.top+tH+14;
+  const g=gMain.append("g").attr("class","scale-bar-g");
+  g.append("line").attr("x1",x0).attr("y1",y0).attr("x2",x0+barPx).attr("y2",y0);
+  g.append("line").attr("x1",x0).attr("y1",y0-4).attr("x2",x0).attr("y2",y0+4);
+  g.append("line").attr("x1",x0+barPx).attr("y1",y0-4).attr("x2",x0+barPx).attr("y2",y0+4);
+  g.append("text").attr("x",x0+barPx/2).attr("y",y0+13).text(nice.toPrecision(2));
+}
+
+function drawGeneTree(treeData){
+  treeSvg.selectAll("*").remove(); _uid=0;
+  const wrap=document.getElementById("tree-wrap");
+  const W=wrap.clientWidth||800, H=wrap.clientHeight||600;
+  treeSvg.attr("width",W).attr("height",H);
+  _zoomScale=1;
+  _zoom=d3.zoom().scaleExtent([0.03,30]).on("zoom",e=>{
+    gMain.attr("transform",e.transform);
+    _zoomScale=e.transform.k;
+    applyTipFontSize();
+  });
+  treeSvg.call(_zoom).on("dblclick.zoom",null);
+  gMain=treeSvg.append("g");
+  rootNode=d3.hierarchy(treeData,d=>d.children);
+  rootNode.each(d=>{d._uid=++_uid;});
+  if(useBranchLen) assignBranchLenPos(rootNode,0);
+  renderTree(false);
+  // auto-fit after layout
+  setTimeout(fitTree, 260);
+}
+
+const BADGE_W=96, BADGE_H=17;
+
+function renderTree(animate){
+  if(!rootNode) return;
+  const wrap=document.getElementById("tree-wrap");
+  const W=wrap.clientWidth||800, H=wrap.clientHeight||600;
+  const mg={top:20,right:240,bottom:36,left:36};
+  const iW=W-mg.left-mg.right, iH=H-mg.top-mg.bottom;
+  const nVis=rootNode.leaves().length;
+  // Count total genes (visible tips + hidden leaves inside collapsed nodes)
+  // so that rowH stays proportional even when many nodes are collapsed.
+  function countAllLeaves(d){ if(!d.children&&!d._children) return 1; return (d._children||d.children).reduce((s,c)=>s+countAllLeaves(c),0); }
+  const nAll=countAllLeaves(rootNode);
+  // Minimum row height must accommodate the current tip font size
+  const fsEff = tipFontSize !== null ? tipFontSize : 11;
+  const minRowH = Math.max(14, Math.ceil(fsEff * 1.3));
+  const rowH = Math.max(minRowH, Math.min(Math.max(minRowH, 36), Math.floor(iH/Math.max(nAll,1))));
+  const tH=Math.max(iH, nAll*rowH) * treeHeightMult;
+  d3.cluster().size([tH,iW])(rootNode);
+
+  // Proportional Y-spacing for OG-collapsed nodes.
+  // D3 cluster treats each collapsed node as 1 leaf; we redistribute so each
+  // collapsed node gets nLeaves * rowH vertical space, preventing overlap.
+  {
+    const vLeaves = rootNode.leaves(); // includes ._children nodes (D3 sees them as leaves)
+    const wts = vLeaves.map(d => (d._children && d._isOgCol) ? countAllLeaves(d) : 1);
+    const anyCollapsed = wts.some(w => w > 1);
+    if (anyCollapsed) {
+      const effRow = rowH * treeHeightMult;   // apply height multiplier here too
+      let cy = effRow / 2;
+      vLeaves.forEach((d, i) => {
+        d.x = cy + wts[i] * effRow / 2;
+        cy += wts[i] * effRow;
+      });
+      // fix internal node positions as midpoint of children (post-order)
+      rootNode.eachAfter(d => {
+        if (d.children && d.children.length)
+          d.x = (d.children[0].x + d.children[d.children.length - 1].x) / 2;
+      });
+    }
+  }
+
+  if(useBranchLen){
+    assignBranchLenPos(rootNode,0);
+    const maxBL=d3.max(rootNode.leaves(),d=>d._by)||1;
+    _phyloScale=iW/maxBL;
+  }
+
+  const dur=animate?240:0;
+
+  // ── Links ──
+  gMain.selectAll(".link")
+    .data(rootNode.links(),d=>d.target._uid)
+    .join(
+      enter=>enter.append("path").attr("class","link")
+        .attr("d",d=>elbowPath(d.source,d.source,mg,3)),
+      update=>update,
+      exit=>exit.transition().duration(dur*0.5).style("opacity",0).remove()
+    )
+    .transition().duration(dur)
+    .attr("d",d=>elbowPath(d.source,d.target,mg,3))
+    .attr("stroke-width",treeLinkWidth/_zoomScale);
+
+  // ── Scale bar ──
+  gMain.selectAll(".scale-bar-g").remove();
+  if(useBranchLen) drawScaleBar(mg,iW,tH);
+
+  // ── Nodes ──
+  const nodeSel=gMain.selectAll(".node-g")
+    .data(rootNode.descendants(),d=>d._uid)
+    .join(
+      enter=>{
+        const g=enter.append("g").attr("class","node-g")
+          .attr("transform",d=>{const p=d.parent||d;return `translate(${nodeX(p,mg)},${p.x+mg.top})`;})
+          .style("opacity",0);
+        g.append("circle");
+        g.append("polygon").attr("class","col-tri");
+        g.append("text").attr("class","count-label")  // manual-collapse count
+          .attr("dy","0.35em").attr("text-anchor","middle").attr("pointer-events","none");
+        g.append("text").attr("class","leaf-label");
+        g.append("text").attr("class","og-label");
+        return g;
+      },
+      update=>update,
+      exit=>exit.transition().duration(dur*0.5)
+        .attr("transform",d=>{const p=d.parent||d;return `translate(${nodeX(p,mg)},${p.x+mg.top})`;})
+        .style("opacity",0).remove()
+    );
+
+  nodeSel.transition().duration(dur)
+    .attr("transform",d=>`translate(${nodeX(d,mg)},${d.x+mg.top})`)
+    .style("opacity",1);
+
+  // circle (leaves and expanded internals)
+  nodeSel.select("circle")
+    .attr("display",d=>d._children?"none":null)
+    .attr("cx",0)   // reset any offset from manual-collapse state
+    .attr("r",d=>d.data.leaf?tipFontSVG()*0.36:isOGNode(d)?tipFontSVG()*0.5:tipFontSVG()*0.26)
+    .attr("fill",d=>{
+      if(d.data.leaf){
+        const gid2=d.data.gene_id||d.data.name;
+        const og2=d.data.og||ogGene2Name[gid2]||"";
+        if(ogHlSet!==null){
+          if(!ogHlSet.has(og2)) return "#e8e8e8";
+          const gi=ogHlGroupIndex.get(og2)??0;
+          return ogHlTagColor(gi);
+        }
+        if(colorMode==="og") return ogLeafColor(gid2, d.data.species);
+        const c=leafColor(d.data.species||"");
+        return hlSet&&!hlSet.has(d.data.species||"")?"#e8e8e8":c;
+      }
+      if(isOGNode(d))return "#e74c3c";
+      return "#ccc";
+    })
+    .attr("stroke",d=>d.data.leaf?"none":isOGNode(d)?"#b03a2e":"#aaa")
+    .attr("stroke-width",d=>isOGNode(d)?1.8:0.8)
+    .on("click",(event,d)=>{
+      if(d.data.leaf)return; event.stopPropagation();
+      if(d._children){ d.children=d._children; d._children=null; renderTree(true); }
+      else if(d.children){d._children=d.children;d.children=null; renderTree(true);}
+    })
+    .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
+
+  // OG-collapse triangle (only when _isOgCol)
+  nodeSel.select(".col-tri")
+    .attr("display",d=>(d._children&&d._isOgCol)?null:"none")
+    .attr("points",d=>{
+      if(!d._children||!d._isOgCol) return "";
+      const nL=countAllLeaves(d);
+      const halfH=Math.max(rowH*0.6, nL*rowH/2);
+      return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
+    })
+    .attr("fill",d=>{
+      if(!d._children||!d._isOgCol||colorMode!=="og") return null;
+      const ogName=d.data._og_label||d.data.name||"";
+      const col=ogName2Color[ogName];
+      return col ? col+"55" : null;
+    })
+    .on("click",(event,d)=>{
+      if(!d._children) return; event.stopPropagation();
+      d.children=d._children; d._children=null; d._isOgCol=false; renderTree(true);
+    })
+    .on("mouseover",(ev,d)=>{
+      if(d._children) showTip(ev,collapsedLabel(d)+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand</div>');
+    }).on("mousemove",moveTip).on("mouseout",hideTip);
+
+  // manual-collapse: larger circle + leaf count label
+  // Shift circle leftward so its RIGHT edge aligns with the normal leaf column,
+  // preventing it from protruding into neighbouring nodes' label zones.
+  {
+    const leafR = tipFontSVG()*0.36;
+    const colR  = d => Math.max(10, tipFontSVG()*0.9);
+    const colCx = d => { const r=colR(d); return -(r-leafR); };
+    nodeSel.select("circle")
+      .filter(d=>d._children&&!d._isOgCol)
+      .attr("r",colR).attr("cx",colCx)
+      .attr("fill","#f5f5f5").attr("stroke","#999").attr("stroke-width",1.2)
+      .attr("display",null);
+    nodeSel.select(".count-label")
+      .attr("display",d=>(d._children&&!d._isOgCol)?null:"none")
+      .attr("font-size",tipFontSVG())
+      .attr("x",d=>(d._children&&!d._isOgCol)?colCx(d):0)
+      .text(d=>(d._children&&!d._isOgCol)?countAllLeaves(d):"");
+  }
+
+  // leaf labels: gene_id + OG name
+  nodeSel.select(".leaf-label")
+    .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
+    .attr("font-size",d=>d.data.leaf?tipFontSVG():0)
+    .attr("display",d=>{
+      if(!d.data.leaf) return "none";
+      if(hideNonHl){
+        const gid3=d.data.gene_id||d.data.name, og3=d.data.og||ogGene2Name[gid3]||"";
+        if(hlSet!==null&&!hlSet.has(d.data.species||"")) return "none";
+        if(ogHlSet!==null&&!ogHlSet.has(og3)) return "none";
+      }
+      return null;
+    })
+    .text("")
+    .each(function(d){
+      if(!d.data.leaf) return;
+      const el=d3.select(this);
+      el.selectAll("tspan").remove();
+      const gid=d.data.gene_id||d.data.name;
+      const og=d.data.og||ogGene2Name[gid]||"";
+      const ref=d.data.ref||"";
+      // dim if either species-hl or OG-hl is active and this tip doesn't match
+      const notSpHl=hlSet!==null&&!hlSet.has(d.data.species||"");
+      const ogHlActive=ogHlSet!==null;
+      const inOgHl=ogHlActive&&ogHlSet.has(og);
+      const notHl=notSpHl||(ogHlActive&&!inOgHl);
+      // if OG-hl active, use that group's color; otherwise species color
+      let baseCol;
+      if(ogHlActive&&inOgHl){
+        const gi=ogHlGroupIndex.get(og)??0;
+        baseCol=ogHlTagColor(gi);
+      } else {
+        baseCol=notHl?"#ccc":(colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||""));
+      }
+      const sepCol=notHl?"#ddd":"#bbb";
+      const ogCol=notHl?"#ccc":(inOgHl?baseCol:"#4a7aad");
+      const refCol=notHl?"#ccc":"#2e8b57";
+      let first=true;
+      function sep(){ if(!first) el.append("tspan").attr("fill",sepCol).text(" \u00b7 "); first=false; }
+      if(showGeneId){ sep(); el.append("tspan").attr("fill",baseCol).text(gid); }
+      if(showOGName&&og){ sep(); el.append("tspan").attr("fill",ogCol).text(og); }
+      if(showRefOrtho&&ref){ sep(); el.append("tspan").attr("fill",refCol).text(ref); }
+    });
+
+  // OG labels: beside OG-collapsed triangle, or beside expanded OG-named internal
+  nodeSel.select(".og-label")
+    .attr("x",d=>d._children?BADGE_W+6:-7)
+    .attr("dy","0.35em")
+    .attr("text-anchor",d=>d._children?"start":"end")
+    .attr("font-size",tipFontSVG())
+    .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(!d._children&&isOGNode(d))))?null:"none")
+    .text(d=>d._isOgCol?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
+  applyTipFontSize();
+}
+
+// ── tree controls ──
+function expandAll(){
+  if(!rootNode)return;
+  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;d._isOgCol=false;}});
+  renderTree(true);
+}
+function collapseToOGs(){
+  if(!rootNode)return;
+  // pass 1: expand all, clear flags
+  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;} d._isOgCol=false;});
+  // pass 2a: collapse named OG internal nodes (POSSVM trees with annotated internals)
+  let found=false;
+  rootNode.each(d=>{
+    if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;d._isOgCol=true;found=true;}
+  });
+  // pass 2b: fallback – derive OGs from pipe-separated tip names (gene_id|og|ref)
+  if(!found){
+    const ogGroups={};
+    rootNode.leaves().forEach(l=>{
+      const og=l.data.og;
+      if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);
+    });
+    for(const [og,leaves] of Object.entries(ogGroups)){
+      const mrca=findMRCA(leaves);
+      if(mrca&&!mrca.data.leaf&&mrca.children){
+        mrca.data._og_label=og; mrca._isOgCol=true;
+        mrca._children=mrca.children; mrca.children=null;
+      }
+    }
+  }
+  renderTree(true);
+  setTimeout(fitTree, 260);
+}
+function collapseAll(){
+  if(!rootNode)return;
+  rootNode.each(d=>{
+    if(d.depth>0&&!d.data.leaf&&d.children){d._children=d.children;d.children=null;}
+  });
+  if(rootNode._children){rootNode.children=rootNode._children;rootNode._children=null;}
+  renderTree(true);
+  setTimeout(fitTree, 260);
+}
+
+function focusHighlighted(){
+  if(!hlSet||!rootNode)return;
+  // expand all
+  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
+  // mark nodes that have ≥1 highlighted descendant (post-order)
+  const hasHl=new Map();
+  rootNode.eachAfter(d=>{
+    if(d.data.leaf){ hasHl.set(d,hlSet.has(d.data.species||"")); }
+    else { hasHl.set(d,(d.children||[]).some(c=>hasHl.get(c))); }
+  });
+  // collapse subtrees with no highlighted leaf
+  rootNode.each(d=>{
+    if(!d.data.leaf&&d.children&&!hasHl.get(d)){d._children=d.children;d.children=null;}
+  });
+  renderTree(true);
+  setTimeout(fitTree, 260);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════════
+// scroll sync between species-tree panel and heatmap panel
+(function(){
+  const tp=document.getElementById("tree-panel");
+  const hp=document.getElementById("heatmap-panel");
+  let syncing=false;
+  tp.addEventListener("scroll",()=>{ if(!syncing){syncing=true;hp.scrollTop=tp.scrollTop;syncing=false;} });
+  hp.addEventListener("scroll",()=>{ if(!syncing){syncing=true;tp.scrollTop=hp.scrollTop;syncing=false;} });
+})();
+
+document.getElementById("tree-count").textContent =
+  TREE_INDEX.length+" gene tree"+(TREE_INDEX.length!==1?"s":"");
+
+if (hasHeatmapData || TREE_INDEX.length > 0) {
+  switchTab(hasHeatmapData ? "heatmap" : "trees");
+} else {
+  document.getElementById("pane-heatmap").innerHTML =
+    '<div style="padding:40px;color:#999;text-align:center">No data found.<br>'+
+    'Pass <code>--possvm_dir</code> and/or <code>--search_dir</code> / <code>--cluster_dir</code>.</div>';
+}
+</script>
+</body>
+</html>
