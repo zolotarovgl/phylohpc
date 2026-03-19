@@ -1209,11 +1209,11 @@ function drawHeatmap() {
     // third arg 'sp': species clicked (from cell), undefined for column-header click
     clickHandler=(_ev,_d,sp)=>{
       if(!treeRec) return;
+      switchTab("trees"); selectTree(treeRec); renderSidebar("");
       if(sp && _d.species_counts[sp]){
         hlQueries=[sp]; rebuildHlSet();
+        setTimeout(focusHighlighted,60);
       }
-      switchTab("trees"); selectTree(treeRec); renderSidebar("");
-      if(hlSet) setTimeout(focusHighlighted,60);
     };
   }
 
