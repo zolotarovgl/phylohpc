@@ -126,6 +126,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <h2>Step 2 Report</h2>
   <button class="btn" id="hm-back" style="display:none" onclick="hmBack()">&#8592; Back</button>
   <span id="hm-breadcrumb" style="font-size:11px"></span>
+  <button id="hm-expand-og" style="display:none;padding:2px 8px;font-size:11px;border:1px solid #27ae60;color:#27ae60;border-radius:3px;background:#fff;cursor:pointer" title="Switch to Custom view with all OGs from all visible HGs" onclick="hmExpandToOGs()">&#43; Expand all to OGs</button>
   <span id="tree-count" style="font-size:11px;color:#95a5a6;display:none"></span>
 </div>
 
@@ -186,6 +187,12 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
               <option value="absolute">Absolute count</option>
             </select>
           </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Sort cols:
+            <select id="hm-col-sort-sp" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:3px" onchange="hmColSortSp=this.value||null;hmColOrderOverride=null;drawHeatmap()">
+              <option value="">— none —</option>
+            </select>
+          </label>
           <button id="btn-hm-custom" onclick="hmEnterCustom()" style="padding:2px 8px;font-size:11px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer;font-weight:600">&#128269; Search OGs</button>
           <button onclick="downloadHeatmapPNG()" title="Download heatmap as PNG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; PNG</button>
           <button onclick="downloadHeatmapSVG()" title="Download heatmap as SVG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; SVG</button>
@@ -193,10 +200,13 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <summary style="cursor:pointer;color:#888;list-style:none">&#9432; Help</summary>
             <div style="position:absolute;z-index:50;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;box-shadow:0 2px 8px rgba(0,0,0,.12);line-height:1.7;color:#999;min-width:300px;right:10px">
               <div><b style="color:#777">Navigate:</b> click a <i>column header</i> to drill into family &rarr; HG &rarr; OG</div>
+              <div><b style="color:#777">Expand to OGs:</b> at HG level, shift+click a column or use the &ldquo;Expand all to OGs&rdquo; button</div>
               <div><b style="color:#777">Open tree:</b> click a <i>cell</i> to open the gene tree and highlight that species</div>
+              <div><b style="color:#777">Sort columns:</b> use the &ldquo;Sort cols&rdquo; dropdown to rank columns by a species&rsquo; gene count</div>
+              <div><b style="color:#777">Reorder:</b> drag a column header left or right to reorder columns manually</div>
               <div><b style="color:#777">Row groups:</b> shift+click a node in the Species Tree tab to split rows by clade</div>
               <div><b style="color:#777">Colour:</b> intensity = gene count; grey = absent</div>
-              <div><b style="color:#777">Custom:</b> build a heatmap from any combination of orthogroups; search by OG name or gene ID</div>
+              <div><b style="color:#777">Custom:</b> build a heatmap from any OGs, classes or HGs; search by OG name, gene ID or group name</div>
             </div>
           </details>
         </div>
@@ -507,6 +517,7 @@ let hmActiveClass  = null;
 let hmActiveFamily = null;
 let hmActiveHG     = null;   // id string from HG_DATA
 let hmActiveHGRec  = null;   // full HG_DATA record (for fallback lookup)
+let hmColSortSp    = null;   // sort heatmap columns by this species' count (descending)
 let hmCustomOGs    = [];     // user-selected individual OG names for custom view
 let hmCustomGroups = [];     // bulk selections: [{type:"class"|"family", key, label, ogs:[...]}]
 let hmColOrderOverride = null; // drag-reorder: array of column ids overriding natural order
@@ -665,6 +676,11 @@ const hasHeatmapData = FAMILY_DATA.length > 0 || HG_DATA.length > 0;
   const prefs = ["all",...new Set(FAMILY_DATA.map(d=>d.pref).filter(Boolean).sort())];
   prefs.forEach(p => { const o=document.createElement("option"); o.value=p; o.textContent=p; sel.appendChild(o); });
   sel.addEventListener("change", drawHeatmap);
+})();
+// sort-by-species selector — populate from ALL_SPECIES
+(function(){
+  const sel=document.getElementById("hm-col-sort-sp");
+  ALL_SPECIES.forEach(sp=>{ const o=document.createElement("option"); o.value=sp; o.textContent=sp; sel.appendChild(o); });
 })();
 
 const cladoCollapsed  = new Set();   // stable node keys of collapsed cladogram nodes
@@ -1000,14 +1016,16 @@ function drawSpeciesTree() {
         .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.5);
       svg.append("text").attr("x",sx(n._d)+8).attr("y",n._y).attr("dy","0.35em")
         .attr("font-size",12).attr("fill",tc).attr("font-family","monospace").text(n.name)
-        .style("cursor","default")
+        .style("cursor","pointer")
         .on("mouseover",(ev)=>{
           const m=spMeta[n.name]||{genes:0,families:0,hgs:0};
           showTip(ev,'<div class="tt-name">'+n.name+'</div>'
             +'<div class="tt-row"><span>Annotated genes</span><strong>'+m.genes+'</strong></div>'
             +'<div class="tt-row"><span>Families</span><strong>'+m.families+'</strong></div>'
-            +'<div class="tt-row"><span>Homology groups</span><strong>'+m.hgs+'</strong></div>');
-        }).on("mousemove",moveTip).on("mouseout",hideTip);
+            +'<div class="tt-row"><span>Homology groups</span><strong>'+m.hgs+'</strong></div>'
+            +'<div style="font-size:9px;color:#aaa;margin-top:3px">click to download gene list</div>');
+        }).on("mousemove",moveTip).on("mouseout",hideTip)
+        .on("click",()=>{ hideTip(); downloadSpeciesGenes(n.name); });
       return;
     }
     n.children.forEach(drawLeaves);
@@ -1019,6 +1037,7 @@ function drawHeatmap() {
   const prefix = document.getElementById("prefixSelect").value;
   const back   = document.getElementById("hm-back");
   const crumb  = document.getElementById("hm-breadcrumb");
+  const expandBtn = document.getElementById("hm-expand-og");
   let data, colLabel, clickHandler;
 
   if (hmViewMode==="class") {
@@ -1033,7 +1052,7 @@ function drawHeatmap() {
     data=Object.values(map).sort((a,b)=>
       Object.values(b.species_counts).reduce((x,y)=>x+y,0)-
       Object.values(a.species_counts).reduce((x,y)=>x+y,0));
-    back.style.display="none"; crumb.textContent="";
+    back.style.display="none"; crumb.textContent=""; expandBtn.style.display="none";
     colLabel=d=>d.id;
     clickHandler=(_ev,d)=>{ hmViewMode="family"; hmActiveClass=d.id; drawHeatmap(); };
 
@@ -1041,7 +1060,7 @@ function drawHeatmap() {
     data=FAMILY_DATA.filter(d=>(d.class||d.pref)===hmActiveClass)
                     .filter(d=>prefix==="all"||d.pref===prefix)
                     .sort((a,b)=>b.total-a.total);
-    back.style.display="inline"; crumb.textContent=hmActiveClass;
+    back.style.display="inline"; crumb.textContent=hmActiveClass; expandBtn.style.display="none";
     colLabel=d=>d.family;
     clickHandler=(_ev,d)=>{ hmViewMode="hg"; hmActiveFamily=d.family; drawHeatmap(); };
 
@@ -1050,9 +1069,13 @@ function drawHeatmap() {
                 .filter(d=>prefix==="all"||d.pref===prefix)
                 .sort((a,b)=>b.total-a.total);
     back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily;
+    expandBtn.style.display="inline"; expandBtn.dataset.hgData=JSON.stringify(data.map(d=>d.id));
     colLabel=d=>d.hg||d.id;
     clickHandler=(ev,d,sp)=>{
-      if(sp===undefined){ hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap(); return; }
+      if(sp===undefined){
+        if(ev.shiftKey){ hmExpandHGToOGs([d.id]); return; }
+        hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap(); return;
+      }
       // cell click: open gene tree for this HG with species highlighted
       const tRec=TREE_INDEX.find(t=>t.id===d.id)||TREE_INDEX.find(t=>t.family===d.family&&t.hg===d.hg);
       if(!tRec) return;
@@ -1072,7 +1095,7 @@ function drawHeatmap() {
       gids.forEach(g=>{ const sp=getSpeciesPfx(g); if(sp) sc[sp]=(sc[sp]||0)+1; });
       return {id:og,species_counts:sc,total:gids.length};
     }).sort((a,b)=>b.total-a.total);
-    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG);
+    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG); expandBtn.style.display="none";
     colLabel=d=>d.id+" ["+d.total+"]";
     // third arg 'sp': species clicked (from cell), undefined for column-header click
     clickHandler=(_ev,_d,sp)=>{
@@ -1104,7 +1127,7 @@ function drawHeatmap() {
       const r=hmOGIndex[og]||{};
       return {id:og,species_counts:r.species_counts||{},total:r.total||0,family:r.family||"",cls:r.cls||""};
     });
-    back.style.display="none";
+    back.style.display="none"; expandBtn.style.display="none";
     crumb.textContent="Custom selection ("+effOGs.length+" OG"+(effOGs.length!==1?"s":"")+")";
     colLabel=d=>d.id;
     clickHandler=(_ev,d,sp)=>{
@@ -1121,6 +1144,15 @@ function drawHeatmap() {
       }
       setTimeout(focusHighlighted,80);
     };
+  }
+
+  // ── apply sort-by-species ──────────────────────────────────────────────
+  if(hmColSortSp){
+    data=[...data].sort((a,b)=>{
+      const av=a.species_counts[hmColSortSp]||0;
+      const bv=b.species_counts[hmColSortSp]||0;
+      return bv-av; // descending; zero ties remain in original relative order
+    });
   }
 
   // ── apply drag-reorder override ────────────────────────────────────────
@@ -1405,6 +1437,25 @@ function hmEnterCustom(){
   _positionCustomBar();
   document.getElementById("hm-og-search").focus();
   drawHeatmap();
+}
+function hmExpandHGToOGs(hgIds){
+  buildOGIndex();
+  const newGroups=hgIds.map(hgId=>{
+    const ogs=Object.keys(hmOGIndex).filter(og=>hmOGIndex[og].hgId===hgId);
+    const label=HG_DATA.find(d=>d.id===hgId)?.hg||hgId;
+    return {groupType:"hg",key:hgId,label,ogs};
+  }).filter(g=>g.ogs.length>0);
+  if(!newGroups.length) return;
+  newGroups.forEach(g=>{ if(!hmCustomGroups.some(x=>x.key===g.key)) hmCustomGroups.push(g); });
+  hmViewMode="custom";
+  const bar=document.getElementById("hm-custom-bar");
+  bar.style.display="flex"; _positionCustomBar();
+  renderCustomChips(); drawHeatmap();
+}
+function hmExpandToOGs(){
+  const btn=document.getElementById("hm-expand-og");
+  const hgIds=JSON.parse(btn.dataset.hgData||"[]");
+  hmExpandHGToOGs(hgIds);
 }
 function hmExitCustom(){
   hmViewMode="class"; hmActiveClass=null; hmActiveFamily=null;
@@ -1895,6 +1946,22 @@ function downloadNewick(){
   a.href=URL.createObjectURL(new Blob([NEWICK_RAW],{type:"text/plain"}));
   a.download="species_tree.nwk";
   a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function downloadSpeciesGenes(sp){
+  buildOGIndex();
+  const rows=["gene_id\tog_name\thg_id\tfamily\tclass"];
+  for(const [gene,og] of Object.entries(hmGeneIndex)){
+    if(getSpeciesPfx(gene)!==sp) continue;
+    const r=hmOGIndex[og]||{};
+    rows.push([gene,og,r.hgId||"",r.family||"",r.cls||""].join("\t"));
+  }
+  if(rows.length===1){ alert("No gene data found for "+sp); return; }
+  const blob=new Blob([rows.join("\n")],{type:"text/tab-separated-values"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=sp+"_genes.tsv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }
 
