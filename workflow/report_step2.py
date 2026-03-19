@@ -418,8 +418,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .link{fill:none;stroke:#d5d5d5;stroke-width:1.3px}
 .node-g circle{cursor:pointer;transition:r .12s,fill .12s}
 .node-g circle:hover{stroke-width:2.5px !important}
-.badge-bg{fill:#fff7ed;stroke:#e8913a;stroke-width:1.3px;cursor:pointer}
-.badge-bg:hover{fill:#ffecd4}
+.badge-bg{fill:#f0f0f0;stroke:#bbb;stroke-width:1px;cursor:pointer}
+.badge-bg:hover{fill:#e4e4e4}
 .leaf-label{pointer-events:none;font-family:monospace}
 .og-label{fill:#b5371f;pointer-events:none}
 .ctrl-btn.active-btn{background:#d5f5e3;border-color:#1abc9c;color:#1a6b4a}
@@ -823,6 +823,31 @@ function drawCladogram() {
     });
   }
   drawB(tree);
+
+  // ── interactive internal nodes (hover = name, shift+click = heatmap split) ──
+  function drawCladoNodes(n){
+    if(!n.children) return;
+    const nodeLabel = n.name || "(unnamed)";
+    const cleavesSet = new Set(n.children ? flat(n).filter(x=>!x.children).map(x=>x.name) : []);
+    const splitIdx = hmSplitSets.findIndex(s=>s.size===cleavesSet.size&&[...cleavesSet].every(v=>s.has(v)));
+    const isSplit = splitIdx >= 0;
+    const nodeCol = isSplit ? hmSplitLineColors[splitIdx%hmSplitLineColors.length] : "#aaa";
+    svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
+      .attr("fill", isSplit ? hmSplitColors[splitIdx%hmSplitColors.length] : "#fff")
+      .attr("stroke",nodeCol).attr("stroke-width", isSplit?2:1)
+      .style("cursor","pointer")
+      .on("mouseover",ev=>showTip(ev,nodeLabel+'<div style="font-size:9px;color:#aaa;margin-top:2px">shift+click to split heatmap</div>'))
+      .on("mousemove",moveTip).on("mouseout",hideTip)
+      .on("click",(ev)=>{
+        if(!ev.shiftKey) return;
+        ev.stopPropagation();
+        if(isSplit){ hmSplitSets.splice(splitIdx,1); hmSplitLabels.splice(splitIdx,1); }
+        else { hmSplitSets.push(cleavesSet); hmSplitLabels.push(nodeLabel); }
+        updateHmSplitBar(); hideTip(); drawCladogram(); drawHeatmap();
+      });
+    n.children.forEach(drawCladoNodes);
+  }
+  drawCladoNodes(tree);
 }
 
 // ── helpers for heatmap row splitting ─────────────────────────────────────
@@ -966,6 +991,11 @@ function drawSpeciesTree() {
       const isSplit=splitIdx>=0;
       const nodeCol=isSplit?hmSplitLineColors[splitIdx%hmSplitLineColors.length]:"#999";
       const tip=nodeLabel+'<div style="font-size:9px;color:#aaa;margin-top:3px">click to collapse &nbsp;·&nbsp; shift+click to split heatmap</div>';
+      // always-visible node name label (italic, small, to the right of the dot)
+      if(n.name)
+        svg.append("text").attr("x",sx(n._d)+7).attr("y",n._y).attr("dy","0.35em")
+          .attr("font-size",9).attr("fill",nodeCol).attr("font-style","italic")
+          .style("pointer-events","none").text(n.name);
       svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
         .attr("fill",isSplit?hmSplitColors[splitIdx%hmSplitColors.length]:"#fff")
         .attr("stroke",nodeCol).attr("stroke-width",isSplit?2:1.2)
@@ -1081,53 +1111,76 @@ function drawHeatmap() {
   if (hmSplitSets.length > 0) {
     hmSplitSets.forEach((sSet,gi) => sSet.forEach(sp => { if (!spSplitGroup.has(sp)) spSplitGroup.set(sp,gi); }));
     nSplitGroups = hmSplitSets.length;
-  } else if (hlSet !== null) {
-    for (const [sp,gi] of hlGroupIndex) spSplitGroup.set(sp, gi);
-    nSplitGroups = hlQueries.length;
-    bandLineColors = hlTagColors;
-    bandFillColors = hlTagColors.map(c=>{ const o=d3.color(c); return o?`rgba(${o.r},${o.g},${o.b},0.09)`:c; });
-    bandLabels     = hlQueries;
   }
 
+  // Local copy — never mutate the global speciesOrder (it drives drawSpeciesTree too)
+  let hmOrder = [...speciesOrder];
   if (nSplitGroups > 0) {
-    // reorder rows: each group in phylo order, then non-group species
     const grouped = [];
     for (let gi=0; gi<nSplitGroups; gi++)
-      speciesOrder.filter(s=>spSplitGroup.get(s)===gi).forEach(s=>grouped.push(s));
-    speciesOrder.filter(s=>!spSplitGroup.has(s)).forEach(s=>grouped.push(s));
-    speciesOrder = grouped;
+      hmOrder.filter(s=>spSplitGroup.get(s)===gi).forEach(s=>grouped.push(s));
+    hmOrder.filter(s=>!spSplitGroup.has(s)).forEach(s=>grouped.push(s));
+    hmOrder = grouped;
   }
 
   const cW=18, cH=12;
-  const maxNameLen=speciesOrder.reduce((m,s)=>Math.max(m,s.length),0);
+  const maxNameLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
   const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
-  const svgW=data.length*cW+ROW_LABEL_W+20, svgH=speciesOrder.length*14+TOP_MARGIN+60;
+  const BAR_MAX_H=50, BAR_OFFSET=BAR_MAX_H+22;
+  const hmTM=TOP_MARGIN+BAR_OFFSET;   // shifted top margin; bars live in [TOP_MARGIN, hmTM]
+  const svgW=data.length*cW+ROW_LABEL_W+20, svgH=speciesOrder.length*14+hmTM+60;
   const panel=document.getElementById("heatmap-panel");
   const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
 
-  if(!data.length){ svg.append("text").attr("x",40).attr("y",TOP_MARGIN+30).attr("fill","#999").text("No data for this selection."); return; }
+  if(!data.length){ svg.append("text").attr("x",40).attr("y",hmTM+30).attr("fill","#999").text("No data for this selection."); return; }
+
+  // ── column-sum bar chart ──────────────────────────────────────────────────
+  const colTotals=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
+  const maxTotal=d3.max(colTotals)||1;
+  const BAR_BASELINE=hmTM-15;           // x-axis line y-coord
+  svg.append("line")
+    .attr("x1",ROW_LABEL_W).attr("x2",ROW_LABEL_W+data.length*cW)
+    .attr("y1",BAR_BASELINE).attr("y2",BAR_BASELINE)
+    .attr("stroke","#ccc").attr("stroke-width",0.8);
+  // "total" y-axis label
+  svg.append("text").attr("x",ROW_LABEL_W-4).attr("y",BAR_BASELINE-BAR_MAX_H/2)
+    .attr("text-anchor","end").attr("font-size",8).attr("fill","#aaa")
+    .attr("dominant-baseline","middle").text("total \u2193");
+  data.forEach((_rec,ci)=>{
+    const total=colTotals[ci];
+    const bH=Math.max(total>0?1:0,(total/maxTotal)*BAR_MAX_H);
+    svg.append("rect")
+      .attr("x",ci*cW+ROW_LABEL_W+1).attr("y",BAR_BASELINE-bH)
+      .attr("width",cW-2).attr("height",bH)
+      .attr("fill","#7fb3d3").attr("opacity",0.8);
+    if(total>0)
+      svg.append("text")
+        .attr("x",ci*cW+ROW_LABEL_W+cW/2).attr("y",BAR_BASELINE-bH-2)
+        .attr("text-anchor","middle").attr("font-size",6.5).attr("fill","#555")
+        .text(total>=10000?(total/1000).toFixed(0)+"k":total);
+  });
 
   // draw group background bands before cells (SVG paint order: back to front)
   if (nSplitGroups > 0) {
-    let gi0 = spSplitGroup.has(speciesOrder[0]) ? spSplitGroup.get(speciesOrder[0]) : -1;
+    let gi0 = spSplitGroup.has(hmOrder[0]) ? spSplitGroup.get(hmOrder[0]) : -1;
     let bandStart = 0;
-    for (let ri=1; ri<=speciesOrder.length; ri++) {
-      const gi1 = ri<speciesOrder.length ? (spSplitGroup.has(speciesOrder[ri]) ? spSplitGroup.get(speciesOrder[ri]) : -1) : -2;
+    for (let ri=1; ri<=hmOrder.length; ri++) {
+      const gi1 = ri<hmOrder.length ? (spSplitGroup.has(hmOrder[ri]) ? spSplitGroup.get(hmOrder[ri]) : -1) : -2;
       if (gi1 !== gi0) {
         if (gi0 >= 0) {
           svg.append("rect")
-            .attr("x",0).attr("y",bandStart*14+TOP_MARGIN)
+            .attr("x",0).attr("y",bandStart*14+hmTM)
             .attr("width",svgW).attr("height",(ri-bandStart)*14)
             .attr("fill",bandFillColors[gi0%bandFillColors.length]);
-          const midY=bandStart*14+TOP_MARGIN+(ri-bandStart)*7;
+          const midY=bandStart*14+hmTM+(ri-bandStart)*7;
           svg.append("text").attr("x",4).attr("y",midY).attr("dy","0.35em")
             .attr("font-size",8).attr("fill",bandLineColors[gi0%bandLineColors.length])
             .attr("font-weight","bold").text(bandLabels[gi0]||("Group "+(gi0+1)));
         }
-        if (ri<speciesOrder.length) {
+        if (ri<hmOrder.length) {
           svg.append("line")
             .attr("x1",0).attr("x2",svgW)
-            .attr("y1",ri*14+TOP_MARGIN).attr("y2",ri*14+TOP_MARGIN)
+            .attr("y1",ri*14+hmTM).attr("y2",ri*14+hmTM)
             .attr("stroke","#999").attr("stroke-width",1.5).attr("stroke-dasharray","4,2");
         }
         gi0 = gi1; bandStart = ri;
@@ -1136,7 +1189,7 @@ function drawHeatmap() {
   }
 
   const zMat=data.map(rec=>{
-    const vals=speciesOrder.map(s=>rec.species_counts[s]||0);
+    const vals=hmOrder.map(s=>rec.species_counts[s]||0);
     const m=d3.mean(vals), sd=d3.deviation(vals)||1;
     return vals.map(v=>(v-m)/sd);
   });
@@ -1145,42 +1198,52 @@ function drawHeatmap() {
   const color=d3.scaleDiverging().domain([zMax,0,-zMax]).interpolator(d3.interpolateRdBu);
 
   data.forEach((rec,ci)=>{
-    speciesOrder.forEach((sp,ri)=>{
+    hmOrder.forEach((sp,ri)=>{
       const count=rec.species_counts[sp]||0;
       const z=zMat[ci][ri];
+      const cellX=ci*cW+ROW_LABEL_W, cellY=ri*14+hmTM;
       svg.append("rect").attr("class","hm-cell")
-        .attr("x",ci*cW+ROW_LABEL_W).attr("y",ri*14+TOP_MARGIN).attr("width",cW-2).attr("height",cH)
+        .attr("x",cellX).attr("y",cellY).attr("width",cW-2).attr("height",cH)
         .attr("fill",color(z)).style("cursor","pointer")
         .on("mouseover",ev=>{
           showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b><br>z: <b>'+z.toFixed(2)+'</b>');
         })
         .on("mousemove",moveTip).on("mouseout",hideTip)
         .on("click",ev=>clickHandler(ev,rec));
+      if(count>0){
+        const fc=d3.color(color(z));
+        const lum=fc?(0.2126*fc.r+0.7152*fc.g+0.0722*fc.b)/255:1;
+        svg.append("text")
+          .attr("x",cellX+(cW-2)/2).attr("y",cellY+cH/2).attr("dy","0.35em")
+          .attr("text-anchor","middle").attr("font-size",6.5)
+          .attr("fill",lum>0.45?"#222":"#eee").attr("pointer-events","none")
+          .text(count>999?"≫":count);
+      }
     });
   });
 
   // row labels (coloured by group when grouping is active)
-  speciesOrder.forEach((sp,ri)=>{
+  hmOrder.forEach((sp,ri)=>{
     const gi = spSplitGroup.get(sp);
     const labelCol = gi!==undefined
       ? bandLineColors[gi%bandLineColors.length]
       : (nSplitGroups>0 ? "#bbb" : "#333");
     svg.append("text")
-      .attr("x",ROW_LABEL_W-4).attr("y",ri*14+TOP_MARGIN+9)
+      .attr("x",ROW_LABEL_W-4).attr("y",ri*14+hmTM+9)
       .attr("text-anchor","end").attr("font-size",11).attr("fill",labelCol)
       .text(sp);
   });
 
   // column headers
   svg.selectAll("text.hm-col").data(data).enter().append("text").attr("class","hm-col")
-    .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W},${TOP_MARGIN-10}) rotate(-65)`)
+    .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W},${hmTM-10}) rotate(-65)`)
     .attr("font-size",9).style("cursor","pointer")
     .text(colLabel)
     .on("click",clickHandler);
 
   // hint
   svg.append("text")
-    .attr("x",ROW_LABEL_W).attr("y",TOP_MARGIN-92)
+    .attr("x",ROW_LABEL_W).attr("y",TOP_MARGIN-8)
     .attr("font-size",9).attr("fill","#aaa").attr("font-style","italic")
     .text("Click a column label or cell to drill down \u2193");
 
@@ -1353,7 +1416,6 @@ function rebuildHlSet(){
   renderHlTags();
   document.getElementById("btn-focus-hl").style.display=hlSet?"inline":"none";
   if(currentIndex) renderTree();
-  if(hmSplitSets.length===0) drawHeatmap();  // heatmap groups driven by hlSet when no explicit splits
 }
 
 function renderHlTags(){
@@ -1609,8 +1671,12 @@ function renderTree(animate){
   const mg={top:20,right:240,bottom:36,left:36};
   const iW=W-mg.left-mg.right, iH=H-mg.top-mg.bottom;
   const nVis=rootNode.leaves().length;
-  const rowH=Math.max(18,Math.min(32,Math.floor(iH/Math.max(nVis,1))));
-  const tH=Math.max(iH,nVis*rowH);
+  // Count total genes (visible tips + hidden leaves inside collapsed nodes)
+  // so that rowH stays proportional even when many nodes are collapsed.
+  function countAllLeaves(d){ if(!d.children&&!d._children) return 1; return (d._children||d.children).reduce((s,c)=>s+countAllLeaves(c),0); }
+  const nAll=countAllLeaves(rootNode);
+  const rowH=Math.max(14,Math.min(32,Math.floor(iH/Math.max(nAll,1))));
+  const tH=Math.max(iH,nAll*rowH);
   d3.cluster().size([tH,iW])(rootNode);
 
   if(useBranchLen){
