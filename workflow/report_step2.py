@@ -768,6 +768,8 @@ function cpExpand() {
 // HEATMAP VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
 const TOP_MARGIN = 110;
+const HM_BAR_H  = 72;   // height reserved above heatmap rows for the column-sum bar chart
+const HM_TOP    = TOP_MARGIN + HM_BAR_H;  // first row y-coord in the heatmap SVG
 
 // species order: tree order filtered to species present in data
 const dataSpecies = new Set([...FAMILY_DATA,...HG_DATA].flatMap(d=>Object.keys(d.species_counts)));
@@ -790,9 +792,9 @@ function drawCladogram() {
   tp.innerHTML = "";
   if (!SP_TREE_DATA || !SP_TREE_DATA.children || !speciesOrder.length) return;
 
-  const W = 270, H = speciesOrder.length*14+TOP_MARGIN+40;
+  const W = 270, H = speciesOrder.length*14+HM_TOP+40;
   const svg = d3.select(tp).append("svg").attr("width",W).attr("height",H);
-  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=TOP_MARGIN+i*14; });
+  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=HM_TOP+i*14; });
 
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
   function prune(n){
@@ -1126,9 +1128,9 @@ function drawHeatmap() {
   const cW=18, cH=12;
   const maxNameLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
   const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
-  const BAR_MAX_H=50, BAR_OFFSET=BAR_MAX_H+22;
-  const hmTM=TOP_MARGIN+BAR_OFFSET;   // shifted top margin; bars live in [TOP_MARGIN, hmTM]
-  const svgW=data.length*cW+ROW_LABEL_W+20, svgH=speciesOrder.length*14+hmTM+60;
+  const BAR_MAX_H=HM_BAR_H-22;   // usable bar pixel height within the reserved zone
+  const hmTM=HM_TOP;              // alias used throughout drawHeatmap
+  const svgW=data.length*cW+ROW_LABEL_W+20, svgH=hmOrder.length*14+hmTM+60;
   const panel=document.getElementById("heatmap-panel");
   const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
 
@@ -1516,7 +1518,6 @@ function selectTree(rec){
     for(const gid of _ogs[og]){ ogLeaf2Color[gid]=col; ogGene2Name[gid]=og; }
   });
   drawGeneTree(currentDetail.tree);
-  collapseToOGs();
   setTimeout(fitTree, 260);
 }
 
