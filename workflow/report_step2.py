@@ -1295,6 +1295,22 @@ function drawSpeciesTree() {
   drawLeaves(tree);
 }
 
+// ── helpers for sort-by-species buttons ───────────────────────────────────
+function hmSortActive(sps){
+  if(!hmColSortSp) return false;
+  const cur=Array.isArray(hmColSortSp)?hmColSortSp:[hmColSortSp];
+  const tgt=Array.isArray(sps)?sps:[sps];
+  return cur.length===tgt.length&&tgt.every(s=>cur.includes(s));
+}
+function hmSetSort(sps){
+  const tgt=Array.isArray(sps)?sps:[sps];
+  hmColSortSp=hmSortActive(tgt)?null:(tgt.length===1?tgt[0]:tgt);
+  hmColOrderOverride=null;
+  const dd=document.getElementById("hm-col-sort-sp");
+  if(dd) dd.value=(typeof hmColSortSp==="string"?hmColSortSp:"");
+  drawHeatmap();
+}
+
 function drawHeatmap() {
   const prefix = document.getElementById("prefixSelect").value;
   const back   = document.getElementById("hm-back");
@@ -1408,12 +1424,13 @@ function drawHeatmap() {
     };
   }
 
-  // ── apply sort-by-species ──────────────────────────────────────────────
+  // ── apply sort-by-species (hmColSortSp may be a single string or array) ──
   if(hmColSortSp){
+    const _sortSps=Array.isArray(hmColSortSp)?hmColSortSp:[hmColSortSp];
     data=[...data].sort((a,b)=>{
-      const av=a.species_counts[hmColSortSp]||0;
-      const bv=b.species_counts[hmColSortSp]||0;
-      return bv-av; // descending; zero ties remain in original relative order
+      const av=_sortSps.reduce((s,sp)=>s+(a.species_counts[sp]||0),0)/_sortSps.length;
+      const bv=_sortSps.reduce((s,sp)=>s+(b.species_counts[sp]||0),0)/_sortSps.length;
+      return bv-av;
     });
   }
 
@@ -1567,14 +1584,35 @@ function drawHeatmap() {
         .attr("stroke","#aaa").attr("stroke-width",0.8).attr("stroke-dasharray","3,2")
         .attr("pointer-events","none");
     });
-    // label at left edge
+    // label at left edge (offset right to make room for the group sort button)
     svg.append("text")
-      .attr("x",2).attr("y",bandY+bandH/2).attr("dy","0.35em")
+      .attr("x",14).attr("y",bandY+bandH/2).attr("dy","0.35em")
       .attr("font-size",8).attr("fill","#888").attr("font-style","italic")
       .text(band.label);
+    // group sort button spanning the full band height
+    const bandSps=band.species.filter(s=>hmOrder.includes(s));
+    if(bandSps.length){
+      const bActive=hmSortActive(bandSps);
+      const bBtnH=Math.max(10,bandH-2);
+      svg.append("rect").attr("class","hm-sort-btn")
+        .attr("x",1).attr("y",bandY+1).attr("width",10).attr("height",bBtnH).attr("rx",2)
+        .attr("fill",bActive?"#4a90d9":"#ddd").attr("stroke",bActive?"#2172c4":"#bbb").attr("stroke-width",0.8)
+        .style("cursor","pointer")
+        .on("mouseover",ev=>showTip(ev,`Sort OGs by avg count in <b>${band.label}</b> (${bandSps.length} spp.)`))
+        .on("mousemove",moveTip).on("mouseout",hideTip)
+        .on("click",()=>{ hideTip(); hmSetSort(bandSps); });
+      svg.append("text").attr("class","hm-sort-btn-lbl")
+        .attr("x",6).attr("y",bandY+bBtnH/2+1).attr("text-anchor","middle").attr("dominant-baseline","middle")
+        .attr("font-size",8).attr("fill",bActive?"#fff":"#888").attr("pointer-events","none")
+        .text("↓");
+    }
   });
 
-  // row labels (coloured by group when grouping is active)
+  // which species are covered by a collapsed-clade band sort button?
+  const spInBand=new Map(); // sp → band index
+  hmCollapsedBands.forEach((band,bi)=>{ band.species.forEach(sp=>{ if(hmOrder.includes(sp)) spInBand.set(sp,bi); }); });
+
+  // row labels + individual sort buttons
   hmOrder.forEach((sp,ri)=>{
     const gi = spSplitGroup.get(sp);
     const labelCol = gi!==undefined
@@ -1584,6 +1622,22 @@ function drawHeatmap() {
       .attr("x",ROW_LABEL_W-4).attr("y",ri*14+hmTM+9)
       .attr("text-anchor","end").attr("font-size",11).attr("fill",labelCol)
       .text(sp);
+    // individual sort button — skip if covered by a band button
+    if(!spInBand.has(sp)){
+      const active=hmSortActive([sp]);
+      const btnY=ri*14+hmTM+1;
+      svg.append("rect").attr("class","hm-sort-btn")
+        .attr("x",1).attr("y",btnY).attr("width",10).attr("height",11).attr("rx",2)
+        .attr("fill",active?"#4a90d9":"#eee").attr("stroke",active?"#2172c4":"#ccc").attr("stroke-width",0.8)
+        .style("cursor","pointer")
+        .on("mouseover",ev=>showTip(ev,`Sort OGs by count in <b>${sp}</b>`))
+        .on("mousemove",moveTip).on("mouseout",hideTip)
+        .on("click",()=>{ hideTip(); hmSetSort([sp]); });
+      svg.append("text").attr("class","hm-sort-btn-lbl")
+        .attr("x",6).attr("y",btnY+8).attr("text-anchor","middle")
+        .attr("font-size",8).attr("fill",active?"#fff":"#888").attr("pointer-events","none")
+        .text("↓");
+    }
   });
 
   // column headers — drag to reorder, short-click to navigate
