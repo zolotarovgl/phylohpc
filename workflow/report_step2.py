@@ -418,7 +418,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .link{fill:none;stroke:#d5d5d5}
 .node-g circle{cursor:pointer;transition:r .12s,fill .12s}
 .node-g circle:hover{stroke-width:2.5px !important}
-.col-tri{fill:rgba(90,130,170,0.13);stroke:#7a9ab8;stroke-width:1px;cursor:pointer}
+.col-tri{fill:rgba(90,130,170,0.13);stroke:#222;stroke-width:1px;cursor:pointer}
 .col-tri:hover{fill:rgba(90,130,170,0.25)}
 .leaf-label{pointer-events:none;font-family:monospace}
 .og-label{fill:#b5371f;pointer-events:none}
@@ -1864,6 +1864,27 @@ function renderTree(animate){
   const tH=Math.max(iH,nAll*rowH);
   d3.cluster().size([tH,iW])(rootNode);
 
+  // Proportional Y-spacing for OG-collapsed nodes.
+  // D3 cluster treats each collapsed node as 1 leaf; we redistribute so each
+  // collapsed node gets nLeaves * rowH vertical space, preventing overlap.
+  {
+    const vLeaves = rootNode.leaves(); // includes ._children nodes (D3 sees them as leaves)
+    const wts = vLeaves.map(d => (d._children && d._isOgCol) ? countAllLeaves(d) : 1);
+    const anyCollapsed = wts.some(w => w > 1);
+    if (anyCollapsed) {
+      let cy = rowH / 2;
+      vLeaves.forEach((d, i) => {
+        d.x = cy + wts[i] * rowH / 2;
+        cy += wts[i] * rowH;
+      });
+      // fix internal node positions as midpoint of children (post-order)
+      rootNode.eachAfter(d => {
+        if (d.children && d.children.length)
+          d.x = (d.children[0].x + d.children[d.children.length - 1].x) / 2;
+      });
+    }
+  }
+
   if(useBranchLen){
     assignBranchLenPos(rootNode,0);
     const maxBL=d3.max(rootNode.leaves(),d=>d._by)||1;
@@ -1950,7 +1971,7 @@ function renderTree(animate){
     .attr("points",d=>{
       if(!d._children||!d._isOgCol) return "";
       const nL=countAllLeaves(d);
-      const halfH=Math.min(Math.max(rowH*0.6, rowH*nL/2), iH*0.35);
+      const halfH=Math.max(rowH*0.6, nL*rowH/2);
       return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
     })
     .on("click",(event,d)=>{
