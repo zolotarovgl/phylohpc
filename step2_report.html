@@ -141,7 +141,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane active" id="pane-heatmap">
-    <div id="hm-custom-bar" style="display:none;flex-shrink:0;border-bottom:1px solid #ddd;background:#fffbf0;padding:4px 10px;gap:6px;flex-wrap:wrap;align-items:center;position:relative">
+    <div id="hm-custom-bar" style="display:none;position:fixed;z-index:500;border:1px solid #c8b96e;border-top:none;background:#fffbf0;padding:6px 12px;gap:6px;flex-wrap:wrap;align-items:center;box-shadow:0 4px 12px rgba(0,0,0,.15);border-radius:0 0 6px 6px">
       <span style="font-size:11px;color:#888;font-weight:600">Custom OG heatmap:</span>
       <div style="position:relative;display:inline-block">
         <input id="hm-og-search" type="text" placeholder="&#128269; Search OG or gene name&#8230;" autocomplete="off" style="font-size:11px;padding:2px 8px;border:1px solid #ccc;border-radius:3px;width:240px" oninput="hmOGSearchInput(this.value)" onkeydown="hmOGSearchKey(event)">
@@ -1251,10 +1251,21 @@ function hmBack(){
 }
 
 // ── Custom OG selection helpers ────────────────────────────────────────────
+function _positionCustomBar(){
+  const strip=document.getElementById("hm-col-strip");
+  const bar=document.getElementById("hm-custom-bar");
+  if(!strip||bar.style.display==="none") return;
+  const r=strip.getBoundingClientRect();
+  bar.style.top=r.bottom+"px";
+  bar.style.left=r.left+"px";
+  bar.style.width=(r.right-r.left)+"px";
+}
 function hmEnterCustom(){
   buildOGIndex();
   hmViewMode="custom";
-  document.getElementById("hm-custom-bar").style.display="flex";
+  const bar=document.getElementById("hm-custom-bar");
+  bar.style.display="flex";
+  _positionCustomBar();
   document.getElementById("hm-og-search").focus();
   drawHeatmap();
 }
@@ -1265,6 +1276,7 @@ function hmExitCustom(){
   document.getElementById("hm-og-dropdown").style.display="none";
   drawHeatmap();
 }
+window.addEventListener("resize",_positionCustomBar);
 function hmCustomClear(){
   hmCustomOGs=[]; renderCustomChips(); drawHeatmap();
 }
