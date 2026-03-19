@@ -205,6 +205,8 @@ def load_og_csv(csv_path: Path) -> dict:
                 if len(parts) < 2:
                     continue
                 gene, og = parts[0], parts[1]
+                if og.lower() == "orthogroup":   # POSSVM catch-all; skip
+                    continue
                 og_members[og].append(gene)
     except OSError:
         pass
