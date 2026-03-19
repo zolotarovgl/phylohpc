@@ -1853,6 +1853,7 @@ function rebuildHlSet(){
     const union=new Set();
     hlQueries.forEach((q,i)=>{ resolveQuery(q).forEach(s=>{ union.add(s); if(!hlGroupIndex.has(s)) hlGroupIndex.set(s,i); }); });
     hlSet=union.size?union:null;
+    if(hlSet) hmFocusGids=null; // user's new highlight overrides heatmap-navigation focus
   }
   renderHlTags();
   document.getElementById("btn-focus-hl").style.display=hlSet?"inline":"none";
@@ -1913,6 +1914,7 @@ function rebuildOgHlSet(){
     const union=new Set();
     ogHlQueries.forEach((q,i)=>{ resolveOgQuery(q).forEach(og=>{ union.add(og); if(!ogHlGroupIndex.has(og)) ogHlGroupIndex.set(og,i); }); });
     ogHlSet=union.size?union:null;
+    if(ogHlSet) hmFocusGids=null; // user's new highlight overrides heatmap-navigation focus
   }
   renderOgHlTags();
   if(currentIndex) renderTree();
