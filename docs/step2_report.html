@@ -1149,10 +1149,11 @@ function drawHeatmap() {
   const cW=18, cH=12;
   const maxNameLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
   const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
-  // truncate column labels to 30 chars max
-  const colLabelTrunc = d => { const s=colLabel(d)||""; return s.length>30 ? s.slice(0,28)+"\u2026" : s; };
+  // truncation limit scales with font size: bigger font = more characters shown
+  const colLabelMaxChars = Math.round(hmColFontSize * 3.5);
+  const colLabelTrunc = d => { const s=colLabel(d)||""; return s.length>colLabelMaxChars ? s.slice(0,colLabelMaxChars-1)+"\u2026" : s; };
   // top margin: enough room for rotated column labels (using truncated length)
-  const maxColLen=Math.min(30, data.reduce((m,d)=>Math.max(m,(colLabel(d)||"").length),0));
+  const maxColLen=data.reduce((m,d)=>Math.max(m,(colLabelTrunc(d)||"").length),0);
   const hmColLabelH=Math.ceil(Math.sin(hmColRotation*Math.PI/180)*maxColLen*hmColFontSize*0.6)+8;
   const hmTM=Math.max(HM_TOP, hmColLabelH+14);
   hmTopActual = hmTM; // always sync before cladogram draws
