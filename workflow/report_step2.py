@@ -1767,6 +1767,8 @@ function applyTipFontSize(){
   const fs=tipFontSVG();
   gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?fs:0);
   gMain.selectAll(".og-label").attr("font-size",fs);
+  gMain.selectAll(".count-label").attr("font-size",fs);
+  gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",Math.max(10,fs*0.9));
   gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
 }
 
@@ -2031,11 +2033,12 @@ function renderTree(animate){
   // manual-collapse: larger circle + leaf count label
   nodeSel.select("circle")
     .filter(d=>d._children&&!d._isOgCol)
-    .attr("r",12).attr("fill","#f5f5f5").attr("stroke","#999").attr("stroke-width",1.2)
+    .attr("r",d=>Math.max(10, tipFontSVG()*0.9))
+    .attr("fill","#f5f5f5").attr("stroke","#999").attr("stroke-width",1.2)
     .attr("display",null);
   nodeSel.select(".count-label")
     .attr("display",d=>(d._children&&!d._isOgCol)?null:"none")
-    .attr("font-size",d=>Math.max(7,Math.min(10,14/_zoomScale)))
+    .attr("font-size",tipFontSVG())
     .text(d=>(d._children&&!d._isOgCol)?countAllLeaves(d):"");
 
   // leaf labels: gene_id + OG name
@@ -2082,14 +2085,14 @@ function renderTree(animate){
       if(showRefOrtho&&ref){ sep(); el.append("tspan").attr("fill",refCol).text(ref); }
     });
 
-  // OG labels (inside badge when collapsed, beside node when OG-named internal)
+  // OG labels: beside OG-collapsed triangle, or beside expanded OG-named internal
   nodeSel.select(".og-label")
     .attr("x",d=>d._children?BADGE_W+6:-7)
     .attr("dy","0.35em")
     .attr("text-anchor",d=>d._children?"start":"end")
     .attr("font-size",tipFontSVG())
-    .attr("display",d=>(!d.data.leaf&&(isOGNode(d)||d._children))?null:"none")
-    .text(d=>d._children?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
+    .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(!d._children&&isOGNode(d))))?null:"none")
+    .text(d=>d._isOgCol?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
   applyTipFontSize();
 }
 
