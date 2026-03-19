@@ -2014,6 +2014,12 @@ function renderTree(animate){
       const halfH=Math.max(rowH*0.6, nL*rowH/2);
       return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
     })
+    .attr("fill",d=>{
+      if(!d._children||!d._isOgCol||colorMode!=="og") return null;
+      const ogName=d.data._og_label||d.data.name||"";
+      const col=ogName2Color[ogName];
+      return col ? col+"55" : null;
+    })
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
       d.children=d._children; d._children=null; d._isOgCol=false; renderTree(true);
@@ -2082,8 +2088,8 @@ function renderTree(animate){
     .attr("dy","0.35em")
     .attr("text-anchor",d=>d._children?"start":"end")
     .attr("font-size",tipFontSVG())
-    .attr("display",d=>(!d.data.leaf&&!d._children&&isOGNode(d))?null:"none")
-    .text(d=>(!d.data.leaf&&!d._children&&isOGNode(d))?d.data.name:"");
+    .attr("display",d=>(!d.data.leaf&&(isOGNode(d)||d._children))?null:"none")
+    .text(d=>d._children?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
   applyTipFontSize();
 }
 
