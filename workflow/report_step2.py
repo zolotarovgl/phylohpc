@@ -211,8 +211,8 @@ def load_og_csv(csv_path: Path) -> dict:
     return dict(og_members)
 
 
-def load_possvm_trees(possvm_dir: Path) -> tuple[list, list]:
-    """Return (tree_records, all_species)."""
+def load_possvm_trees(possvm_dir: Path, source: str = "generax") -> tuple[list, list]:
+    """Return (tree_records, all_species).  source='generax' or 'prev'."""
     try:
         from ete3 import Tree  # type: ignore
     except ImportError:
@@ -225,6 +225,11 @@ def load_possvm_trees(possvm_dir: Path) -> tuple[list, list]:
     for nwk in sorted(possvm_dir.glob("*.ortholog_groups.newick")):
         stem = nwk.stem
         for suffix in (".treefile.ortholog_groups", ".ortholog_groups"):
+            if stem.endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+        # Strip GeneRax-specific suffixes so id == "Family.HG"
+        for suffix in (".generax.tree", ".generax"):
             if stem.endswith(suffix):
                 stem = stem[: -len(suffix)]
                 break
@@ -259,6 +264,7 @@ def load_possvm_trees(possvm_dir: Path) -> tuple[list, list]:
             "hg":               hg,
             "family":           family,
             "prefix":           prefix,
+            "source":           source,
             "n_leaves":         len(leaves),
             "species":          species,
             "og_names":         sorted(ogs.keys()),
@@ -384,6 +390,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .hg-item.selected{background:#d5f5e3;border-left:3px solid #1abc9c;padding-left:13px}
 .hg-item .hg-name{font-weight:600;font-size:11px}
 .hg-item .hg-meta{font-size:10px;color:#888}
+.src-badge{font-size:8px;padding:1px 4px;border-radius:3px;background:#dceeff;color:#2a6fa8;font-weight:600;margin-left:5px;vertical-align:middle;letter-spacing:0.02em}
 
 /* main tree panel */
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -1101,7 +1108,8 @@ function renderSidebar(filter){
     for(const rec of matching){
       const item=document.createElement("div");
       item.className="hg-item"+(currentIndex&&currentIndex.id===rec.id?" selected":"");
-      item.innerHTML='<div class="hg-name">'+rec.hg+'</div><div class="hg-meta">'+rec.n_leaves+' genes \u00b7 '+rec.n_ogs+' OGs</div>';
+      const badge=rec.source==="generax"?'<span class="src-badge">GeneRax</span>':'';
+      item.innerHTML='<div class="hg-name">'+rec.hg+' '+badge+'</div><div class="hg-meta">'+rec.n_leaves+' genes \u00b7 '+rec.n_ogs+' OGs</div>';
       item.addEventListener("click",()=>selectTree(rec));
       body.appendChild(item);
     }
@@ -1267,7 +1275,8 @@ function selectTree(rec){
   populateColorBy();
   document.getElementById("color-by").value="og"; // set after options are added
   populateDatalist();
-  document.getElementById("tree-title").textContent=rec.id+" \u00b7 "+rec.n_leaves+" genes";
+  const srcSuffix=rec.source==="generax"?" (GeneRax)":rec.source==="prev"?" (IQ-Tree)":"";
+  document.getElementById("tree-title").textContent=rec.id+srcSuffix+" \u00b7 "+rec.n_leaves+" genes";
   document.getElementById("n-ogs-label").textContent=rec.n_ogs+" orthogroups";
 
   // build OG colour maps (currentDetail already set above)
@@ -1677,7 +1686,7 @@ def main(argv=None):
     # Gene tree data (POSSVM)
     if not possvm_dir.exists():
         print(f"WARN: {possvm_dir} does not exist – no gene trees.", file=sys.stderr)
-    records, all_species = load_possvm_trees(possvm_dir) if possvm_dir.exists() else ([], [])
+    records, all_species = load_possvm_trees(possvm_dir, source="generax") if possvm_dir.exists() else ([], [])
     print(f"Loaded {len(records)} gene trees, {len(all_species)} species.", file=sys.stderr)
 
     # Prev trees (IQ-TREE2 original, pre-GeneRax) — optional
@@ -1685,9 +1694,14 @@ def main(argv=None):
     if args.possvm_prev_dir:
         prev_dir = Path(args.possvm_prev_dir)
         if prev_dir.is_dir():
-            prev_list, prev_sp = load_possvm_trees(prev_dir)
+            prev_list, prev_sp = load_possvm_trees(prev_dir, source="prev")
             prev_records = {r["id"]: r for r in prev_list}
             all_species = sorted(set(all_species) | set(prev_sp))
+            # Include HGs that have a prev tree but no GeneRax output
+            generax_ids = {r["id"] for r in records}
+            for r in prev_list:
+                if r["id"] not in generax_ids:
+                    records.append(r)
             print(f"Loaded {len(prev_records)} prev gene trees (original IQ-TREE2).",
                   file=sys.stderr)
     print(f"Loaded {len(family_records)} families, {len(hg_records)} HGs for heatmap.",
@@ -1704,6 +1718,7 @@ def main(argv=None):
     for rec in records:
         idx = {k: v for k, v in rec.items() if k not in ("tree_dict", "ogs")}
         idx["has_prev"] = rec["id"] in prev_records
+        idx["source"]   = rec.get("source", "generax")
         idx["class"] = family_info.get(rec["family"], rec.get("prefix", ""))
         index_records.append(idx)
 
