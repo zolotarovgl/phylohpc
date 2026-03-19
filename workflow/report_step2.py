@@ -699,7 +699,7 @@ function switchTab(name) {
     drawSpeciesTree();
   } else {
     tc.style.display = "none"; pfx.style.display = "";
-    drawCladogram(); drawHeatmap();
+    drawHeatmap(); // drawCladogram() is called at the end of drawHeatmap()
   }
 }
 
@@ -804,8 +804,9 @@ function cpExpand() {
 // HEATMAP VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
 const TOP_MARGIN = 110;
-const HM_TOP     = TOP_MARGIN;   // first row y-coord in the heatmap SVG
+const HM_TOP     = TOP_MARGIN;   // minimum first-row y-coord (may grow with label height)
 const HM_BAR_H   = 55;           // height of column-sum bar chart below the heatmap
+let   hmTopActual = HM_TOP;      // actual top margin, synced between heatmap and cladogram
 
 // species order: tree order filtered to species present in data
 const dataSpecies = new Set([...FAMILY_DATA,...HG_DATA].flatMap(d=>Object.keys(d.species_counts)));
@@ -831,9 +832,9 @@ function drawCladogram() {
   tp.innerHTML = "";
   if (!SP_TREE_DATA || !SP_TREE_DATA.children || !speciesOrder.length) return;
 
-  const W = 270, H = speciesOrder.length*14+HM_TOP+40;
+  const W = 270, H = speciesOrder.length*14+hmTopActual+40;
   const svg = d3.select(tp).append("svg").attr("width",W).attr("height",H);
-  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=HM_TOP+i*14; });
+  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=hmTopActual+i*14; });
 
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
   function prune(n){
@@ -935,7 +936,7 @@ function drawCladogram() {
           ev.stopPropagation();
           if(isSplit){ hmSplitSets.splice(splitIdx,1); hmSplitLabels.splice(splitIdx,1); }
           else { hmSplitSets.push(cleavesSet); hmSplitLabels.push(nodeLabel); }
-          updateHmSplitBar(); drawCladogram(); drawHeatmap();
+          updateHmSplitBar(); drawHeatmap(); // drawCladogram called at end of drawHeatmap
         } else {
           cladoCollapsed.add(key); drawCladogram();
         }
@@ -1235,10 +1236,13 @@ function drawHeatmap() {
   const cW=18, cH=12;
   const maxNameLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
   const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
-  // top margin: enough room for rotated column labels
-  const maxColLen=data.reduce((m,d)=>Math.max(m,(colLabel(d)||"").length),0);
+  // truncate column labels to 30 chars max
+  const colLabelTrunc = d => { const s=colLabel(d)||""; return s.length>30 ? s.slice(0,28)+"\u2026" : s; };
+  // top margin: enough room for rotated column labels (using truncated length)
+  const maxColLen=Math.min(30, data.reduce((m,d)=>Math.max(m,(colLabel(d)||"").length),0));
   const hmColLabelH=Math.ceil(Math.sin(hmColRotation*Math.PI/180)*maxColLen*hmColFontSize*0.6)+8;
   const hmTM=Math.max(HM_TOP, hmColLabelH+14);
+  hmTopActual = hmTM; // always sync before cladogram draws
   const nRows=hmOrder.length;
   const CELLS_BOTTOM=nRows*14+hmTM;   // y just below the last cell row
   const BAR_TOP=CELLS_BOTTOM+10;      // bar chart starts here
@@ -1328,7 +1332,7 @@ function drawHeatmap() {
     .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W+cW/2},${hmTM-6}) rotate(-${hmColRotation})`)
     .attr("font-size",hmColFontSize).style("cursor","pointer")
     .attr("text-anchor","start")
-    .text(colLabel)
+    .text(colLabelTrunc)
     .on("click",clickHandler);
 
   // ── column-sum bar chart (below cells) ───────────────────────────────────
@@ -1371,6 +1375,9 @@ function drawHeatmap() {
   svg.append("text").attr("x",cbX).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("high");
   svg.append("text").attr("x",cbX+cbW/2).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("mean");
   svg.append("text").attr("x",cbX+cbW).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("low");
+
+  // always redraw cladogram last so it uses the updated hmTopActual
+  drawCladogram();
 }
 
 function hmBack(){
