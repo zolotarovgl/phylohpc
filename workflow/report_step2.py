@@ -507,14 +507,24 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             </select>
           </label>
           <div id="hl-tags"></div>
-          <input id="hl-search" list="hl-list" placeholder="Highlight… (Enter to add)">
+          <input id="hl-search" list="hl-list" placeholder="Species… (Enter to add)">
           <datalist id="hl-list"></datalist>
-          <button id="hl-clear" onclick="clearHighlight()" title="Clear all highlights">&#10005;</button>
+          <button id="hl-clear" onclick="clearHighlight()" title="Clear all species highlights">&#10005;</button>
           <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
+          <span style="border-left:1px solid #ddd;margin:0 4px;height:16px;align-self:center"></span>
+          <div id="og-hl-tags"></div>
+          <input id="og-hl-search" list="og-hl-list" placeholder="OG name… (Enter to add)" style="width:130px">
+          <datalist id="og-hl-list"></datalist>
+          <button id="og-hl-clear" onclick="clearOgHighlight()" title="Clear OG highlights">&#10005;</button>
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
             Label size:
             <input type="range" id="tip-font-slider" min="6" max="24" step="1" value="11" style="width:70px;cursor:pointer;accent-color:#4a90d9">
             <span id="tip-font-val" style="width:20px;text-align:right">11</span>px
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px;margin-left:8px">
+            Line width:
+            <input type="range" id="line-width-slider" min="1" max="8" step="0.5" value="1.3" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="line-width-val" style="width:20px;text-align:right">1.3</span>px
           </label>
           <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:8px;margin-left:4px">
             Show:
@@ -602,7 +612,11 @@ let ogGene2Name   = {};   // gene_id → og_name
 let hlSet         = null;        // null = off; union Set<species> when active
 let hlQueries     = [];          // committed query strings (tags)
 let hlGroupIndex  = new Map();   // species → group index (for per-group color)
+let ogHlSet       = null;        // null = off; Set<og_name> when active
+let ogHlQueries   = [];          // committed OG query strings
+let ogHlGroupIndex= new Map();   // og_name → group index
 let tipFontSize   = null;        // null = auto; number = user override (px)
+let treeLinkWidth = 1.3;         // branch stroke-width in screen px
 let showGeneId    = true;        // tip label parts
 let showOGName    = true;
 let showRefOrtho  = true;
@@ -787,7 +801,8 @@ const hasHeatmapData = FAMILY_DATA.length > 0 || HG_DATA.length > 0;
   sel.addEventListener("change", drawHeatmap);
 })();
 
-const cladoCollapsed = new Set();  // stable node keys of collapsed cladogram nodes
+const cladoCollapsed  = new Set();   // stable node keys of collapsed cladogram nodes
+const cladoNames      = new Map();   // key → custom display name (user-editable)
 
 function drawCladogram() {
   const tp = document.getElementById("tree-panel");
@@ -841,17 +856,34 @@ function drawCladogram() {
     const key=nodeKey(n);
     if(cladoCollapsed.has(key)){
       const [y0,y1]=yRange(n);
+      const displayName=cladoNames.get(key)||(n.name||"clade");
       svg.append("polygon")
         .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
-        .attr("fill","rgba(90,130,170,0.15)").attr("stroke","#7a9ab8").attr("stroke-width",1)
+        .attr("fill","#e8e8e8").attr("stroke","#333").attr("stroke-width",1.2)
         .style("cursor","pointer")
-        .on("mouseover",ev=>showTip(ev,(n.name||"clade")+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand</div>'))
+        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand &nbsp;·&nbsp; dbl-click label to rename</div>'))
         .on("mousemove",moveTip).on("mouseout",hideTip)
         .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); });
-      if(n.name)
-        svg.append("text").attr("x",sx(n._d)+6).attr("y",n._y).attr("dy","0.35em")
-          .attr("font-size",9).attr("fill","#5a7090").attr("font-style","italic")
-          .style("pointer-events","none").text(n.name);
+      // editable label — double-click opens inline input
+      const labelEl=svg.append("text")
+        .attr("x",sx(n._d)+6).attr("y",n._y).attr("dy","0.35em")
+        .attr("font-size",9).attr("fill","#333").attr("font-style","italic")
+        .style("cursor","text").text(displayName);
+      labelEl.on("dblclick",(ev)=>{
+        ev.stopPropagation();
+        // build a tiny foreignObject with an <input> for inline editing
+        const fo=svg.append("foreignObject")
+          .attr("x",sx(n._d)+4).attr("y",n._y-9)
+          .attr("width",sx(maxD)-sx(n._d)+60).attr("height",18);
+        const inp=fo.append("xhtml:input")
+          .attr("value",displayName)
+          .style("font-size","9px").style("font-style","italic")
+          .style("width","100%").style("border","1px solid #4a90d9")
+          .style("border-radius","2px").style("padding","0 2px").style("outline","none");
+        const inpNode=inp.node(); inpNode.focus(); inpNode.select();
+        function commit(){ cladoNames.set(key,inpNode.value.trim()||displayName); fo.remove(); drawCladogram(); }
+        inp.on("blur",commit).on("keydown",(e)=>{ if(e.key==="Enter") commit(); if(e.key==="Escape"){ fo.remove(); } });
+      });
       return;
     }
     n.children.forEach(drawCollapsedTriangles);
@@ -1492,6 +1524,57 @@ function removeHlTag(i){ hlQueries.splice(i,1); rebuildHlSet(); }
 
 function clearHighlight(){ hlQueries=[]; document.getElementById("hl-search").value=""; rebuildHlSet(); }
 
+// ── OG name highlight system ──────────────────────────────────────────────
+function resolveOgQuery(query){
+  // Returns Set<og_name> whose names contain the query string (case-insensitive)
+  const lq=(query||"").toLowerCase().trim();
+  if(!lq) return new Set();
+  const matched=new Set();
+  // Search through all known OG names in the current tree
+  Object.values(ogGene2Name).forEach(og=>{ if(og.toLowerCase().includes(lq)) matched.add(og); });
+  // Also search ogName2Color keys
+  Object.keys(ogName2Color).forEach(og=>{ if(og.toLowerCase().includes(lq)) matched.add(og); });
+  return matched;
+}
+
+function rebuildOgHlSet(){
+  ogHlGroupIndex=new Map();
+  if(!ogHlQueries.length){ ogHlSet=null; }
+  else {
+    const union=new Set();
+    ogHlQueries.forEach((q,i)=>{ resolveOgQuery(q).forEach(og=>{ union.add(og); if(!ogHlGroupIndex.has(og)) ogHlGroupIndex.set(og,i); }); });
+    ogHlSet=union.size?union:null;
+  }
+  renderOgHlTags();
+  if(currentIndex) renderTree();
+}
+
+function renderOgHlTags(){
+  const el=document.getElementById("og-hl-tags"); el.innerHTML="";
+  ogHlQueries.forEach((q,i)=>{
+    const chip=document.createElement("span"); chip.className="hl-tag";
+    chip.style.background=hlTagColors[i%hlTagColors.length];
+    const lbl=document.createTextNode(q+" ");
+    const btn=document.createElement("button");
+    btn.textContent="\u00d7"; btn.onclick=()=>removeOgHlTag(i);
+    chip.append(lbl,btn); el.appendChild(chip);
+  });
+  // populate datalist for autocomplete
+  const dl=document.getElementById("og-hl-list"); dl.innerHTML="";
+  const allOgs=new Set([...Object.values(ogGene2Name),...Object.keys(ogName2Color)]);
+  allOgs.forEach(og=>{ const o=document.createElement("option"); o.value=og; dl.appendChild(o); });
+}
+
+function addOgHlTag(query){
+  query=(query||"").trim();
+  if(!query||ogHlQueries.includes(query)) return;
+  ogHlQueries.push(query);
+  document.getElementById("og-hl-search").value="";
+  rebuildOgHlSet();
+}
+function removeOgHlTag(i){ ogHlQueries.splice(i,1); rebuildOgHlSet(); }
+function clearOgHighlight(){ ogHlQueries=[]; document.getElementById("og-hl-search").value=""; rebuildOgHlSet(); }
+
 document.getElementById("hl-search").addEventListener("keydown",function(e){
   if(e.key==="Enter"&&this.value.trim()){ addHlTag(this.value); e.preventDefault(); }
 });
@@ -1499,10 +1582,23 @@ document.getElementById("hl-search").addEventListener("change",function(){
   if(this.value.trim()) addHlTag(this.value);
 });
 
+document.getElementById("og-hl-search").addEventListener("keydown",function(e){
+  if(e.key==="Enter"&&this.value.trim()){ addOgHlTag(this.value.trim()); e.preventDefault(); }
+});
+document.getElementById("og-hl-search").addEventListener("change",function(){
+  if(this.value.trim()) addOgHlTag(this.value.trim());
+});
+
 document.getElementById("tip-font-slider").addEventListener("input",function(){
   tipFontSize=+this.value;
   document.getElementById("tip-font-val").textContent=this.value;
   applyTipFontSize();
+});
+
+document.getElementById("line-width-slider").addEventListener("input",function(){
+  treeLinkWidth=+this.value;
+  document.getElementById("line-width-val").textContent=this.value;
+  if(gMain) gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
 });
 
 document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
@@ -1537,6 +1633,9 @@ function selectTree(rec){
   hlSet=null; hlQueries=[]; hlGroupIndex=new Map();
   document.getElementById("hl-search").value="";
   renderHlTags();
+  ogHlSet=null; ogHlQueries=[]; ogHlGroupIndex=new Map();
+  document.getElementById("og-hl-search").value="";
+  renderOgHlTags();
   cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   colorMode="og";
 
@@ -1608,6 +1707,7 @@ function applyTipFontSize(){
   const fs=tipFontSVG();
   gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?fs:0);
   gMain.selectAll(".og-label").attr("font-size",fs);
+  gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
 }
 
 function isOGNode(d){ return !d.data.leaf && d.data.name && activeOgs()[d.data.name]!==undefined; }
@@ -1758,7 +1858,8 @@ function renderTree(animate){
       exit=>exit.transition().duration(dur*0.5).style("opacity",0).remove()
     )
     .transition().duration(dur)
-    .attr("d",d=>elbowPath(d.source,d.target,mg,3));
+    .attr("d",d=>elbowPath(d.source,d.target,mg,3))
+    .attr("stroke-width",treeLinkWidth/_zoomScale);
 
   // ── Scale bar ──
   gMain.selectAll(".scale-bar-g").remove();
@@ -1774,6 +1875,8 @@ function renderTree(animate){
           .style("opacity",0);
         g.append("circle");
         g.append("polygon").attr("class","col-tri");
+        g.append("text").attr("class","count-label")  // manual-collapse count
+          .attr("dy","0.35em").attr("text-anchor","middle").attr("pointer-events","none");
         g.append("text").attr("class","leaf-label");
         g.append("text").attr("class","og-label");
         return g;
@@ -1794,7 +1897,14 @@ function renderTree(animate){
     .attr("r",d=>d.data.leaf?4:isOGNode(d)?5.5:2.8)
     .attr("fill",d=>{
       if(d.data.leaf){
-        if(colorMode==="og") return ogLeafColor(d.data.gene_id||d.data.name, d.data.species);
+        const gid2=d.data.gene_id||d.data.name;
+        const og2=d.data.og||ogGene2Name[gid2]||"";
+        if(ogHlSet!==null){
+          if(!ogHlSet.has(og2)) return "#e8e8e8";
+          const gi=ogHlGroupIndex.get(og2)??0;
+          return hlTagColors[gi%hlTagColors.length];
+        }
+        if(colorMode==="og") return ogLeafColor(gid2, d.data.species);
         const c=leafColor(d.data.species||"");
         return hlSet&&!hlSet.has(d.data.species||"")?"#e8e8e8":c;
       }
@@ -1810,22 +1920,32 @@ function renderTree(animate){
     })
     .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
 
-  // collapsed triangle (replaces badge pill)
+  // OG-collapse triangle (only when _isOgCol)
   nodeSel.select(".col-tri")
-    .attr("display",d=>d._children?null:"none")
+    .attr("display",d=>(d._children&&d._isOgCol)?null:"none")
     .attr("points",d=>{
-      if(!d._children) return "";
+      if(!d._children||!d._isOgCol) return "";
       const nL=countAllLeaves(d);
       const halfH=Math.min(Math.max(rowH*0.6, rowH*nL/2), iH*0.35);
       return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
     })
     .on("click",(event,d)=>{
-      if(d.data.leaf||!d._children) return; event.stopPropagation();
-      d.children=d._children; d._children=null; renderTree(true);
+      if(!d._children) return; event.stopPropagation();
+      d.children=d._children; d._children=null; d._isOgCol=false; renderTree(true);
     })
     .on("mouseover",(ev,d)=>{
       if(d._children) showTip(ev,collapsedLabel(d)+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand</div>');
     }).on("mousemove",moveTip).on("mouseout",hideTip);
+
+  // manual-collapse: larger circle + leaf count label
+  nodeSel.select("circle")
+    .filter(d=>d._children&&!d._isOgCol)
+    .attr("r",12).attr("fill","#f5f5f5").attr("stroke","#999").attr("stroke-width",1.2)
+    .attr("display",null);
+  nodeSel.select(".count-label")
+    .attr("display",d=>(d._children&&!d._isOgCol)?null:"none")
+    .attr("font-size",d=>Math.max(7,Math.min(10,14/_zoomScale)))
+    .text(d=>(d._children&&!d._isOgCol)?countAllLeaves(d):"");
 
   // leaf labels: gene_id + OG name
   nodeSel.select(".leaf-label")
@@ -1833,7 +1953,11 @@ function renderTree(animate){
     .attr("font-size",d=>d.data.leaf?tipFontSVG():0)
     .attr("display",d=>{
       if(!d.data.leaf) return "none";
-      if(hideNonHl && hlSet!==null && !hlSet.has(d.data.species||"")) return "none";
+      if(hideNonHl){
+        const gid3=d.data.gene_id||d.data.name, og3=d.data.og||ogGene2Name[gid3]||"";
+        if(hlSet!==null&&!hlSet.has(d.data.species||"")) return "none";
+        if(ogHlSet!==null&&!ogHlSet.has(og3)) return "none";
+      }
       return null;
     })
     .text("")
@@ -1841,13 +1965,22 @@ function renderTree(animate){
       if(!d.data.leaf) return;
       const el=d3.select(this);
       el.selectAll("tspan").remove();
-      const gid=d.data.gene_id||d.data.name;
-      const og=d.data.og||ogGene2Name[gid]||"";
       const ref=d.data.ref||"";
-      const notHl=hlSet!==null&&!hlSet.has(d.data.species||"");
-      const baseCol=notHl?"#ccc":(colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||""));
+      // dim if either species-hl or OG-hl is active and this tip doesn't match
+      const notSpHl=hlSet!==null&&!hlSet.has(d.data.species||"");
+      const ogHlActive=ogHlSet!==null;
+      const inOgHl=ogHlActive&&ogHlSet.has(og);
+      const notHl=notSpHl||(ogHlActive&&!inOgHl);
+      // if OG-hl active, use that group's color; otherwise species color
+      let baseCol;
+      if(ogHlActive&&inOgHl){
+        const gi=ogHlGroupIndex.get(og)??0;
+        baseCol=hlTagColors[gi%hlTagColors.length];
+      } else {
+        baseCol=notHl?"#ccc":(colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||""));
+      }
       const sepCol=notHl?"#ddd":"#bbb";
-      const ogCol=notHl?"#ccc":"#4a7aad";
+      const ogCol=notHl?"#ccc":(inOgHl?baseCol:"#4a7aad");
       const refCol=notHl?"#ccc":"#2e8b57";
       let first=true;
       function sep(){ if(!first) el.append("tspan").attr("fill",sepCol).text(" \u00b7 "); first=false; }
@@ -1870,17 +2003,17 @@ function renderTree(animate){
 // ── tree controls ──
 function expandAll(){
   if(!rootNode)return;
-  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
+  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;d._isOgCol=false;}});
   renderTree(true);
 }
 function collapseToOGs(){
   if(!rootNode)return;
-  // pass 1: expand all
-  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
+  // pass 1: expand all, clear flags
+  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;} d._isOgCol=false;});
   // pass 2a: collapse named OG internal nodes (POSSVM trees with annotated internals)
   let found=false;
   rootNode.each(d=>{
-    if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;found=true;}
+    if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;d._isOgCol=true;found=true;}
   });
   // pass 2b: fallback – derive OGs from pipe-separated tip names (gene_id|og|ref)
   if(!found){
@@ -1892,7 +2025,7 @@ function collapseToOGs(){
     for(const [og,leaves] of Object.entries(ogGroups)){
       const mrca=findMRCA(leaves);
       if(mrca&&!mrca.data.leaf&&mrca.children){
-        mrca.data._og_label=og;
+        mrca.data._og_label=og; mrca._isOgCol=true;
         mrca._children=mrca.children; mrca.children=null;
       }
     }
