@@ -487,6 +487,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <datalist id="hl-list"></datalist>
           <button id="hl-clear" onclick="clearHighlight()" title="Clear all highlights">&#10005;</button>
           <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Label size:
+            <input type="range" id="tip-font-slider" min="6" max="24" step="1" value="11" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="tip-font-val" style="width:20px;text-align:right">11</span>px
+          </label>
         </div>
         <div id="tree-wrap">
           <svg id="tree-svg"></svg>
@@ -550,6 +555,7 @@ let ogGene2Name   = {};   // gene_id → og_name
 let hlSet         = null;        // null = off; union Set<species> when active
 let hlQueries     = [];          // committed query strings (tags)
 let hlGroupIndex  = new Map();   // species → group index (for per-group color)
+let tipFontSize   = null;        // null = auto; number = user override (px)
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
 
 function leafColor(sp) {
@@ -1054,6 +1060,12 @@ document.getElementById("hl-search").addEventListener("change",function(){
   if(this.value.trim()) addHlTag(this.value);
 });
 
+document.getElementById("tip-font-slider").addEventListener("input",function(){
+  tipFontSize=+this.value;
+  document.getElementById("tip-font-val").textContent=this.value;
+  if(currentIndex) renderTree();
+});
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TREE VIEW – SELECTION & D3 RENDERING
@@ -1336,7 +1348,7 @@ function renderTree(animate){
   // leaf labels: gene_id + OG name
   nodeSel.select(".leaf-label")
     .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
-    .attr("font-size",d=>d.data.leaf?Math.min(11,rowH-2):0)
+    .attr("font-size",d=>d.data.leaf?(tipFontSize!==null?tipFontSize:Math.min(11,rowH-2)):0)
     .attr("fill",d=>colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||""))
     .attr("display",d=>d.data.leaf?null:"none")
     .text(d=>{
