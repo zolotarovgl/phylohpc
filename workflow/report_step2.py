@@ -357,6 +357,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .tab-pane.active{display:flex}
 
 /* ── Species tree pane ── */
+#pane-sptree{flex-direction:column}
+#sptree-controls{display:flex;align-items:center;gap:12px;padding:6px 14px;background:#f5f5f5;border-bottom:1px solid #ddd;flex-shrink:0}
 #sp-tree-wrap{flex:1;overflow:auto;background:#fff;padding:16px}
 #sp-tree-wrap svg{display:block}
 
@@ -456,7 +458,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- vertical tab strip -->
   <div id="tab-strip">
-    <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">Heatmap</button>
+    <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">Counts</button>
     <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">Gene Trees</button>
     <button class="tab-btn" data-tab="sptree" onclick="switchTab('sptree')">Species Tree</button>
   </div>
@@ -522,6 +524,14 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- ── Species tree pane ── -->
   <div class="tab-pane" id="pane-sptree">
+    <div id="sptree-controls">
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:6px">
+        Tree width:
+        <input type="range" id="sptree-width-slider" min="20" max="100" step="5" value="50" style="width:90px;cursor:pointer;accent-color:#4a90d9">
+        <span id="sptree-width-val">50</span>%
+      </label>
+      <button class="ctrl-btn" id="btn-dl-newick" onclick="downloadNewick()">&#11015; Newick</button>
+    </div>
     <div id="sp-tree-wrap"></div>
   </div>
 
@@ -557,6 +567,7 @@ const HG_DATA       = %%HG_DATA%%;
 const TREE_INDEX    = %%TREE_INDEX_JSON%%;
 const ALL_SPECIES   = %%SPECIES_JSON%%;
 const CLADE_DATA    = %%CLADE_DATA_JSON%%;
+const NEWICK_RAW    = %%NEWICK_RAW%%;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COLOUR SYSTEM
@@ -585,6 +596,7 @@ let showGeneId    = true;        // tip label parts
 let showOGName    = true;
 let showRefOrtho  = true;
 const spCollapsed = new Set();   // node _ids collapsed in species tree
+let spTreeWidthPct = 50;         // % of pane width used by species tree SVG
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
 
 function leafColor(sp) {
@@ -624,18 +636,19 @@ function getSpeciesPfx(geneId){
 function switchTab(name) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab===name));
   document.querySelectorAll(".tab-pane").forEach(p => p.classList.toggle("active", p.id==="pane-"+name));
-  const tc = document.getElementById("tree-count");
-  const hb = document.getElementById("hm-back");
-  const cr = document.getElementById("hm-breadcrumb");
+  const tc  = document.getElementById("tree-count");
+  const hb  = document.getElementById("hm-back");
+  const cr  = document.getElementById("hm-breadcrumb");
+  const pfx = document.getElementById("prefixSelect").parentElement; // the <label>
   if (name==="trees") {
-    tc.style.display = "inline";
+    tc.style.display = "inline"; pfx.style.display = "none";
     hb.style.display = "none"; cr.textContent = "";
     if (!currentIndex && TREE_INDEX.length) { renderSidebar(""); selectTree(TREE_INDEX[0]); }
   } else if (name==="sptree") {
-    tc.style.display = "none";
+    tc.style.display = "none"; pfx.style.display = "none";
     drawSpeciesTree();
   } else {
-    tc.style.display = "none";
+    tc.style.display = "none"; pfx.style.display = "";
     drawCladogram(); drawHeatmap();
   }
 }
@@ -807,7 +820,7 @@ function drawSpeciesTree() {
   }
 
   const rowH = 22, topM = 16, leftM = 16, rightM = 260;
-  const W = Math.max(Math.floor((wrap.clientWidth || 900) * 0.5), 420);
+  const W = Math.max(Math.floor((wrap.clientWidth || 900) * spTreeWidthPct / 100), 300);
   const treeW = W - leftM - rightM;
   const inPhylo = new Set(ALL_SPECIES);
   const tipColor = n => inPhylo.has(n.name) ? "#111" : "#bbb";
@@ -992,7 +1005,7 @@ function drawHeatmap() {
       return {id:og,species_counts:sc,total:gids.length};
     }).sort((a,b)=>b.total-a.total);
     back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG);
-    colLabel=d=>d.id;
+    colLabel=d=>d.id+" ["+d.total+"]";
     clickHandler=(_ev,_d)=>{
       if(treeRec){ switchTab("trees"); selectTree(treeRec); renderSidebar(""); }
     };
@@ -1245,6 +1258,21 @@ document.getElementById("tip-font-slider").addEventListener("input",function(){
 document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
 document.getElementById("chk-og").addEventListener("change",function(){ showOGName=this.checked; if(currentIndex) renderTree(); });
 document.getElementById("chk-ref").addEventListener("change",function(){ showRefOrtho=this.checked; if(currentIndex) renderTree(); });
+
+document.getElementById("sptree-width-slider").addEventListener("input",function(){
+  spTreeWidthPct=+this.value;
+  document.getElementById("sptree-width-val").textContent=this.value;
+  drawSpeciesTree();
+});
+
+function downloadNewick(){
+  if(!NEWICK_RAW){ alert("No species tree loaded."); return; }
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([NEWICK_RAW],{type:"text/plain"}));
+  a.download="species_tree.nwk";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1680,8 +1708,10 @@ def main(argv=None):
     # Species tree (for ordering + cladogram)
     species_order: list = []
     tree_dict: dict = {}
+    newick_raw: str = ""
     if args.species_tree and Path(args.species_tree).exists():
         species_order, tree_dict = load_tree_data(args.species_tree)
+        newick_raw = Path(args.species_tree).read_text().strip()
 
     # Gene tree data (POSSVM)
     if not possvm_dir.exists():
@@ -1704,6 +1734,19 @@ def main(argv=None):
                     records.append(r)
             print(f"Loaded {len(prev_records)} prev gene trees (original IQ-TREE2).",
                   file=sys.stderr)
+    # Filter all data to families present in genefam.csv (when provided)
+    if family_info:
+        before = len(records), len(family_records), len(hg_records)
+        records        = [r for r in records        if r["prefix"]  in family_info]
+        family_records = [r for r in family_records if r["family"]  in family_info]
+        hg_records     = [r for r in hg_records     if r["family"]  in family_info]
+        print(
+            f"Filtered to genefam families: "
+            f"{before[0]}→{len(records)} trees, "
+            f"{before[1]}→{len(family_records)} families, "
+            f"{before[2]}→{len(hg_records)} HGs.",
+            file=sys.stderr,
+        )
     print(f"Loaded {len(family_records)} families, {len(hg_records)} HGs for heatmap.",
           file=sys.stderr)
 
@@ -1746,7 +1789,8 @@ def main(argv=None):
             .replace("%%HG_DATA%%",         json.dumps(hg_records))
             .replace("%%TREE_INDEX_JSON%%", json.dumps(index_records))
             .replace("%%SPECIES_JSON%%",    json.dumps(all_species))
-            .replace("%%CLADE_DATA_JSON%%", json.dumps(clade_groupings)))
+            .replace("%%CLADE_DATA_JSON%%", json.dumps(clade_groupings))
+            .replace("%%NEWICK_RAW%%",      json.dumps(newick_raw)))
 
     Path(args.output).write_text(html, encoding="utf-8")
     print(f"Report written to {args.output}", file=sys.stderr)
