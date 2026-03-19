@@ -141,6 +141,17 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane active" id="pane-heatmap">
+    <div id="hm-controls" style="border-bottom:1px solid #ddd;background:#f5f5f5;flex-shrink:0;display:flex;align-items:center;padding:3px 10px;gap:8px;flex-wrap:wrap">
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+        Colour:
+        <select id="hm-color-mode" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:3px">
+          <option value="zscore">Z-score (RdBu)</option>
+          <option value="absolute">Absolute count</option>
+        </select>
+      </label>
+      <input type="text" id="hm-text-search" placeholder="&#128269; Search gene family / HG…" style="font-size:11px;padding:2px 7px;border:1px solid #ccc;border-radius:3px;width:200px" oninput="hmTextFilter=this.value.toLowerCase().trim();drawHeatmap()">
+      <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click column header or cell to drill down &darr;</span>
+    </div>
     <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
       <span style="font-weight:600">Row groups:</span>
       <span id="hm-split-tags"></span>
@@ -157,22 +168,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         <div id="tree-panel" style="flex:1;overflow-y:auto;background:#fff"></div>
       </div>
       <div id="hm-right" style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0">
-        <!-- column-label controls strip + search + colour mode — always visible above the heatmap SVG -->
+        <!-- column-label controls strip: always visible above the heatmap SVG -->
         <div id="hm-col-strip" style="display:flex;align-items:center;gap:10px;padding:3px 10px;background:#fafafa;border-bottom:1px solid #eee;flex-shrink:0;flex-wrap:wrap">
-          <!-- global search — autocomplete, navigates to the right class/family/HG -->
-          <div style="position:relative">
-            <input type="text" id="hm-text-search" placeholder="&#128269; Search family / HG / class…" autocomplete="off"
-              style="font-size:11px;padding:2px 7px;border:1px solid #ccc;border-radius:3px;width:200px"
-              oninput="hmSearchInput(this.value)" onkeydown="hmSearchKey(event)">
-            <div id="hm-search-drop" style="display:none;position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ccc;border-radius:3px;box-shadow:0 3px 10px rgba(0,0,0,.15);max-height:220px;overflow-y:auto;min-width:280px;font-size:11px"></div>
-          </div>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
-            Colour:
-            <select id="hm-color-mode" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:3px">
-              <option value="zscore">Z-score (RdBu)</option>
-              <option value="absolute">Absolute count</option>
-            </select>
-          </label>
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
             Label size:
             <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
@@ -186,7 +183,6 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <details style="margin-left:auto;font-size:10px">
             <summary style="cursor:pointer;color:#888;list-style:none">&#9432; Help</summary>
             <div style="position:absolute;z-index:50;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;box-shadow:0 2px 8px rgba(0,0,0,.12);line-height:1.7;color:#999;min-width:300px;right:10px">
-              <div><b style="color:#777">Search:</b> type a family, HG, or class name and select from the dropdown to navigate</div>
               <div><b style="color:#777">Navigate:</b> click a <i>column header</i> to drill into family &rarr; HG &rarr; OG</div>
               <div><b style="color:#777">Open tree:</b> click a <i>cell</i> to open the gene tree and highlight that species</div>
               <div><b style="color:#777">Row groups:</b> shift+click a node in the Species Tree tab to split rows by clade</div>
@@ -285,7 +281,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         <input type="range" id="sptree-width-slider" min="20" max="100" step="5" value="50" style="width:90px;cursor:pointer;accent-color:#4a90d9">
         <span id="sptree-width-val">50</span>%
       </label>
-      <span style="font-size:10px;color:#aaa;font-style:italic">Dbl-click a triangle to change its colour</span>
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">
+        Triangle fill:
+        <input type="color" id="col-tri-fill" value="#cccccc" style="width:28px;height:22px;cursor:pointer;border:1px solid #bbb;border-radius:3px;padding:1px">
+      </label>
       <button class="ctrl-btn" id="btn-dl-anno" onclick="downloadAnnotations()">&#11015; Annotations TSV</button>
       <button class="ctrl-btn" id="btn-dl-newick" onclick="downloadNewick()">&#11015; Newick</button>
     </div>
@@ -371,85 +370,9 @@ let hmSplitLabels = [];      // display label for each split group
 let hmColFontSize = 9;       // column label font size (px)
 let hmColRotation = 65;      // column label rotation angle (degrees)
 let hmColorMode   = "zscore"; // "zscore" | "absolute"
-let hmTextFilter  = "";       // free-text filter for heatmap columns (kept for compat)
-
-// ── global heatmap search index ───────────────────────────────────────────
-// Each entry: {label, hint, action} where action() navigates the heatmap
-const hmSearchIndex = (()=>{
-  const idx = [];
-  // classes (unique values of rec.cls)
-  const classes = [...new Set(FAMILY_DATA.map(d=>d.cls).filter(Boolean))].sort();
-  classes.forEach(cls=>{
-    idx.push({label: cls, hint: "class", action:()=>{
-      hmViewMode="family"; hmActiveClass=cls; drawHeatmap();
-    }});
-  });
-  // families
-  FAMILY_DATA.forEach(d=>{
-    idx.push({label: d.id||d.family||"", hint: (d.cls||"")+" › family", action:()=>{
-      hmViewMode="hg"; hmActiveClass=d.cls||""; hmActiveFamily=d.id||d.family||""; drawHeatmap();
-    }});
-  });
-  // HGs
-  HG_DATA.forEach(d=>{
-    const famId = d.family||"";
-    const famRec = FAMILY_DATA.find(f=>f.id===famId||f.family===famId);
-    idx.push({label: d.hg||d.id||"", hint: (famRec?.cls||"")+" › "+famId+" › HG", action:()=>{
-      hmViewMode="og"; hmActiveClass=famRec?.cls||""; hmActiveFamily=famId; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap();
-    }});
-  });
-  return idx;
-})();
-
-let _hmSearchFocusIdx = -1;
-function hmSearchInput(val){
-  const q = val.trim().toLowerCase();
-  const drop = document.getElementById("hm-search-drop");
-  if(!q){ drop.style.display="none"; return; }
-  const hits = hmSearchIndex.filter(e=>e.label.toLowerCase().includes(q)).slice(0,40);
-  if(!hits.length){ drop.style.display="none"; return; }
-  _hmSearchFocusIdx = -1;
-  drop.innerHTML = hits.map((h,i)=>
-    `<div class="hm-sdrop-item" data-i="${i}" style="padding:4px 8px;cursor:pointer;white-space:nowrap;border-bottom:1px solid #f0f0f0">
-       <span style="font-weight:600">${h.label}</span>
-       <span style="color:#aaa;font-size:10px;margin-left:6px">${h.hint}</span>
-     </div>`).join("");
-  drop.querySelectorAll(".hm-sdrop-item").forEach((el,i)=>{
-    el.addEventListener("mousedown",(e)=>{
-      e.preventDefault();
-      hits[i].action();
-      document.getElementById("hm-text-search").value="";
-      drop.style.display="none";
-    });
-    el.addEventListener("mouseover",()=>{
-      drop.querySelectorAll(".hm-sdrop-item").forEach(x=>x.style.background="");
-      el.style.background="#f0f5ff";
-      _hmSearchFocusIdx=i;
-    });
-  });
-  drop.style.display="block";
-  drop._hits = hits;
-}
-function hmSearchKey(ev){
-  const drop = document.getElementById("hm-search-drop");
-  if(drop.style.display==="none") return;
-  const items = drop.querySelectorAll(".hm-sdrop-item");
-  if(ev.key==="ArrowDown"){ ev.preventDefault(); _hmSearchFocusIdx=Math.min(_hmSearchFocusIdx+1,items.length-1); }
-  else if(ev.key==="ArrowUp"){ ev.preventDefault(); _hmSearchFocusIdx=Math.max(_hmSearchFocusIdx-1,0); }
-  else if(ev.key==="Enter"){
-    if(_hmSearchFocusIdx>=0&&drop._hits){ drop._hits[_hmSearchFocusIdx].action(); document.getElementById("hm-text-search").value=""; drop.style.display="none"; }
-    return;
-  } else if(ev.key==="Escape"){ drop.style.display="none"; return; } else return;
-  items.forEach((el,i)=>{ el.style.background = i===_hmSearchFocusIdx?"#f0f5ff":""; });
-  if(items[_hmSearchFocusIdx]) items[_hmSearchFocusIdx].scrollIntoView({block:"nearest"});
-}
-document.addEventListener("click",(ev)=>{
-  if(!ev.target.closest("#hm-text-search")&&!ev.target.closest("#hm-search-drop"))
-    document.getElementById("hm-search-drop").style.display="none";
-});
+let hmTextFilter  = "";       // free-text filter for heatmap columns
 const spCollapsed = new Set();   // node _ids collapsed in species tree
-const cladoTriColors = new Map(); // nodeKey → per-triangle color (cladogram)
-const spTriColors    = new Map(); // node._id → per-triangle color (species tree)
+let colTriFill = "#cccccc";      // fill colour for collapsed triangles
 // pre-computed metadata per species: {genes, families, hgs}
 const spMeta = (()=>{
   const m={};
@@ -709,15 +632,13 @@ function drawCladogram() {
       // collect leaf species for heatmap shading
       function getLeafSp(nd){ return nd.children?nd.children.flatMap(getLeafSp):[nd.name]; }
       hmCollapsedBands.push({species:getLeafSp(n),label:displayName});
-      const triCol = cladoTriColors.get(key) || "#cccccc";
       svg.append("polygon")
         .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
-        .attr("fill",triCol).attr("stroke","#222").attr("stroke-width",1.2)
+        .attr("fill",colTriFill).attr("stroke","#222").attr("stroke-width",1.2)
         .style("cursor","pointer")
-        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand &nbsp;·&nbsp; dbl-click to change colour</div>'))
+        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand &nbsp;·&nbsp; dbl-click label to rename</div>'))
         .on("mousemove",moveTip).on("mouseout",hideTip)
-        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); })
-        .on("dblclick",(ev)=>{ ev.stopPropagation(); openColorPicker(cladoTriColors.get(key)||"#cccccc",c=>{ cladoTriColors.set(key,c); drawCladogram(); }); });
+        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); });
       // small circle at triangle apex so the node is easy to click/uncollapse
       svg.append("circle")
         .attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
@@ -783,8 +704,6 @@ function drawCladogram() {
     n.children.forEach(drawCladoNodes);
   }
   drawCladoNodes(tree);
-  // keep heatmap shading in sync whenever cladogram is redrawn
-  if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
 }
 
 // ── helpers for heatmap row splitting ─────────────────────────────────────
@@ -889,14 +808,12 @@ function drawSpeciesTree() {
       const y0=n._colY0, y1=n._colY0+n._colH, yM=n._y;
       const leaves=getLeaves(n);
       // horizontal branch from parent edge to apex already drawn; draw triangle
-      const spTriCol = spTriColors.get(n._id) || "#cccccc";
       svg.append("polygon")
         .attr("points",`${x0},${yM} ${x1},${y0} ${x1},${y1}`)
-        .attr("fill",spTriCol).attr("stroke","#222").attr("stroke-width",1)
+        .attr("fill",colTriFill).attr("stroke","#222").attr("stroke-width",1)
         .style("cursor","pointer")
         .on("click",()=>{ spCollapsed.delete(n._id); drawSpeciesTree(); })
-        .on("dblclick",(ev)=>{ ev.stopPropagation(); openColorPicker(spTriColors.get(n._id)||"#cccccc",c=>{ spTriColors.set(n._id,c); drawSpeciesTree(); }); })
-        .on("mouseover",ev=>showTip(ev,'<div class="tt-name">'+n.name+'</div><div style="font-size:9px;color:#aaa">click to expand &nbsp;·&nbsp; dbl-click to change colour</div>'))
+        .on("mouseover",ev=>showTip(ev,'<div class="tt-name">'+n.name+'</div><div style="font-size:9px;color:#aaa">click to expand</div>'))
         .on("mousemove",moveTip).on("mouseout",hideTip);
       // small circle at apex for easy uncollapse
       svg.append("circle")
@@ -1004,7 +921,7 @@ function drawHeatmap() {
   const prefix = document.getElementById("prefixSelect").value;
   const back   = document.getElementById("hm-back");
   const crumb  = document.getElementById("hm-breadcrumb");
-  let data, colLabel, clickHandler, hoverHandler=null;
+  let data, colLabel, clickHandler;
 
   if (hmViewMode==="class") {
     // aggregate FAMILY_DATA by class
@@ -1043,16 +960,6 @@ function drawHeatmap() {
       if(!tRec) return;
       switchTab("trees"); selectTree(tRec); renderSidebar("");
       if(d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); setTimeout(focusHighlighted,60); }
-    };
-    // HG column header hover: list constituent OGs sorted by total gene count
-    hoverHandler=(ev,d)=>{
-      const r=d; const tRec2=TREE_INDEX.find(t=>t.id===r.id)||(TREE_INDEX.find(t=>t.family===r.family&&t.hg===r.hg));
-      const detail=tRec2?loadDetail(tRec2.id):null;
-      const ogs=detail&&detail.ogs||{};
-      const ogList=Object.entries(ogs).map(([og,gids])=>({og,n:gids.length})).sort((a,b)=>b.n-a.n);
-      const html='<b>'+(d.hg||d.id)+'</b>'
-        +(ogList.length?'<div style="margin-top:4px;font-size:10px;color:#555">'+ogList.slice(0,20).map(x=>`<div>${x.og} <span style="color:#aaa">(${x.n})</span></div>`).join('')+(ogList.length>20?`<div style="color:#aaa">…and ${ogList.length-20} more</div>`:'')+`</div>`:'<div style="color:#aaa;font-size:10px">no OG data</div>');
-      showTip(ev,html);
     };
 
   } else { // og
@@ -1247,10 +1154,7 @@ function drawHeatmap() {
     .attr("font-size",hmColFontSize).style("cursor","pointer")
     .attr("text-anchor","start")
     .text(colLabelTrunc)
-    .on("click",clickHandler)
-    .on("mouseover",hoverHandler?((ev,d)=>hoverHandler(ev,d)):null)
-    .on("mousemove",hoverHandler?moveTip:null)
-    .on("mouseout",hoverHandler?hideTip:null);
+    .on("click",clickHandler);
 
   // ── column-sum bar chart (below cells) ───────────────────────────────────
   const colTotals=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
@@ -1595,6 +1499,12 @@ document.getElementById("sptree-width-slider").addEventListener("input",function
   spTreeWidthPct=+this.value;
   document.getElementById("sptree-width-val").textContent=this.value;
   drawSpeciesTree();
+});
+document.getElementById("col-tri-fill").addEventListener("input",function(){
+  colTriFill=this.value;
+  // update already-drawn triangles immediately
+  document.querySelectorAll(".col-tri").forEach(el=>{ el.style.fill=colTriFill; });
+  drawCladogram(); drawSpeciesTree();
 });
 
 function downloadNewick(){
@@ -2053,18 +1963,16 @@ function renderTree(animate){
       const halfH=Math.max(rowH*0.6, nL*rowH/2);
       return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
     })
-    .style("fill",d=>{
+    .attr("fill",d=>{
       if(!d._children||!d._isOgCol) return null;
       const ogName=d.data._og_label||d.data.name||"";
       if(ogHlSet!==null){
         if(ogHlSet.has(ogName)){ const gi=ogHlGroupIndex.get(ogName)??0; return ogHlTagColor(gi)+"bb"; }
         return "#e8e8e8";
       }
-      if(colorMode==="og"){
-        const col=ogName2Color[ogName];
-        return col ? col+"55" : "#cccccc";
-      }
-      return "#cccccc";
+      if(colorMode!=="og") return null;
+      const col=ogName2Color[ogName];
+      return col ? col+"55" : null;
     })
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
@@ -2159,8 +2067,8 @@ function renderTree(animate){
     .attr("x",-4).attr("dy","-0.4em").attr("text-anchor","end")
     .attr("font-size",Math.max(7,tipFontSVG()*0.75))
     .attr("fill","#888").attr("pointer-events","none")
-    .attr("display",d=>(showSupport&&!d.data.leaf&&("support" in d.data)&&!d._children)?null:"none")
-    .text(d=>("support" in d.data)?d.data.support:"");
+    .attr("display",d=>(showSupport&&!d.data.leaf&&d.data.support!=null&&!d._children)?null:"none")
+    .text(d=>(d.data.support!=null)?d.data.support:"");
   applyTipFontSize();
 }
 
