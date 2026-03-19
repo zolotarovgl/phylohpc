@@ -141,17 +141,6 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane active" id="pane-heatmap">
-    <div id="hm-controls" style="border-bottom:1px solid #ddd;background:#f5f5f5;flex-shrink:0;display:flex;align-items:center;padding:3px 10px;gap:8px;flex-wrap:wrap">
-      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
-        Colour:
-        <select id="hm-color-mode" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:3px">
-          <option value="zscore">Z-score (RdBu)</option>
-          <option value="absolute">Absolute count</option>
-        </select>
-      </label>
-      <input type="text" id="hm-text-search" placeholder="&#128269; Search gene family / HG…" style="font-size:11px;padding:2px 7px;border:1px solid #ccc;border-radius:3px;width:200px" oninput="hmTextFilter=this.value.toLowerCase().trim();drawHeatmap()">
-      <button id="btn-hm-custom" onclick="hmEnterCustom()" style="margin-left:auto;padding:2px 10px;font-size:11px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer;font-weight:600">&#9998; Custom selection</button>
-    </div>
     <div id="hm-custom-bar" style="display:none;flex-shrink:0;border-bottom:1px solid #ddd;background:#fffbf0;padding:4px 10px;gap:6px;flex-wrap:wrap;align-items:center;position:relative">
       <span style="font-size:11px;color:#888;font-weight:600">Custom OG heatmap:</span>
       <div style="position:relative;display:inline-block">
@@ -190,6 +179,15 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
             <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
           </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Colour:
+            <select id="hm-color-mode" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:3px">
+              <option value="zscore">Z-score (RdBu)</option>
+              <option value="absolute">Absolute count</option>
+            </select>
+          </label>
+          <input type="text" id="hm-text-search" placeholder="&#128269; Search…" style="font-size:11px;padding:2px 7px;border:1px solid #ccc;border-radius:3px;width:140px" oninput="hmTextFilter=this.value.toLowerCase().trim();drawHeatmap()">
+          <button id="btn-hm-custom" onclick="hmEnterCustom()" style="padding:2px 8px;font-size:11px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer;font-weight:600">&#9998; Custom</button>
           <details style="margin-left:auto;font-size:10px">
             <summary style="cursor:pointer;color:#888;list-style:none">&#9432; Help</summary>
             <div style="position:absolute;z-index:50;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;box-shadow:0 2px 8px rgba(0,0,0,.12);line-height:1.7;color:#999;min-width:300px;right:10px">
@@ -197,6 +195,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
               <div><b style="color:#777">Open tree:</b> click a <i>cell</i> to open the gene tree and highlight that species</div>
               <div><b style="color:#777">Row groups:</b> shift+click a node in the Species Tree tab to split rows by clade</div>
               <div><b style="color:#777">Colour:</b> intensity = gene count; grey = absent</div>
+              <div><b style="color:#777">Custom:</b> build a heatmap from any combination of orthogroups; search by OG name or gene ID</div>
             </div>
           </details>
         </div>
