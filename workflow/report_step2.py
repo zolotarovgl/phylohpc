@@ -185,6 +185,8 @@ def gene_tree_to_dict(node) -> dict:
         d["species"] = get_species_prefix(gene_id) if gene_id else ""
         if len(parts) >= 2 and parts[1]:
             d["og"] = parts[1]
+        if len(parts) >= 3 and parts[2] and parts[2].upper() != "NA":
+            d["ref"] = parts[2]
     else:
         d["children"] = [gene_tree_to_dict(c) for c in node.children]
     return d
@@ -348,6 +350,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .tab-pane{display:none;flex:1;overflow:hidden;flex-direction:column;min-height:0}
 .tab-pane.active{display:flex}
 
+/* ── Species tree pane ── */
+#sp-tree-wrap{flex:1;overflow:auto;background:#fff;padding:16px}
+#sp-tree-wrap svg{display:block}
+
 /* ── Heatmap pane ── */
 #pane-heatmap{flex-direction:row}
 #hm-layout{display:flex;flex:1;overflow:hidden}
@@ -445,6 +451,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <div id="tab-strip">
     <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">Heatmap</button>
     <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">Gene Trees</button>
+    <button class="tab-btn" data-tab="sptree" onclick="switchTab('sptree')">Species Tree</button>
   </div>
 
   <!-- ── Heatmap pane ── -->
@@ -492,12 +499,23 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <input type="range" id="tip-font-slider" min="6" max="24" step="1" value="11" style="width:70px;cursor:pointer;accent-color:#4a90d9">
             <span id="tip-font-val" style="width:20px;text-align:right">11</span>px
           </label>
+          <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:8px;margin-left:4px">
+            Show:
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-geneid" checked> gene&nbsp;ID</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-og" checked> OG</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-ref" checked> ref&nbsp;ortholog</label>
+          </span>
         </div>
         <div id="tree-wrap">
           <svg id="tree-svg"></svg>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- ── Species tree pane ── -->
+  <div class="tab-pane" id="pane-sptree">
+    <div id="sp-tree-wrap"></div>
   </div>
 
 </div>
@@ -556,6 +574,9 @@ let hlSet         = null;        // null = off; union Set<species> when active
 let hlQueries     = [];          // committed query strings (tags)
 let hlGroupIndex  = new Map();   // species → group index (for per-group color)
 let tipFontSize   = null;        // null = auto; number = user override (px)
+let showGeneId    = true;        // tip label parts
+let showOGName    = true;
+let showRefOrtho  = true;
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
 
 function leafColor(sp) {
@@ -602,6 +623,9 @@ function switchTab(name) {
     tc.style.display = "inline";
     hb.style.display = "none"; cr.textContent = "";
     if (!currentIndex && TREE_INDEX.length) { renderSidebar(""); selectTree(TREE_INDEX[0]); }
+  } else if (name==="sptree") {
+    tc.style.display = "none";
+    drawSpeciesTree();
   } else {
     tc.style.display = "none";
     drawCladogram(); drawHeatmap();
@@ -764,6 +788,87 @@ function drawCladogram() {
     });
   }
   drawB(tree);
+}
+
+function drawSpeciesTree() {
+  const wrap = document.getElementById("sp-tree-wrap");
+  wrap.innerHTML = "";
+  if (!SP_TREE_DATA || !SP_TREE_DATA.children || !SPECIES_ORDER.length) {
+    wrap.innerHTML = '<p style="padding:20px;color:#888">No species tree provided (pass --species_tree).</p>';
+    return;
+  }
+
+  const rowH = 22, topM = 16, leftM = 16, rightM = 260;
+  const allLeaves = SPECIES_ORDER;
+  const H = allLeaves.length * rowH + topM + 16;
+  const W = Math.max(wrap.clientWidth || 700, 500);
+  const treeW = W - leftM - rightM;
+
+  const svg = d3.select(wrap).append("svg").attr("width", W).attr("height", H);
+
+  function clone(n){ return JSON.parse(JSON.stringify(n)); }
+  // prune to leaves actually in SPECIES_ORDER
+  function prune(n){
+    if(!n.children) return allLeaves.includes(n.name)?n:null;
+    const k=n.children.map(prune).filter(Boolean);
+    if(!k.length) return null;
+    if(k.length===1) return k[0];
+    n.children=k; return n;
+  }
+  const tree = prune(clone(SP_TREE_DATA));
+  if(!tree){ wrap.innerHTML='<p style="padding:20px;color:#888">Species tree is empty.</p>'; return; }
+
+  const leafY={};
+  allLeaves.forEach((s,i)=>{ leafY[s]=topM+i*rowH+rowH/2; });
+
+  function assignY(n){ if(!n.children){n._y=leafY[n.name]||0;return n._y;} const ys=n.children.map(assignY); n._y=d3.mean(ys);return n._y; }
+  function assignX(n,d=0){ n._d=d; if(n.children) n.children.forEach(c=>assignX(c,d+1)); }
+  function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
+
+  assignY(tree); assignX(tree);
+  const nodes = flat(tree);
+  const maxD = d3.max(nodes,d=>d._d)||1;
+  nodes.forEach(n=>{ if(!n.children) n._d=maxD; });
+  const sx = d => leftM + (d/maxD)*treeW;
+
+  // branches
+  function drawB(n){
+    if(!n.children) return;
+    const ys=n.children.map(c=>c._y);
+    svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d))
+      .attr("y1",d3.min(ys)).attr("y2",d3.max(ys))
+      .attr("stroke","#999").attr("stroke-width",1.5);
+    n.children.forEach(c=>{
+      svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(c._d))
+        .attr("y1",c._y).attr("y2",c._y)
+        .attr("stroke","#999").attr("stroke-width",1.5);
+      drawB(c);
+    });
+  }
+  drawB(tree);
+
+  // internal node names
+  nodes.forEach(n=>{
+    if(n.children && n.name){
+      svg.append("text")
+        .attr("x",sx(n._d)+4).attr("y",n._y-4)
+        .attr("font-size",9).attr("fill","#777").attr("font-style","italic")
+        .text(n.name);
+    }
+  });
+
+  // leaf dots + labels
+  nodes.forEach(n=>{
+    if(!n.children){
+      svg.append("circle")
+        .attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
+        .attr("fill",spColor(n.name)).attr("stroke","#fff").attr("stroke-width",0.5);
+      svg.append("text")
+        .attr("x",sx(n._d)+8).attr("y",n._y).attr("dy","0.35em")
+        .attr("font-size",12).attr("fill","#222").attr("font-family","monospace")
+        .text(n.name);
+    }
+  });
 }
 
 function drawHeatmap() {
@@ -1066,6 +1171,10 @@ document.getElementById("tip-font-slider").addEventListener("input",function(){
   if(currentIndex) renderTree();
 });
 
+document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
+document.getElementById("chk-og").addEventListener("change",function(){ showOGName=this.checked; if(currentIndex) renderTree(); });
+document.getElementById("chk-ref").addEventListener("change",function(){ showRefOrtho=this.checked; if(currentIndex) renderTree(); });
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TREE VIEW – SELECTION & D3 RENDERING
@@ -1355,7 +1464,12 @@ function renderTree(animate){
       if(!d.data.leaf) return "";
       const gid=d.data.gene_id||d.data.name;
       const og=d.data.og||ogGene2Name[gid]||"";
-      return og ? gid+" \u00b7 "+og : gid;
+      const ref=d.data.ref||"";
+      const parts=[];
+      if(showGeneId) parts.push(gid);
+      if(showOGName && og) parts.push(og);
+      if(showRefOrtho && ref) parts.push(ref);
+      return parts.join(" \u00b7 ");
     });
 
   // OG labels (inside badge when collapsed, beside node when OG-named internal)
