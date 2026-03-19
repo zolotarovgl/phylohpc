@@ -649,8 +649,7 @@ function collectLeafGenes(children) {
 function showCollapsedPopup(event, d) {
   event.stopPropagation();
   cpActiveNode = d;
-  const nodeKey = d.data.name || "";
-  const currentName = (nodeKey && customNodeNames[nodeKey]) || nodeKey || collapsedLabel(d);
+  const currentName = customNodeNames[d._uid] || d.data.name || collapsedLabel(d);
   const genes = collectLeafGenes(d._children);
   document.getElementById("cp-name").value = currentName;
   document.getElementById("cp-genes-label").textContent = genes.length + " genes:";
@@ -666,9 +665,8 @@ function cpClose() { cpEl.style.display = "none"; cpActiveNode = null; }
 
 function cpRename() {
   if (!cpActiveNode) return;
-  const nodeKey = cpActiveNode.data.name || "";
   const newName = document.getElementById("cp-name").value.trim();
-  if (nodeKey && newName) customNodeNames[nodeKey] = newName;
+  if (newName) customNodeNames[cpActiveNode._uid] = newName;
   cpClose();
   renderTree(false);
 }
@@ -1048,7 +1046,7 @@ function selectTree(rec){
   });
   drawGeneTree(currentDetail.tree);
   collapseToOGs();
-  requestAnimationFrame(fitTree);
+  setTimeout(fitTree, 260);
 }
 
 function rebuildOgColors(){
@@ -1108,8 +1106,7 @@ function countDescLeaves(children){
 
 function collapsedLabel(d){
   const n=countDescLeaves(d._children);
-  const nodeKey=d.data.name||"";
-  if(nodeKey&&customNodeNames[nodeKey]) return customNodeNames[nodeKey]+" ["+n+"]";
+  if(d._uid&&customNodeNames[d._uid]) return customNodeNames[d._uid]+" ["+n+"]";
   const lbl=d.data._og_label||d.data.name||"";
   if(lbl) return lbl+" ["+n+"]";
   const sc={};
@@ -1191,7 +1188,7 @@ function drawGeneTree(treeData){
   if(useBranchLen) assignBranchLenPos(rootNode,0);
   renderTree(false);
   // auto-fit after layout
-  requestAnimationFrame(fitTree);
+  setTimeout(fitTree, 260);
 }
 
 const BADGE_W=96, BADGE_H=17;
@@ -1342,7 +1339,7 @@ function collapseToOGs(){
     }
   }
   renderTree(true);
-  requestAnimationFrame(fitTree);
+  setTimeout(fitTree, 260);
 }
 function collapseAll(){
   if(!rootNode)return;
@@ -1351,7 +1348,7 @@ function collapseAll(){
   });
   if(rootNode._children){rootNode.children=rootNode._children;rootNode._children=null;}
   renderTree(true);
-  requestAnimationFrame(fitTree);
+  setTimeout(fitTree, 260);
 }
 
 function focusHighlighted(){
@@ -1369,7 +1366,7 @@ function focusHighlighted(){
     if(!d.data.leaf&&d.children&&!hasHl.get(d)){d._children=d.children;d.children=null;}
   });
   renderTree(true);
-  requestAnimationFrame(fitTree);
+  setTimeout(fitTree, 260);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
