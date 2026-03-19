@@ -392,6 +392,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .hg-item.selected{background:#d5f5e3;border-left:3px solid #1abc9c;padding-left:13px}
 .hg-item .hg-name{font-weight:600;font-size:11px}
 .hg-item .hg-meta{font-size:10px;color:#888}
+.hg-cov{height:3px;background:#e8e8e8;border-radius:2px;margin:3px 0 1px}
+.hg-cov-bar{height:3px;background:#1abc9c;border-radius:2px}
 .src-badge{font-size:8px;padding:1px 4px;border-radius:3px;background:#dceeff;color:#2a6fa8;font-weight:600;margin-left:5px;vertical-align:middle;letter-spacing:0.02em}
 
 /* main tree panel */
@@ -458,9 +460,9 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- vertical tab strip -->
   <div id="tab-strip">
-    <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">Counts</button>
-    <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">Gene Trees</button>
-    <button class="tab-btn" data-tab="sptree" onclick="switchTab('sptree')">Species Tree</button>
+    <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">&#9639; Counts</button>
+    <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">&#11044; Gene Trees</button>
+    <button class="tab-btn" data-tab="sptree" onclick="switchTab('sptree')">&#10022; Species Tree</button>
   </div>
 
   <!-- ── Heatmap pane ── -->
@@ -922,21 +924,27 @@ function drawSpeciesTree() {
   // ── internal nodes (click to collapse) ───────────────────────────────
   function drawInternals(n){
     if(n._isCol||!n.children) return;
-    if(n.name){
-      svg.append("text").attr("x",sx(n._d)+6).attr("y",n._y-4)
-        .attr("font-size",9).attr("fill","#777").attr("font-style","italic").text(n.name);
-    }
     // clickable node dot — only non-root internal nodes
     if(n._id!==tree._id){
+      const tip=n.name||"(unnamed)";
       svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
         .attr("fill","#fff").attr("stroke","#999").attr("stroke-width",1.2)
         .style("cursor","pointer")
-        .attr("title","Click to collapse")
-        .on("click",()=>{ spCollapsed.add(n._id); drawSpeciesTree(); });
+        .on("mouseover",ev=>showTip(ev,tip))
+        .on("mousemove",moveTip)
+        .on("mouseout",hideTip)
+        .on("click",()=>{ spCollapsed.add(n._id); hideTip(); drawSpeciesTree(); });
     }
     n.children.forEach(drawInternals);
   }
   drawInternals(tree);
+
+  // ── tip legend (black = in gene trees, grey = absent) ─────────────────
+  const legX=W-rightM+8, legY=topM;
+  svg.append("circle").attr("cx",legX).attr("cy",legY).attr("r",4).attr("fill","#111");
+  svg.append("text").attr("x",legX+8).attr("y",legY).attr("dy","0.35em").attr("font-size",10).attr("fill","#444").text("in gene trees");
+  svg.append("circle").attr("cx",legX).attr("cy",legY+16).attr("r",4).attr("fill","#bbb");
+  svg.append("text").attr("x",legX+8).attr("y",legY+16).attr("dy","0.35em").attr("font-size",10).attr("fill","#888").text("absent");
 
   // ── leaf tips ─────────────────────────────────────────────────────────
   function drawLeaves(n){
@@ -1014,7 +1022,7 @@ function drawHeatmap() {
   const cW=18, cH=12;
   const maxNameLen=speciesOrder.reduce((m,s)=>Math.max(m,s.length),0);
   const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
-  const svgW=data.length*cW+ROW_LABEL_W+20, svgH=speciesOrder.length*14+TOP_MARGIN+40;
+  const svgW=data.length*cW+ROW_LABEL_W+20, svgH=speciesOrder.length*14+TOP_MARGIN+60;
   const panel=document.getElementById("heatmap-panel");
   const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
 
@@ -1064,6 +1072,22 @@ function drawHeatmap() {
     .attr("x",ROW_LABEL_W).attr("y",TOP_MARGIN-92)
     .attr("font-size",9).attr("fill","#aaa").attr("font-style","italic")
     .text("Click a column label or cell to drill down \u2193");
+
+  // colorbar legend
+  const cbW=120, cbH=10, cbX=ROW_LABEL_W, cbY=svgH-28;
+  const gradId="hmgrad"+Date.now();
+  const defs=svg.append("defs");
+  const grad=defs.append("linearGradient").attr("id",gradId).attr("x1","0%").attr("x2","100%");
+  const stops=10;
+  for(let i=0;i<=stops;i++){
+    const t=i/stops;
+    grad.append("stop").attr("offset",(t*100)+"%").attr("stop-color",color(zMax-t*2*zMax));
+  }
+  svg.append("rect").attr("x",cbX).attr("y",cbY).attr("width",cbW).attr("height",cbH)
+    .attr("fill","url(#"+gradId+")").attr("rx",2);
+  svg.append("text").attr("x",cbX).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("high");
+  svg.append("text").attr("x",cbX+cbW/2).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("mean");
+  svg.append("text").attr("x",cbX+cbW).attr("y",cbY+cbH+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text("low");
 }
 
 function hmBack(){
@@ -1122,7 +1146,10 @@ function renderSidebar(filter){
       const item=document.createElement("div");
       item.className="hg-item"+(currentIndex&&currentIndex.id===rec.id?" selected":"");
       const badge=rec.source==="generax"?'<span class="src-badge">GeneRax</span>':'';
-      item.innerHTML='<div class="hg-name">'+rec.hg+' '+badge+'</div><div class="hg-meta">'+rec.n_leaves+' genes \u00b7 '+rec.n_ogs+' OGs</div>';
+      const covPct=ALL_SPECIES.length?Math.round((rec.species||[]).length/ALL_SPECIES.length*100):0;
+      item.innerHTML='<div class="hg-name">'+rec.hg+' '+badge+'</div>'
+        +'<div class="hg-cov"><div class="hg-cov-bar" style="width:'+covPct+'%"></div></div>'
+        +'<div class="hg-meta">'+rec.n_leaves+' genes \u00b7 '+rec.n_ogs+' OGs \u00b7 '+covPct+'% sp.</div>';
       item.addEventListener("click",()=>selectTree(rec));
       body.appendChild(item);
     }
@@ -1558,18 +1585,21 @@ function renderTree(animate){
   nodeSel.select(".leaf-label")
     .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
     .attr("font-size",d=>d.data.leaf?(tipFontSize!==null?tipFontSize:Math.min(11,rowH-2)):0)
-    .attr("fill",d=>colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||""))
     .attr("display",d=>d.data.leaf?null:"none")
-    .text(d=>{
-      if(!d.data.leaf) return "";
+    .text("")
+    .each(function(d){
+      if(!d.data.leaf) return;
+      const el=d3.select(this);
+      el.selectAll("tspan").remove();
       const gid=d.data.gene_id||d.data.name;
       const og=d.data.og||ogGene2Name[gid]||"";
       const ref=d.data.ref||"";
-      const parts=[];
-      if(showGeneId) parts.push(gid);
-      if(showOGName && og) parts.push(og);
-      if(showRefOrtho && ref) parts.push(ref);
-      return parts.join(" \u00b7 ");
+      const baseCol=colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||"");
+      let first=true;
+      function sep(){ if(!first) el.append("tspan").attr("fill","#bbb").text(" \u00b7 "); first=false; }
+      if(showGeneId){ sep(); el.append("tspan").attr("fill",baseCol).text(gid); }
+      if(showOGName&&og){ sep(); el.append("tspan").attr("fill","#4a7aad").text(og); }
+      if(showRefOrtho&&ref){ sep(); el.append("tspan").attr("fill","#2e8b57").text(ref); }
     });
 
   // OG labels (inside badge when collapsed, beside node when OG-named internal)
@@ -1737,7 +1767,7 @@ def main(argv=None):
     # Filter all data to families present in genefam.csv (when provided)
     if family_info:
         before = len(records), len(family_records), len(hg_records)
-        records        = [r for r in records        if r["prefix"]  in family_info]
+        records        = [r for r in records        if r["prefix"] in family_info or r["family"] in family_info]
         family_records = [r for r in family_records if r["family"]  in family_info]
         hg_records     = [r for r in hg_records     if r["family"]  in family_info]
         print(
@@ -1762,7 +1792,8 @@ def main(argv=None):
         idx = {k: v for k, v in rec.items() if k not in ("tree_dict", "ogs")}
         idx["has_prev"] = rec["id"] in prev_records
         idx["source"]   = rec.get("source", "generax")
-        idx["class"] = family_info.get(rec["family"], rec.get("prefix", ""))
+        fam_key = rec["family"] if rec["family"] in family_info else rec["prefix"]
+        idx["class"] = family_info.get(fam_key, rec.get("prefix", ""))
         index_records.append(idx)
 
     # Build per-HG lazy <script> tags
