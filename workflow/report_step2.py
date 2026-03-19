@@ -467,18 +467,25 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane active" id="pane-heatmap">
-    <div id="hm-controls" style="display:flex;align-items:center;gap:14px;padding:5px 14px;background:#f5f5f5;border-bottom:1px solid #ddd;flex-shrink:0">
-      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
-        Col label size:
-        <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
-        <span id="hm-col-font-val" style="width:20px;text-align:right">9</span>px
-      </label>
-      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
-        Rotation:
-        <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
-        <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
-      </label>
-      <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click a column label or cell to drill down &darr;</span>
+    <div id="hm-controls" style="border-bottom:1px solid #ddd;background:#f5f5f5;flex-shrink:0">
+      <div style="display:flex;align-items:center;padding:3px 10px;gap:8px">
+        <button onclick="toggleHmColCtrl()" id="hm-col-ctrl-btn" style="font-size:11px;padding:1px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;display:flex;align-items:center;gap:4px">
+          <span id="hm-col-ctrl-arrow" style="font-size:9px">&#9654;</span> Column labels control
+        </button>
+        <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click a column label or cell to drill down &darr;</span>
+      </div>
+      <div id="hm-col-ctrl-body" style="display:none;padding:5px 14px 7px;align-items:center;gap:14px">
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+          Label size:
+          <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+          <span id="hm-col-font-val" style="width:20px;text-align:right">9</span>px
+        </label>
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+          Rotation:
+          <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+          <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
+        </label>
+      </div>
     </div>
     <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
       <span style="font-weight:600">Row groups:</span>
@@ -945,6 +952,14 @@ function spNodeLeaves(n) {
 }
 const hmSplitColors     = ["rgba(231,76,60,0.10)","rgba(52,152,219,0.10)","rgba(39,174,96,0.10)","rgba(243,156,18,0.10)"];
 const hmSplitLineColors = ["#e74c3c","#3498db","#27ae60","#f39c12"];
+function toggleHmColCtrl() {
+  const body = document.getElementById("hm-col-ctrl-body");
+  const arrow = document.getElementById("hm-col-ctrl-arrow");
+  const open = body.style.display === "flex";
+  body.style.display = open ? "none" : "flex";
+  arrow.innerHTML = open ? "&#9654;" : "&#9660;";
+}
+
 function updateHmSplitBar() {
   const bar = document.getElementById("hm-split-bar");
   if (!hmSplitSets.length) { bar.style.display = "none"; return; }
