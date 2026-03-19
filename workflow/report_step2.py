@@ -639,8 +639,10 @@ let ogGene2Name   = {};   // gene_id → og_name
 let hlSet         = null;        // null = off; union Set<species> when active
 let hlQueries     = [];          // committed query strings (tags)
 let hlGroupIndex  = new Map();   // species → group index (for per-group color)
+let hlQueryColors = {};          // query string → custom hex color override
 let ogHlSet       = null;        // null = off; Set<og_name> when active
 let ogHlQueries   = [];          // committed OG query strings
+let ogHlQueryColors = {};        // og query string → custom hex color override
 let ogHlGroupIndex= new Map();   // og_name → group index
 let tipFontSize    = null;        // null = auto; number = user override (px)
 let treeLinkWidth  = 1.3;        // branch stroke-width in screen px
@@ -656,12 +658,24 @@ let hmColRotation = 65;      // column label rotation angle (degrees)
 const spCollapsed = new Set();   // node _ids collapsed in species tree
 let spTreeWidthPct = 50;         // % of pane width used by species tree SVG
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
+function hlTagColor(gi){ const q=hlQueries[gi]; return (q&&hlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
+function ogHlTagColor(gi){ const q=ogHlQueries[gi]; return (q&&ogHlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
+
+function openColorPicker(currentCol, onPick){
+  const inp=document.createElement("input"); inp.type="color";
+  inp.value=currentCol; inp.style.cssText="position:fixed;opacity:0;pointer-events:none";
+  document.body.appendChild(inp);
+  inp.addEventListener("input",()=>onPick(inp.value));
+  inp.addEventListener("change",()=>{ onPick(inp.value); document.body.removeChild(inp); });
+  inp.addEventListener("blur",()=>{ if(inp.parentNode) document.body.removeChild(inp); });
+  inp.click();
+}
 
 function leafColor(sp) {
   if (hlSet !== null) {
     if (!hlSet.has(sp)) return "#ccc";
     const gi = hlGroupIndex.get(sp);
-    return gi !== undefined ? hlTagColors[gi % hlTagColors.length]
+    return gi !== undefined ? hlTagColor(gi)
                             : (colorMode === "species" ? spColor(sp) : (cladeSp2Color[sp] || "#ccc"));
   }
   return colorMode === "species" ? spColor(sp) : (cladeSp2Color[sp] || "#ccc");
@@ -670,7 +684,7 @@ function ogLeafColor(geneId, species) {
   if (hlSet !== null) {
     if (!hlSet.has(species||"")) return "#ccc";
     const gi = hlGroupIndex.get(species||"");
-    return gi !== undefined ? hlTagColors[gi % hlTagColors.length] : (ogLeaf2Color[geneId] || "#ccc");
+    return gi !== undefined ? hlTagColor(gi) : (ogLeaf2Color[geneId] || "#ccc");
   }
   return ogLeaf2Color[geneId] || "#ccc";
 }
@@ -1541,11 +1555,14 @@ function rebuildHlSet(){
 function renderHlTags(){
   const el=document.getElementById("hl-tags"); el.innerHTML="";
   hlQueries.forEach((q,i)=>{
+    const col=hlTagColor(i);
     const chip=document.createElement("span"); chip.className="hl-tag";
-    chip.style.background=hlTagColors[i%hlTagColors.length];
+    chip.style.background=col; chip.title="Click to change color";
+    chip.style.cursor="pointer";
     const lbl=document.createTextNode(q+" ");
     const x=document.createElement("span"); x.className="hl-tag-x"; x.textContent="\u00d7";
-    x.onclick=()=>removeHlTag(i);
+    x.onclick=(e)=>{ e.stopPropagation(); removeHlTag(i); };
+    chip.onclick=()=>openColorPicker(col,c=>{ hlQueryColors[q]=c; rebuildHlSet(); });
     chip.appendChild(lbl); chip.appendChild(x);
     el.appendChild(chip);
   });
@@ -1559,9 +1576,9 @@ function addHlTag(query){
   rebuildHlSet();
 }
 
-function removeHlTag(i){ hlQueries.splice(i,1); rebuildHlSet(); }
+function removeHlTag(i){ delete hlQueryColors[hlQueries[i]]; hlQueries.splice(i,1); rebuildHlSet(); }
 
-function clearHighlight(){ hlQueries=[]; document.getElementById("hl-search").value=""; rebuildHlSet(); }
+function clearHighlight(){ hlQueries=[]; hlQueryColors={}; document.getElementById("hl-search").value=""; rebuildHlSet(); }
 
 // ── OG name highlight system ──────────────────────────────────────────────
 function resolveOgQuery(query){
@@ -1591,11 +1608,14 @@ function rebuildOgHlSet(){
 function renderOgHlTags(){
   const el=document.getElementById("og-hl-tags"); el.innerHTML="";
   ogHlQueries.forEach((q,i)=>{
+    const col=ogHlTagColor(i);
     const chip=document.createElement("span"); chip.className="hl-tag";
-    chip.style.background=hlTagColors[i%hlTagColors.length];
+    chip.style.background=col; chip.title="Click to change color";
+    chip.style.cursor="pointer";
     const lbl=document.createTextNode(q+" ");
     const btn=document.createElement("button");
-    btn.textContent="\u00d7"; btn.onclick=()=>removeOgHlTag(i);
+    btn.textContent="\u00d7"; btn.onclick=(e)=>{ e.stopPropagation(); removeOgHlTag(i); };
+    chip.onclick=()=>openColorPicker(col,c=>{ ogHlQueryColors[q]=c; rebuildOgHlSet(); });
     chip.append(lbl,btn); el.appendChild(chip);
   });
   // populate datalist for autocomplete
@@ -1611,8 +1631,8 @@ function addOgHlTag(query){
   document.getElementById("og-hl-search").value="";
   rebuildOgHlSet();
 }
-function removeOgHlTag(i){ ogHlQueries.splice(i,1); rebuildOgHlSet(); }
-function clearOgHighlight(){ ogHlQueries=[]; document.getElementById("og-hl-search").value=""; rebuildOgHlSet(); }
+function removeOgHlTag(i){ delete ogHlQueryColors[ogHlQueries[i]]; ogHlQueries.splice(i,1); rebuildOgHlSet(); }
+function clearOgHighlight(){ ogHlQueries=[]; ogHlQueryColors={}; document.getElementById("og-hl-search").value=""; rebuildOgHlSet(); }
 
 document.getElementById("hl-search").addEventListener("keydown",function(e){
   if(e.key==="Enter"&&this.value.trim()){ addHlTag(this.value); e.preventDefault(); }
@@ -1686,10 +1706,10 @@ function selectTree(rec){
   currentDetail=loadDetail(rec.id);
   if(!currentDetail){ console.warn("No detail data for",rec.id); return; }
   // reset colour state – default to OG colouring
-  hlSet=null; hlQueries=[]; hlGroupIndex=new Map();
+  hlSet=null; hlQueries=[]; hlGroupIndex=new Map(); hlQueryColors={};
   document.getElementById("hl-search").value="";
   renderHlTags();
-  ogHlSet=null; ogHlQueries=[]; ogHlGroupIndex=new Map();
+  ogHlSet=null; ogHlQueries=[]; ogHlGroupIndex=new Map(); ogHlQueryColors={};
   document.getElementById("og-hl-search").value="";
   renderOgHlTags();
   cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
@@ -1986,7 +2006,7 @@ function renderTree(animate){
         if(ogHlSet!==null){
           if(!ogHlSet.has(og2)) return "#e8e8e8";
           const gi=ogHlGroupIndex.get(og2)??0;
-          return hlTagColors[gi%hlTagColors.length];
+          return ogHlTagColor(gi);
         }
         if(colorMode==="og") return ogLeafColor(gid2, d.data.species);
         const c=leafColor(d.data.species||"");
@@ -2068,7 +2088,7 @@ function renderTree(animate){
       let baseCol;
       if(ogHlActive&&inOgHl){
         const gi=ogHlGroupIndex.get(og)??0;
-        baseCol=hlTagColors[gi%hlTagColors.length];
+        baseCol=ogHlTagColor(gi);
       } else {
         baseCol=notHl?"#ccc":(colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||""));
       }
