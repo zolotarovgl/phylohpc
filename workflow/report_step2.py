@@ -2173,25 +2173,45 @@ document.getElementById("col-tri-fill").addEventListener("input",function(){
   drawCladogram(); drawSpeciesTree();
 });
 
+function _buildCombinedHeatmapSVG(){
+  const cladoSvg=document.querySelector("#tree-panel svg");
+  const heatSvg=document.querySelector("#heatmap-panel svg");
+  if(!heatSvg) return null;
+  const bb=el=>{ const v=el.viewBox.baseVal; return v.width?{w:v.width,h:v.height}:{w:el.getBoundingClientRect().width,h:el.getBoundingClientRect().height}; };
+  const cBB=cladoSvg?bb(cladoSvg):{w:0,h:0};
+  const hBB=bb(heatSvg);
+  const W=cBB.w+hBB.w, H=Math.max(cBB.h,hBB.h);
+  // collect SVG-relevant CSS from the document so class-based styles render correctly
+  let css="";
+  try{ for(const sh of document.styleSheets){ try{ for(const r of sh.cssRules) css+=r.cssText+"\n"; }catch(e){} } }catch(e){}
+  const cladoInner=cladoSvg?cladoSvg.innerHTML:"";
+  const heatInner=heatSvg.innerHTML;
+  return {svgStr:
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}">` +
+    `<style>${css}</style>` +
+    `<rect width="${W}" height="${H}" fill="#fff"/>` +
+    (cladoInner?`<g>${cladoInner}</g>`:"") +
+    `<g transform="translate(${cBB.w},0)">${heatInner}</g>` +
+    `</svg>`,
+    W, H};
+}
 function downloadHeatmapSVG(){
-  const svgEl=document.querySelector("#heatmap-panel svg");
-  if(!svgEl){ alert("No heatmap to export."); return; }
-  const blob=new Blob([new XMLSerializer().serializeToString(svgEl)],{type:"image/svg+xml;charset=utf-8"});
+  const r=_buildCombinedHeatmapSVG();
+  if(!r){ alert("No heatmap to export."); return; }
+  const blob=new Blob([r.svgStr],{type:"image/svg+xml;charset=utf-8"});
   const a=document.createElement("a"); a.download="heatmap.svg"; a.href=URL.createObjectURL(blob);
   a.click(); URL.revokeObjectURL(a.href);
 }
 function downloadHeatmapPNG(){
-  const svgEl=document.querySelector("#heatmap-panel svg");
-  if(!svgEl){ alert("No heatmap to export."); return; }
-  const svgStr=new XMLSerializer().serializeToString(svgEl);
-  const W=svgEl.viewBox.baseVal.width||svgEl.getBoundingClientRect().width;
-  const H=svgEl.viewBox.baseVal.height||svgEl.getBoundingClientRect().height;
+  const r=_buildCombinedHeatmapSVG();
+  if(!r){ alert("No heatmap to export."); return; }
+  const {svgStr,W,H}=r;
   const blob=new Blob([svgStr],{type:"image/svg+xml;charset=utf-8"});
   const url=URL.createObjectURL(blob);
   const img=new Image();
   img.onload=function(){
     const canvas=document.createElement("canvas");
-    canvas.width=W*2; canvas.height=H*2; // 2x for retina
+    canvas.width=W*2; canvas.height=H*2;
     const ctx=canvas.getContext("2d");
     ctx.scale(2,2); ctx.fillStyle="#fff"; ctx.fillRect(0,0,W,H);
     ctx.drawImage(img,0,0,W,H);
