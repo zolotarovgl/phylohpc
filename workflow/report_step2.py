@@ -467,6 +467,19 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane active" id="pane-heatmap">
+    <div id="hm-controls" style="display:flex;align-items:center;gap:14px;padding:5px 14px;background:#f5f5f5;border-bottom:1px solid #ddd;flex-shrink:0">
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+        Col label size:
+        <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+        <span id="hm-col-font-val" style="width:20px;text-align:right">9</span>px
+      </label>
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+        Rotation:
+        <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+        <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
+      </label>
+      <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click a column label or cell to drill down &darr;</span>
+    </div>
     <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
       <span style="font-weight:600">Row groups:</span>
       <span id="hm-split-tags"></span>
@@ -623,6 +636,8 @@ let showRefOrtho  = true;
 let hideNonHl     = false;   // hide non-highlighted tip labels when hlSet active
 let hmSplitSets   = [];      // array of Set<species> for heatmap row splitting
 let hmSplitLabels = [];      // display label for each split group
+let hmColFontSize = 9;       // column label font size (px)
+let hmColRotation = 65;      // column label rotation angle (degrees)
 const spCollapsed = new Set();   // node _ids collapsed in species tree
 let spTreeWidthPct = 50;         // % of pane width used by species tree SVG
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
@@ -1205,7 +1220,10 @@ function drawHeatmap() {
   const cW=18, cH=12;
   const maxNameLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
   const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
-  const hmTM=HM_TOP;
+  // top margin: enough room for rotated column labels
+  const maxColLen=data.reduce((m,d)=>Math.max(m,(colLabel(d)||"").length),0);
+  const hmColLabelH=Math.ceil(Math.sin(hmColRotation*Math.PI/180)*maxColLen*hmColFontSize*0.6)+8;
+  const hmTM=Math.max(HM_TOP, hmColLabelH+14);
   const nRows=hmOrder.length;
   const CELLS_BOTTOM=nRows*14+hmTM;   // y just below the last cell row
   const BAR_TOP=CELLS_BOTTOM+10;      // bar chart starts here
@@ -1292,16 +1310,11 @@ function drawHeatmap() {
 
   // column headers
   svg.selectAll("text.hm-col").data(data).enter().append("text").attr("class","hm-col")
-    .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W},${hmTM-10}) rotate(-65)`)
-    .attr("font-size",9).style("cursor","pointer")
+    .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W+cW/2},${hmTM-6}) rotate(-${hmColRotation})`)
+    .attr("font-size",hmColFontSize).style("cursor","pointer")
+    .attr("text-anchor","start")
     .text(colLabel)
     .on("click",clickHandler);
-
-  // hint
-  svg.append("text")
-    .attr("x",ROW_LABEL_W).attr("y",TOP_MARGIN-8)
-    .attr("font-size",9).attr("fill","#aaa").attr("font-style","italic")
-    .text("Click a column label or cell to drill down \u2193");
 
   // ── column-sum bar chart (below cells) ───────────────────────────────────
   const colTotals=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
@@ -1599,6 +1612,17 @@ document.getElementById("line-width-slider").addEventListener("input",function()
   treeLinkWidth=+this.value;
   document.getElementById("line-width-val").textContent=this.value;
   if(gMain) gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
+});
+
+document.getElementById("hm-col-font-slider").addEventListener("input",function(){
+  hmColFontSize=+this.value;
+  document.getElementById("hm-col-font-val").textContent=this.value;
+  drawHeatmap();
+});
+document.getElementById("hm-col-rot-slider").addEventListener("input",function(){
+  hmColRotation=+this.value;
+  document.getElementById("hm-col-rot-val").textContent=this.value;
+  drawHeatmap();
 });
 
 document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
