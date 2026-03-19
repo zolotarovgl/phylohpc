@@ -1882,7 +1882,10 @@ function renderTree(animate){
   // so that rowH stays proportional even when many nodes are collapsed.
   function countAllLeaves(d){ if(!d.children&&!d._children) return 1; return (d._children||d.children).reduce((s,c)=>s+countAllLeaves(c),0); }
   const nAll=countAllLeaves(rootNode);
-  const rowH=Math.max(14,Math.min(32,Math.floor(iH/Math.max(nAll,1))));
+  // Minimum row height must accommodate the current tip font size
+  const fsEff = tipFontSize !== null ? tipFontSize : 11;
+  const minRowH = Math.max(14, Math.ceil(fsEff * 1.3));
+  const rowH = Math.max(minRowH, Math.min(Math.max(minRowH, 36), Math.floor(iH/Math.max(nAll,1))));
   const tH=Math.max(iH,nAll*rowH);
   d3.cluster().size([tH,iW])(rootNode);
 
