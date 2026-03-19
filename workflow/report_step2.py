@@ -415,7 +415,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 #tree-wrap{flex:1;overflow:hidden;position:relative;background:#fff}
 #tree-svg{width:100%;height:100%;cursor:grab;display:block}
 #tree-svg:active{cursor:grabbing}
-.link{fill:none;stroke:#d5d5d5;stroke-width:1.3px}
+.link{fill:none;stroke:#d5d5d5}
 .node-g circle{cursor:pointer;transition:r .12s,fill .12s}
 .node-g circle:hover{stroke-width:2.5px !important}
 .col-tri{fill:rgba(90,130,170,0.13);stroke:#7a9ab8;stroke-width:1px;cursor:pointer}
@@ -1965,6 +1965,8 @@ function renderTree(animate){
       if(!d.data.leaf) return;
       const el=d3.select(this);
       el.selectAll("tspan").remove();
+      const gid=d.data.gene_id||d.data.name;
+      const og=d.data.og||ogGene2Name[gid]||"";
       const ref=d.data.ref||"";
       // dim if either species-hl or OG-hl is active and this tip doesn't match
       const notSpHl=hlSet!==null&&!hlSet.has(d.data.species||"");
