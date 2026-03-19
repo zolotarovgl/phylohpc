@@ -467,6 +467,12 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane active" id="pane-heatmap">
+    <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
+      <span style="font-weight:600">Row groups:</span>
+      <span id="hm-split-tags"></span>
+      <button onclick="clearHmSplits()" style="margin-left:4px;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">&#10005; Clear</button>
+      <span style="font-size:10px;color:#aaa">(shift+click a node in the Species Tree tab to add a group)</span>
+    </div>
     <div id="hm-layout">
       <div id="tree-panel"></div>
       <div id="heatmap-panel"></div>
@@ -515,6 +521,9 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-geneid" checked> gene&nbsp;ID</label>
             <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-og" checked> OG</label>
             <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-ref" checked> ref&nbsp;ortholog</label>
+            <span style="margin-left:6px;border-left:1px solid #ddd;padding-left:8px">
+              <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
+            </span>
           </span>
         </div>
         <div id="tree-wrap">
@@ -597,6 +606,9 @@ let tipFontSize   = null;        // null = auto; number = user override (px)
 let showGeneId    = true;        // tip label parts
 let showOGName    = true;
 let showRefOrtho  = true;
+let hideNonHl     = false;   // hide non-highlighted tip labels when hlSet active
+let hmSplitSets   = [];      // array of Set<species> for heatmap row splitting
+let hmSplitLabels = [];      // display label for each split group
 const spCollapsed = new Set();   // node _ids collapsed in species tree
 let spTreeWidthPct = 50;         // % of pane width used by species tree SVG
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
@@ -813,6 +825,27 @@ function drawCladogram() {
   drawB(tree);
 }
 
+// ── helpers for heatmap row splitting ─────────────────────────────────────
+function spNodeLeaves(n) {
+  if (!n.children) return n.name ? [n.name] : [];
+  return n.children.flatMap(spNodeLeaves);
+}
+const hmSplitColors     = ["rgba(231,76,60,0.10)","rgba(52,152,219,0.10)","rgba(39,174,96,0.10)","rgba(243,156,18,0.10)"];
+const hmSplitLineColors = ["#e74c3c","#3498db","#27ae60","#f39c12"];
+function updateHmSplitBar() {
+  const bar = document.getElementById("hm-split-bar");
+  if (!hmSplitSets.length) { bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  document.getElementById("hm-split-tags").innerHTML = hmSplitLabels.map((lbl,i) =>
+    `<span style="display:inline-flex;align-items:center;padding:1px 8px;border-radius:10px;background:${hmSplitLineColors[i%hmSplitLineColors.length]};color:#fff;font-size:10px">${lbl}</span>`
+  ).join(" ");
+}
+function clearHmSplits() {
+  hmSplitSets = []; hmSplitLabels = [];
+  updateHmSplitBar();
+  drawHeatmap();
+}
+
 function drawSpeciesTree() {
   const wrap = document.getElementById("sp-tree-wrap");
   wrap.innerHTML = "";
@@ -926,14 +959,31 @@ function drawSpeciesTree() {
     if(n._isCol||!n.children) return;
     // clickable node dot — only non-root internal nodes
     if(n._id!==tree._id){
-      const tip=n.name||"(unnamed)";
+      const nodeLabel=n.name||"(unnamed)";
+      // check if this clade is already a split group
+      const cleavesSet=new Set(spNodeLeaves(n));
+      const splitIdx=hmSplitSets.findIndex(s=>s.size===cleavesSet.size&&[...cleavesSet].every(v=>s.has(v)));
+      const isSplit=splitIdx>=0;
+      const nodeCol=isSplit?hmSplitLineColors[splitIdx%hmSplitLineColors.length]:"#999";
+      const tip=nodeLabel+'<div style="font-size:9px;color:#aaa;margin-top:3px">click to collapse &nbsp;·&nbsp; shift+click to split heatmap</div>';
       svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
-        .attr("fill","#fff").attr("stroke","#999").attr("stroke-width",1.2)
+        .attr("fill",isSplit?hmSplitColors[splitIdx%hmSplitColors.length]:"#fff")
+        .attr("stroke",nodeCol).attr("stroke-width",isSplit?2:1.2)
         .style("cursor","pointer")
         .on("mouseover",ev=>showTip(ev,tip))
         .on("mousemove",moveTip)
         .on("mouseout",hideTip)
-        .on("click",()=>{ spCollapsed.add(n._id); hideTip(); drawSpeciesTree(); });
+        .on("click",(ev)=>{
+          if(ev.shiftKey){
+            ev.stopPropagation();
+            if(isSplit){ hmSplitSets.splice(splitIdx,1); hmSplitLabels.splice(splitIdx,1); }
+            else{ hmSplitSets.push(cleavesSet); hmSplitLabels.push(nodeLabel); }
+            updateHmSplitBar();
+            hideTip(); drawSpeciesTree(); drawHeatmap();
+          } else {
+            spCollapsed.add(n._id); hideTip(); drawSpeciesTree();
+          }
+        });
     }
     n.children.forEach(drawInternals);
   }
@@ -1019,6 +1069,18 @@ function drawHeatmap() {
     };
   }
 
+  // ── heatmap row splitting ──────────────────────────────────────────────
+  // Build species → group index map and reorder speciesOrder by group
+  let spSplitGroup = new Map(); // species → group index (0,1,… or -1 for "other")
+  if (hmSplitSets.length > 0) {
+    hmSplitSets.forEach((sSet,gi) => sSet.forEach(sp => { if (!spSplitGroup.has(sp)) spSplitGroup.set(sp,gi); }));
+    const grouped = [];
+    for (let gi=0; gi<hmSplitSets.length; gi++)
+      speciesOrder.filter(s=>spSplitGroup.get(s)===gi).forEach(s=>grouped.push(s));
+    speciesOrder.filter(s=>!spSplitGroup.has(s)).forEach(s=>grouped.push(s));
+    speciesOrder = grouped;
+  }
+
   const cW=18, cH=12;
   const maxNameLen=speciesOrder.reduce((m,s)=>Math.max(m,s.length),0);
   const ROW_LABEL_W=Math.max(110,Math.min(200,maxNameLen*7+14));
@@ -1027,6 +1089,37 @@ function drawHeatmap() {
   const svg=d3.select(panel).html("").append("svg").attr("width",svgW).attr("height",svgH);
 
   if(!data.length){ svg.append("text").attr("x",40).attr("y",TOP_MARGIN+30).attr("fill","#999").text("No data for this selection."); return; }
+
+  // draw group background bands before cells (SVG paint order: back to front)
+  if (hmSplitSets.length > 0) {
+    let gi0 = spSplitGroup.has(speciesOrder[0]) ? spSplitGroup.get(speciesOrder[0]) : -1;
+    let bandStart = 0;
+    for (let ri=1; ri<=speciesOrder.length; ri++) {
+      const gi1 = ri<speciesOrder.length ? (spSplitGroup.has(speciesOrder[ri]) ? spSplitGroup.get(speciesOrder[ri]) : -1) : -2;
+      if (gi1 !== gi0) {
+        if (gi0 >= 0) {
+          // shaded band for a split group
+          svg.append("rect")
+            .attr("x",0).attr("y",bandStart*14+TOP_MARGIN)
+            .attr("width",svgW).attr("height",(ri-bandStart)*14)
+            .attr("fill",hmSplitColors[gi0%hmSplitColors.length]);
+          // group label on left edge
+          const midY=bandStart*14+TOP_MARGIN+(ri-bandStart)*7;
+          svg.append("text").attr("x",4).attr("y",midY).attr("dy","0.35em")
+            .attr("font-size",8).attr("fill",hmSplitLineColors[gi0%hmSplitLineColors.length])
+            .attr("font-weight","bold").text(hmSplitLabels[gi0]||("Group "+(gi0+1)));
+        }
+        // separator line at boundary
+        if (ri<speciesOrder.length) {
+          svg.append("line")
+            .attr("x1",0).attr("x2",svgW)
+            .attr("y1",ri*14+TOP_MARGIN).attr("y2",ri*14+TOP_MARGIN)
+            .attr("stroke","#666").attr("stroke-width",1.5).attr("stroke-dasharray","4,2");
+        }
+        gi0 = gi1; bandStart = ri;
+      }
+    }
+  }
 
   const zMat=data.map(rec=>{
     const vals=speciesOrder.map(s=>rec.species_counts[s]||0);
@@ -1285,6 +1378,7 @@ document.getElementById("tip-font-slider").addEventListener("input",function(){
 document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
 document.getElementById("chk-og").addEventListener("change",function(){ showOGName=this.checked; if(currentIndex) renderTree(); });
 document.getElementById("chk-ref").addEventListener("change",function(){ showRefOrtho=this.checked; if(currentIndex) renderTree(); });
+document.getElementById("chk-hide-nonhl").addEventListener("change",function(){ hideNonHl=this.checked; if(currentIndex) renderTree(); });
 
 document.getElementById("sptree-width-slider").addEventListener("input",function(){
   spTreeWidthPct=+this.value;
@@ -1585,7 +1679,11 @@ function renderTree(animate){
   nodeSel.select(".leaf-label")
     .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
     .attr("font-size",d=>d.data.leaf?(tipFontSize!==null?tipFontSize:Math.min(11,rowH-2)):0)
-    .attr("display",d=>d.data.leaf?null:"none")
+    .attr("display",d=>{
+      if(!d.data.leaf) return "none";
+      if(hideNonHl && hlSet!==null && !hlSet.has(d.data.species||"")) return "none";
+      return null;
+    })
     .text("")
     .each(function(d){
       if(!d.data.leaf) return;
@@ -1594,12 +1692,16 @@ function renderTree(animate){
       const gid=d.data.gene_id||d.data.name;
       const og=d.data.og||ogGene2Name[gid]||"";
       const ref=d.data.ref||"";
-      const baseCol=colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||"");
+      const notHl=hlSet!==null&&!hlSet.has(d.data.species||"");
+      const baseCol=notHl?"#ccc":(colorMode==="og"?ogLeafColor(d.data.gene_id||d.data.name,d.data.species):leafColor(d.data.species||""));
+      const sepCol=notHl?"#ddd":"#bbb";
+      const ogCol=notHl?"#ccc":"#4a7aad";
+      const refCol=notHl?"#ccc":"#2e8b57";
       let first=true;
-      function sep(){ if(!first) el.append("tspan").attr("fill","#bbb").text(" \u00b7 "); first=false; }
+      function sep(){ if(!first) el.append("tspan").attr("fill",sepCol).text(" \u00b7 "); first=false; }
       if(showGeneId){ sep(); el.append("tspan").attr("fill",baseCol).text(gid); }
-      if(showOGName&&og){ sep(); el.append("tspan").attr("fill","#4a7aad").text(og); }
-      if(showRefOrtho&&ref){ sep(); el.append("tspan").attr("fill","#2e8b57").text(ref); }
+      if(showOGName&&og){ sep(); el.append("tspan").attr("fill",ogCol).text(og); }
+      if(showRefOrtho&&ref){ sep(); el.append("tspan").attr("fill",refCol).text(ref); }
     });
 
   // OG labels (inside badge when collapsed, beside node when OG-named internal)
