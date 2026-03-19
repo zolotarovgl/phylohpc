@@ -142,7 +142,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane active" id="pane-heatmap">
     <div id="hm-custom-bar" style="display:none;position:fixed;z-index:500;border:1px solid #c8b96e;border-top:none;background:#fffbf0;padding:6px 12px;gap:6px;flex-wrap:wrap;align-items:center;box-shadow:0 4px 12px rgba(0,0,0,.15);border-radius:0 0 6px 6px">
-      <span style="font-size:11px;color:#888;font-weight:600">Custom OG heatmap:</span>
+      <span style="font-size:11px;color:#888;font-weight:600">Search / select OGs:</span>
       <div style="position:relative;display:inline-block">
         <input id="hm-og-search" type="text" placeholder="&#128269; Search OG or gene name&#8230;" autocomplete="off" style="font-size:11px;padding:2px 8px;border:1px solid #ccc;border-radius:3px;width:240px" oninput="hmOGSearchInput(this.value)" onkeydown="hmOGSearchKey(event)">
         <ul id="hm-og-dropdown" style="display:none;position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ccc;border-radius:0 0 4px 4px;list-style:none;margin:0;padding:0;max-height:220px;overflow-y:auto;min-width:300px;box-shadow:0 3px 8px rgba(0,0,0,.12);font-size:11px"></ul>
@@ -186,8 +186,9 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
               <option value="absolute">Absolute count</option>
             </select>
           </label>
-          <input type="text" id="hm-text-search" placeholder="&#128269; Search…" style="font-size:11px;padding:2px 7px;border:1px solid #ccc;border-radius:3px;width:140px" oninput="hmTextFilter=this.value.toLowerCase().trim();drawHeatmap()">
-          <button id="btn-hm-custom" onclick="hmEnterCustom()" style="padding:2px 8px;font-size:11px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer;font-weight:600">&#9998; Custom</button>
+          <button id="btn-hm-custom" onclick="hmEnterCustom()" style="padding:2px 8px;font-size:11px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer;font-weight:600">&#128269; Search OGs</button>
+          <button onclick="downloadHeatmapPNG()" title="Download heatmap as PNG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; PNG</button>
+          <button onclick="downloadHeatmapSVG()" title="Download heatmap as SVG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; SVG</button>
           <details style="margin-left:auto;font-size:10px">
             <summary style="cursor:pointer;color:#888;list-style:none">&#9432; Help</summary>
             <div style="position:absolute;z-index:50;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;box-shadow:0 2px 8px rgba(0,0,0,.12);line-height:1.7;color:#999;min-width:300px;right:10px">
@@ -448,6 +449,7 @@ let showOGName    = true;
 let showRefOrtho  = true;
 let showSupport        = false;   // show internal node support values
 let hideNonHl          = false;   // hide non-highlighted tip labels when hlSet active
+let hmFocusGids        = null;    // Set<gene_id> when navigating from heatmap cell; null otherwise
 let collapsedFraction  = 1.0;     // fraction of proportional space for OG-collapsed tips (0.5–1.0)
 let hmSplitSets   = [];      // array of Set<species> for heatmap row splitting
 let hmSplitLabels = [];      // display label for each split group
@@ -1067,13 +1069,16 @@ function drawHeatmap() {
     // third arg 'sp': species clicked (from cell), undefined for column-header click
     clickHandler=(_ev,_d,sp)=>{
       if(!treeRec) return;
+      // resolve gene IDs directly from detail.ogs before selectTree resets state
+      const det=loadDetail(treeRec.id);
+      const ogGids=(det&&det.ogs&&det.ogs[_d.id])||[];
+      const targetGids=sp?ogGids.filter(g=>getSpeciesPfx(g)===sp):ogGids;
       switchTab("trees"); selectTree(treeRec); renderSidebar("");
-      // always highlight the OG and activate focus/hide mode
-      ogHlQueries=[_d.id]; rebuildOgHlSet();
-      if(sp && _d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); }
-      hideNonHl=true;
-      const chkHide=document.getElementById("chk-hide-nonhl");
-      if(chkHide) chkHide.checked=true;
+      if(targetGids.length){
+        hmFocusGids=new Set(targetGids);
+        hideNonHl=true;
+        const chk=document.getElementById("chk-hide-nonhl"); if(chk) chk.checked=true;
+      }
       setTimeout(focusHighlighted,80);
     };
 
@@ -1096,12 +1101,15 @@ function drawHeatmap() {
     clickHandler=(_ev,d,sp)=>{
       const tRec=hmOGIndex[d.id]?TREE_INDEX.find(t=>t.id===hmOGIndex[d.id].hgId):null;
       if(!tRec) return;
+      const det=loadDetail(tRec.id);
+      const ogGids=(det&&det.ogs&&det.ogs[d.id])||[];
+      const targetGids=sp?ogGids.filter(g=>getSpeciesPfx(g)===sp):ogGids;
       switchTab("trees"); selectTree(tRec); renderSidebar("");
-      ogHlQueries=[d.id]; rebuildOgHlSet();
-      if(sp && d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); }
-      hideNonHl=true;
-      const chkHide=document.getElementById("chk-hide-nonhl");
-      if(chkHide) chkHide.checked=true;
+      if(targetGids.length){
+        hmFocusGids=new Set(targetGids);
+        hideNonHl=true;
+        const chk=document.getElementById("chk-hide-nonhl"); if(chk) chk.checked=true;
+      }
       setTimeout(focusHighlighted,80);
     };
   }
@@ -1364,19 +1372,20 @@ function hmOGSearchInput(val){
   if(!val){ dd.style.display="none"; return; }
   buildOGIndex();
   const q=val.toLowerCase();
-  // OG name matches
+  // OG name matches — exact-start first, then by descending gene count
   const ogHits=Object.keys(hmOGIndex)
     .filter(k=>k.toLowerCase().includes(q))
     .sort((a,b)=>{
       const as=a.toLowerCase().startsWith(q),bs=b.toLowerCase().startsWith(q);
-      return (as===bs)?a.localeCompare(b):(as?-1:1);
+      if(as!==bs) return as?-1:1;
+      return (hmOGIndex[b].total||0)-(hmOGIndex[a].total||0);
     }).slice(0,40).map(og=>({og,matchedGene:null}));
   // gene name matches → resolved to OG
   const seenOGs=new Set(ogHits.map(h=>h.og));
   const geneHits=Object.entries(hmGeneIndex)
     .filter(([g])=>g.toLowerCase().includes(q))
     .filter(([,og])=>!seenOGs.has(og))
-    .sort((a,b)=>a[0].localeCompare(b[0])).slice(0,20)
+    .sort((a,b)=>(hmOGIndex[b[1]]?.total||0)-(hmOGIndex[a[1]]?.total||0)).slice(0,20)
     .map(([g,og])=>{ seenOGs.add(og); return {og,matchedGene:g}; });
   _hmOGSearchHits=[...ogHits,...geneHits];
   _hmOGSearchSel=-1;
@@ -1743,6 +1752,35 @@ document.getElementById("col-tri-fill").addEventListener("input",function(){
   drawCladogram(); drawSpeciesTree();
 });
 
+function downloadHeatmapSVG(){
+  const svgEl=document.querySelector("#heatmap-panel svg");
+  if(!svgEl){ alert("No heatmap to export."); return; }
+  const blob=new Blob([new XMLSerializer().serializeToString(svgEl)],{type:"image/svg+xml;charset=utf-8"});
+  const a=document.createElement("a"); a.download="heatmap.svg"; a.href=URL.createObjectURL(blob);
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function downloadHeatmapPNG(){
+  const svgEl=document.querySelector("#heatmap-panel svg");
+  if(!svgEl){ alert("No heatmap to export."); return; }
+  const svgStr=new XMLSerializer().serializeToString(svgEl);
+  const W=svgEl.viewBox.baseVal.width||svgEl.getBoundingClientRect().width;
+  const H=svgEl.viewBox.baseVal.height||svgEl.getBoundingClientRect().height;
+  const blob=new Blob([svgStr],{type:"image/svg+xml;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const img=new Image();
+  img.onload=function(){
+    const canvas=document.createElement("canvas");
+    canvas.width=W*2; canvas.height=H*2; // 2x for retina
+    const ctx=canvas.getContext("2d");
+    ctx.scale(2,2); ctx.fillStyle="#fff"; ctx.fillRect(0,0,W,H);
+    ctx.drawImage(img,0,0,W,H);
+    URL.revokeObjectURL(url);
+    const a=document.createElement("a"); a.download="heatmap.png";
+    a.href=canvas.toDataURL("image/png"); a.click();
+  };
+  img.src=url;
+}
+
 function downloadNewick(){
   if(!NEWICK_RAW){ alert("No species tree loaded."); return; }
   const a=document.createElement("a");
@@ -1791,6 +1829,7 @@ function selectTree(rec){
   renderOgHlTags();
   cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   colorMode="og";
+  hmFocusGids=null;
 
   // reset tree source toggle
   treeSource="generax";
@@ -2249,9 +2288,14 @@ function renderTree(animate){
     .attr("display",d=>{
       if(!d.data.leaf) return "none";
       if(hideNonHl){
-        const gid3=d.data.gene_id||d.data.name, og3=d.data.og||ogGene2Name[gid3]||"";
-        if(hlSet!==null&&!hlSet.has(d.data.species||"")) return "none";
-        if(ogHlSet!==null&&!ogHlSet.has(og3)) return "none";
+        const gid3=d.data.gene_id||d.data.name;
+        if(hmFocusGids!==null){
+          if(!hmFocusGids.has(gid3)) return "none";
+        } else {
+          const og3=d.data.og||ogGene2Name[gid3]||"";
+          if(hlSet!==null&&!hlSet.has(d.data.species||"")) return "none";
+          if(ogHlSet!==null&&!ogHlSet.has(og3)) return "none";
+        }
       }
       return null;
     })
@@ -2357,25 +2401,28 @@ function collapseAll(){
 }
 
 function focusHighlighted(){
-  if((!hlSet&&!ogHlSet)||!rootNode)return;
+  if((!hmFocusGids&&!hlSet&&!ogHlSet)||!rootNode)return;
   // expand all
   rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
-  // mark nodes that have ≥1 highlighted descendant (post-order)
-  // a leaf passes if it satisfies BOTH active filters (species AND/OR OG)
+  // mark nodes that have ≥1 matching descendant (post-order)
   const hasHl=new Map();
   rootNode.eachAfter(d=>{
     if(d.data.leaf){
-      const sp=d.data.species||"";
-      const gid=d.data.gene_id||d.data.name;
-      const og=d.data.og||ogGene2Name[gid]||"";
-      const spOk=!hlSet||hlSet.has(sp);
-      const ogOk=!ogHlSet||ogHlSet.has(og);
-      hasHl.set(d,spOk&&ogOk);
+      let match;
+      if(hmFocusGids){
+        match=hmFocusGids.has(d.data.gene_id||d.data.name);
+      } else {
+        const sp=d.data.species||"";
+        const gid=d.data.gene_id||d.data.name;
+        const og=d.data.og||ogGene2Name[gid]||"";
+        match=(!hlSet||hlSet.has(sp))&&(!ogHlSet||ogHlSet.has(og));
+      }
+      hasHl.set(d,match);
     } else {
       hasHl.set(d,(d.children||[]).some(c=>hasHl.get(c)));
     }
   });
-  // collapse subtrees with no highlighted leaf
+  // collapse subtrees with no matching leaf
   rootNode.each(d=>{
     if(!d.data.leaf&&d.children&&!hasHl.get(d)){d._children=d.children;d.children=null;}
   });
