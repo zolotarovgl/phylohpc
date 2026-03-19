@@ -800,8 +800,10 @@ function drawSpeciesTree() {
   }
 
   const rowH = 22, topM = 16, leftM = 16, rightM = 260;
-  const W = Math.max(wrap.clientWidth || 700, 500);
+  const W = Math.max(Math.floor((wrap.clientWidth || 900) * 0.5), 420);
   const treeW = W - leftM - rightM;
+  const inPhylo = new Set(ALL_SPECIES);
+  const tipColor = n => inPhylo.has(n.name) ? "#111" : "#bbb";
 
   // ── helpers ──────────────────────────────────────────────────────────
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
@@ -884,11 +886,12 @@ function drawSpeciesTree() {
       const nameH=n._colH/leaves.length;
       leaves.forEach((l,i)=>{
         const ly=n._colY0+i*nameH+nameH/2;
+        const tc=tipColor(l);
         svg.append("circle").attr("cx",x1+4).attr("cy",ly).attr("r",3)
-          .attr("fill",spColor(l.name));
+          .attr("fill",tc);
         svg.append("text").attr("x",x1+10).attr("y",ly).attr("dy","0.35em")
           .attr("font-size",Math.max(7,Math.min(11,nameH-2)))
-          .attr("fill","#333").attr("font-family","monospace").text(l.name);
+          .attr("fill",tc).attr("font-family","monospace").text(l.name);
       });
       return;
     }
@@ -919,10 +922,11 @@ function drawSpeciesTree() {
   function drawLeaves(n){
     if(n._isCol) return;
     if(!n.children){
+      const tc=tipColor(n);
       svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
-        .attr("fill",spColor(n.name)).attr("stroke","#fff").attr("stroke-width",0.5);
+        .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.5);
       svg.append("text").attr("x",sx(n._d)+8).attr("y",n._y).attr("dy","0.35em")
-        .attr("font-size",12).attr("fill","#222").attr("font-family","monospace").text(n.name);
+        .attr("font-size",12).attr("fill",tc).attr("font-family","monospace").text(n.name);
       return;
     }
     n.children.forEach(drawLeaves);
