@@ -565,63 +565,67 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
       </div>
       <div id="main">
         <div id="controls">
+          <!-- group 1: tree operations -->
           <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
           <button class="ctrl-btn" onclick="collapseToOGs()">Collapse to OGs</button>
           <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
+          <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
+          <!-- group 2: view toggles -->
           <button class="ctrl-btn" id="btn-support" onclick="toggleSupport()">Support</button>
-          <button class="ctrl-btn" id="btn-mini-sp" onclick="toggleMiniSpPanel(event)" title="Show species tree with named nodes for clade highlight">&#x1F333; Sp. tree</button>
           <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()">Branch lengths</button>
           <button class="ctrl-btn" onclick="fitTree()">&#x2922; Fit</button>
           <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
           <span id="tree-title"></span>
           <span id="n-ogs-label"></span>
           <span style="flex:1"></span>
+          <!-- group 3: visual options -->
           <label style="font-size:11px;color:#555">Color:
             <select id="color-by" style="font-size:11px;padding:2px 4px;border:1px solid #bbb;border-radius:3px">
               <option value="species">by species</option>
             </select>
           </label>
-          <div id="hl-tags"></div>
-          <input id="hl-search" list="hl-list" placeholder="Species… (Enter to add)">
-          <datalist id="hl-list"></datalist>
-          <button id="hl-clear" onclick="clearHighlight()" title="Clear all species highlights">&#10005;</button>
-          <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
-          <span style="border-left:1px solid #ddd;margin:0 4px;height:16px;align-self:center"></span>
-          <div id="og-hl-tags"></div>
-          <input id="og-hl-search" list="og-hl-list" placeholder="OG name… (Enter to add)" style="width:130px">
-          <datalist id="og-hl-list"></datalist>
-          <button id="og-hl-clear" onclick="clearOgHighlight()" title="Clear OG highlights">&#10005;</button>
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
-            Label size:
-            <input type="range" id="tip-font-slider" min="6" max="24" step="1" value="11" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            Label:
+            <input type="range" id="tip-font-slider" min="6" max="24" step="1" value="11" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="tip-font-val" style="width:20px;text-align:right">11</span>px
           </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px;margin-left:8px">
-            Line width:
-            <input type="range" id="line-width-slider" min="1" max="8" step="0.5" value="1.3" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Lines:
+            <input type="range" id="line-width-slider" min="1" max="8" step="0.5" value="1.3" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="line-width-val" style="width:20px;text-align:right">1.3</span>px
           </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px;margin-left:8px">
-            Tree height:
-            <input type="range" id="tree-height-slider" min="0.5" max="5" step="0.1" value="1" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Height:
+            <input type="range" id="tree-height-slider" min="0.5" max="5" step="0.1" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="tree-height-val" style="width:24px;text-align:right">1</span>&times;
           </label>
-          <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:8px;margin-left:4px">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Collapsed:
+            <input type="range" id="collapsed-frac-slider" min="0.1" max="1" step="0.05" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+            <span id="collapsed-frac-val" style="width:28px;text-align:right">1.0</span>
+          </label>
+          <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
+          <!-- group 4: show checkboxes -->
+          <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:6px">
             Show:
-            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-geneid" checked> gene&nbsp;ID</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-geneid" checked> ID</label>
             <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-og" checked> OG</label>
-            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-ref" checked> ref&nbsp;ortholog</label>
-            <span style="margin-left:6px;border-left:1px solid #ddd;padding-left:8px">
-              <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
-            </span>
-            <span style="margin-left:6px;border-left:1px solid #ddd;padding-left:8px;display:flex;align-items:center;gap:4px">
-              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#555">
-                Collapsed size:
-                <input type="range" id="collapsed-frac-slider" min="0.1" max="1" step="0.05" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
-                <span id="collapsed-frac-val" style="width:28px;text-align:right">1.0</span>
-              </label>
-            </span>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-ref" checked> ref</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
           </span>
+          <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
+          <!-- group 5: species + OG highlight + species tree -->
+          <div id="hl-tags"></div>
+          <input id="hl-search" list="hl-list" placeholder="Species… (Enter)">
+          <datalist id="hl-list"></datalist>
+          <button id="hl-clear" onclick="clearHighlight()" title="Clear all species highlights">&#10005;</button>
+          <button class="ctrl-btn" id="btn-mini-sp" onclick="toggleMiniSpPanel(event)" title="Show species tree — click a named node to highlight that clade">&#x1F333; Sp. tree</button>
+          <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
+          <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
+          <div id="og-hl-tags"></div>
+          <input id="og-hl-search" list="og-hl-list" placeholder="OG name… (Enter)" style="width:120px">
+          <datalist id="og-hl-list"></datalist>
+          <button id="og-hl-clear" onclick="clearOgHighlight()" title="Clear OG highlights">&#10005;</button>
         </div>
         <div id="tree-wrap">
           <svg id="tree-svg"></svg>
@@ -655,6 +659,13 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <div id="mini-sp-svg-wrap"></div>
 </div>
 <div id="tooltip"></div>
+<div id="collapse-choice-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:250;display:none;gap:6px;flex-direction:column">
+  <div style="font-size:10px;color:#888;margin-bottom:2px">Collapse as:</div>
+  <div style="display:flex;gap:6px">
+    <button id="ccp-triangle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a filled triangle (proportional size)">&#x25BD; Triangle</button>
+    <button id="ccp-circle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a circle with leaf count">&#x25EF; Circle</button>
+  </div>
+</div>
 <div id="collapsed-popup">
   <div class="cp-title">Collapsed node</div>
   <div class="cp-row"><span>Name:</span><input id="cp-name" type="text"></div>
@@ -877,6 +888,36 @@ function collectLeafGenes(children) {
   })(children);
   return genes;
 }
+
+// ── Collapse-style choice popup ────────────────────────────────────────────
+(function(){
+  const pop=document.getElementById("collapse-choice-popup");
+  let _ccpNode=null, _ccpTimer=null;
+  function hide(){ pop.style.display="none"; _ccpNode=null; }
+  function cancelHide(){ clearTimeout(_ccpTimer); }
+  function schedHide(){ _ccpTimer=setTimeout(hide,200); }
+  pop.addEventListener("mouseenter",cancelHide);
+  pop.addEventListener("mouseleave",schedHide);
+  document.getElementById("ccp-triangle").addEventListener("click",()=>{
+    if(!_ccpNode) return; hide();
+    _ccpNode._children=_ccpNode.children; _ccpNode.children=null;
+    _ccpNode._isOgCol=true; renderTree(true);
+  });
+  document.getElementById("ccp-circle").addEventListener("click",()=>{
+    if(!_ccpNode) return; hide();
+    _ccpNode._children=_ccpNode.children; _ccpNode.children=null;
+    _ccpNode._isOgCol=false; renderTree(true);
+  });
+  window.showCollapseChoicePopup=function(event,d){
+    _ccpNode=d; cancelHide();
+    pop.style.display="flex";
+    const x=Math.min(event.clientX+8, window.innerWidth-pop.offsetWidth-8);
+    const y=Math.min(event.clientY+8, window.innerHeight-pop.offsetHeight-8);
+    pop.style.left=Math.max(4,x)+"px"; pop.style.top=Math.max(4,y)+"px";
+  };
+  // close when clicking elsewhere
+  document.addEventListener("click",(e)=>{ if(!pop.contains(e.target)) hide(); });
+})();
 
 function showCollapsedPopup(event, d) {
   event.stopPropagation();
@@ -2740,10 +2781,14 @@ function renderTree(animate){
         return;
       }
       event.stopPropagation();
-      if(d._children){ d.children=d._children; d._children=null; renderTree(true); }
-      else if(d.children){d._children=d.children;d.children=null; renderTree(true);}
+      if(d._children){ d.children=d._children; d._children=null; d._isOgCol=false; renderTree(true); hideTip(); }
+      else if(d.children){ showCollapseChoicePopup(event,d); }
     })
-    .on("mouseover",showTip).on("mousemove",moveTip).on("mouseout",hideTip);
+    .on("mouseover",(event,d)=>{
+      if(!d.data.leaf&&d.children) showTip(event,'<b>'+(d.data.name||"internal")+'</b><div style="font-size:9px;color:#aaa;margin-top:3px">click to choose collapse style</div>');
+      else showTip(event,d);
+    })
+    .on("mousemove",moveTip).on("mouseout",hideTip);
 
   // OG-collapse triangle (only when _isOgCol)
   nodeSel.select(".col-tri")
@@ -2751,7 +2796,10 @@ function renderTree(animate){
     .attr("points",d=>{
       if(!d._children||!d._isOgCol) return "";
       const nL=countAllLeaves(d);
-      const halfH=Math.max(rowH*0.6, nL*rowH/2);
+      // Half-height uses effRow (= rowH * treeHeightMult) so the triangle fills
+      // exactly the proportional space assigned to this node; capped at 48% to
+      // leave a 2px gap on each side between adjacent triangles.
+      const halfH=Math.max(rowH*0.45, nL*effRow*collapsedFraction*0.48);
       return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
     })
     .attr("fill",d=>{
