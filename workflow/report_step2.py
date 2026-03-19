@@ -1481,8 +1481,6 @@ document.getElementById("color-by").addEventListener("change",function(){
   const v=this.value;
   if(v==="species"){
     colorMode="species"; cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={};
-    // expand so leaf colours are visible
-    if(rootNode) rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
   } else if(v==="og"){
     colorMode="og"; cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={};
     rebuildOgColors();
@@ -1500,8 +1498,6 @@ document.getElementById("color-by").addEventListener("change",function(){
       cladeSp2Color[sp]=cladeGrpColor[grp]||"#ccc";
       cladeSp2Group[sp]=grp;
     }
-    // expand so leaf colours are visible
-    if(rootNode) rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
   }
   renderTree(true);
 });
