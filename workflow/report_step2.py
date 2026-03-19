@@ -577,6 +577,7 @@ let tipFontSize   = null;        // null = auto; number = user override (px)
 let showGeneId    = true;        // tip label parts
 let showOGName    = true;
 let showRefOrtho  = true;
+const spCollapsed = new Set();   // node _ids collapsed in species tree
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
 
 function leafColor(sp) {
@@ -799,76 +800,134 @@ function drawSpeciesTree() {
   }
 
   const rowH = 22, topM = 16, leftM = 16, rightM = 260;
-  const allLeaves = SPECIES_ORDER;
-  const H = allLeaves.length * rowH + topM + 16;
   const W = Math.max(wrap.clientWidth || 700, 500);
   const treeW = W - leftM - rightM;
 
-  const svg = d3.select(wrap).append("svg").attr("width", W).attr("height", H);
-
+  // ── helpers ──────────────────────────────────────────────────────────
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
-  // prune to leaves actually in SPECIES_ORDER
   function prune(n){
-    if(!n.children) return allLeaves.includes(n.name)?n:null;
+    if(!n.children) return SPECIES_ORDER.includes(n.name)?n:null;
     const k=n.children.map(prune).filter(Boolean);
     if(!k.length) return null;
     if(k.length===1) return k[0];
     n.children=k; return n;
   }
+  function countLeaves(n){ return n.children?n.children.reduce((s,c)=>s+countLeaves(c),0):1; }
+  function getLeaves(n){ return n.children?n.children.flatMap(getLeaves):[n]; }
+  function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
+
   const tree = prune(clone(SP_TREE_DATA));
   if(!tree){ wrap.innerHTML='<p style="padding:20px;color:#888">Species tree is empty.</p>'; return; }
 
-  const leafY={};
-  allLeaves.forEach((s,i)=>{ leafY[s]=topM+i*rowH+rowH/2; });
-
-  function assignY(n){ if(!n.children){n._y=leafY[n.name]||0;return n._y;} const ys=n.children.map(assignY); n._y=d3.mean(ys);return n._y; }
-  function assignX(n,d=0){ n._d=d; if(n.children) n.children.forEach(c=>assignX(c,d+1)); }
-  function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
-
-  assignY(tree); assignX(tree);
-  const nodes = flat(tree);
-  const maxD = d3.max(nodes,d=>d._d)||1;
-  nodes.forEach(n=>{ if(!n.children) n._d=maxD; });
+  // ── assign stable IDs and depths ──────────────────────────────────────
+  let _uid=0;
+  function assignId(n,d=0){ n._id=String(_uid++); n._d=d; if(n.children) n.children.forEach(c=>assignId(c,d+1)); }
+  assignId(tree);
+  const allNodes = flat(tree);
+  const maxD = d3.max(allNodes,n=>n._d)||1;
+  allNodes.forEach(n=>{ if(!n.children) n._d=maxD; }); // align tips
   const sx = d => leftM + (d/maxD)*treeW;
 
-  // branches
-  function drawB(n){
-    if(!n.children) return;
+  // ── layout: assign _y accounting for collapsed blocks ─────────────────
+  function layout(n, yStart){
+    if(spCollapsed.has(n._id)){
+      n._colH = countLeaves(n)*rowH;
+      n._colY0 = yStart;
+      n._y = yStart + n._colH/2;
+      n._isCol = true;
+      return yStart + n._colH;
+    }
+    n._isCol = false;
+    if(!n.children){ n._y = yStart + rowH/2; return yStart + rowH; }
+    let y = yStart;
+    for(const c of n.children) y = layout(c, y);
+    n._y = d3.mean(n.children.map(c=>c._y));
+    return y;
+  }
+  const totalH = layout(tree, topM);
+  const svg = d3.select(wrap).append("svg").attr("width",W).attr("height",totalH+16);
+
+  // ── branches (skip into collapsed subtrees) ───────────────────────────
+  function drawBranches(n){
+    if(n._isCol||!n.children) return;
     const ys=n.children.map(c=>c._y);
     svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d))
-      .attr("y1",d3.min(ys)).attr("y2",d3.max(ys))
-      .attr("stroke","#999").attr("stroke-width",1.5);
+      .attr("y1",d3.min(ys)).attr("y2",d3.max(ys)).attr("stroke","#999").attr("stroke-width",1.5);
     n.children.forEach(c=>{
       svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(c._d))
-        .attr("y1",c._y).attr("y2",c._y)
-        .attr("stroke","#999").attr("stroke-width",1.5);
-      drawB(c);
+        .attr("y1",c._y).attr("y2",c._y).attr("stroke","#999").attr("stroke-width",1.5);
+      drawBranches(c);
     });
   }
-  drawB(tree);
+  drawBranches(tree);
 
-  // internal node names
-  nodes.forEach(n=>{
-    if(n.children && n.name){
-      svg.append("text")
-        .attr("x",sx(n._d)+4).attr("y",n._y-4)
-        .attr("font-size",9).attr("fill","#777").attr("font-style","italic")
-        .text(n.name);
+  // ── collapsed triangles ───────────────────────────────────────────────
+  function drawCollapsed(n){
+    if(!n.children) return;
+    if(n._isCol){
+      const x0=sx(n._d), x1=sx(maxD);
+      const y0=n._colY0, y1=n._colY0+n._colH, yM=n._y;
+      const leaves=getLeaves(n);
+      // horizontal branch from parent edge to apex already drawn; draw triangle
+      svg.append("polygon")
+        .attr("points",`${x0},${yM} ${x1},${y0} ${x1},${y1}`)
+        .attr("fill","rgba(90,130,170,0.18)").attr("stroke","#7a9ab8").attr("stroke-width",1)
+        .style("cursor","pointer")
+        .on("click",()=>{ spCollapsed.delete(n._id); drawSpeciesTree(); });
+      // node name badge at apex
+      if(n.name){
+        svg.append("text").attr("x",x0+4).attr("y",yM-3)
+          .attr("font-size",8).attr("fill","#5a7090").attr("font-style","italic")
+          .text(n.name+" ["+leaves.length+"]");
+      }
+      // species names at triangle base
+      const nameH=n._colH/leaves.length;
+      leaves.forEach((l,i)=>{
+        const ly=n._colY0+i*nameH+nameH/2;
+        svg.append("circle").attr("cx",x1+4).attr("cy",ly).attr("r",3)
+          .attr("fill",spColor(l.name));
+        svg.append("text").attr("x",x1+10).attr("y",ly).attr("dy","0.35em")
+          .attr("font-size",Math.max(7,Math.min(11,nameH-2)))
+          .attr("fill","#333").attr("font-family","monospace").text(l.name);
+      });
+      return;
     }
-  });
+    n.children.forEach(drawCollapsed);
+  }
+  drawCollapsed(tree);
 
-  // leaf dots + labels
-  nodes.forEach(n=>{
+  // ── internal nodes (click to collapse) ───────────────────────────────
+  function drawInternals(n){
+    if(n._isCol||!n.children) return;
+    if(n.name){
+      svg.append("text").attr("x",sx(n._d)+6).attr("y",n._y-4)
+        .attr("font-size",9).attr("fill","#777").attr("font-style","italic").text(n.name);
+    }
+    // clickable node dot — only non-root internal nodes
+    if(n._id!==tree._id){
+      svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
+        .attr("fill","#fff").attr("stroke","#999").attr("stroke-width",1.2)
+        .style("cursor","pointer")
+        .attr("title","Click to collapse")
+        .on("click",()=>{ spCollapsed.add(n._id); drawSpeciesTree(); });
+    }
+    n.children.forEach(drawInternals);
+  }
+  drawInternals(tree);
+
+  // ── leaf tips ─────────────────────────────────────────────────────────
+  function drawLeaves(n){
+    if(n._isCol) return;
     if(!n.children){
-      svg.append("circle")
-        .attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
+      svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
         .attr("fill",spColor(n.name)).attr("stroke","#fff").attr("stroke-width",0.5);
-      svg.append("text")
-        .attr("x",sx(n._d)+8).attr("y",n._y).attr("dy","0.35em")
-        .attr("font-size",12).attr("fill","#222").attr("font-family","monospace")
-        .text(n.name);
+      svg.append("text").attr("x",sx(n._d)+8).attr("y",n._y).attr("dy","0.35em")
+        .attr("font-size",12).attr("fill","#222").attr("font-family","monospace").text(n.name);
+      return;
     }
-  });
+    n.children.forEach(drawLeaves);
+  }
+  drawLeaves(tree);
 }
 
 function drawHeatmap() {
@@ -1168,7 +1227,7 @@ document.getElementById("hl-search").addEventListener("change",function(){
 document.getElementById("tip-font-slider").addEventListener("input",function(){
   tipFontSize=+this.value;
   document.getElementById("tip-font-val").textContent=this.value;
-  if(currentIndex) renderTree();
+  if(currentIndex){ renderTree(); requestAnimationFrame(fitTree); }
 });
 
 document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
