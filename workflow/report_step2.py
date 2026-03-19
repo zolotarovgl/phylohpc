@@ -1911,10 +1911,11 @@ function renderTree(animate){
     const wts = vLeaves.map(d => (d._children && d._isOgCol) ? countAllLeaves(d) : 1);
     const anyCollapsed = wts.some(w => w > 1);
     if (anyCollapsed) {
-      let cy = rowH / 2;
+      const effRow = rowH * treeHeightMult;   // apply height multiplier here too
+      let cy = effRow / 2;
       vLeaves.forEach((d, i) => {
-        d.x = cy + wts[i] * rowH / 2;
-        cy += wts[i] * rowH;
+        d.x = cy + wts[i] * effRow / 2;
+        cy += wts[i] * effRow;
       });
       // fix internal node positions as midpoint of children (post-order)
       rootNode.eachAfter(d => {
@@ -2081,8 +2082,8 @@ function renderTree(animate){
     .attr("dy","0.35em")
     .attr("text-anchor",d=>d._children?"start":"end")
     .attr("font-size",tipFontSVG())
-    .attr("display",d=>(!d.data.leaf&&(isOGNode(d)||d._children))?null:"none")
-    .text(d=>d._children?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
+    .attr("display",d=>(!d.data.leaf&&!d._children&&isOGNode(d))?null:"none")
+    .text(d=>(!d.data.leaf&&!d._children&&isOGNode(d))?d.data.name:"");
   applyTipFontSize();
 }
 
