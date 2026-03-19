@@ -432,9 +432,17 @@ let hmActiveClass  = null;
 let hmActiveFamily = null;
 let hmActiveHG     = null;   // id string from HG_DATA
 let hmActiveHGRec  = null;   // full HG_DATA record (for fallback lookup)
-let hmCustomOGs    = [];     // user-selected OG names for custom view
+let hmCustomOGs    = [];     // user-selected individual OG names for custom view
+let hmCustomGroups = [];     // bulk selections: [{type:"class"|"family", key, label, ogs:[...]}]
+let hmColOrderOverride = null; // drag-reorder: array of column ids overriding natural order
 let hmOGIndex      = null;   // lazy: {og_name → {hgId,family,cls,total,species_counts}}
 let hmGeneIndex    = null;   // lazy: {gene_id → og_name}
+
+function getEffectiveCustomOGs(){
+  const all=new Set(hmCustomOGs);
+  hmCustomGroups.forEach(g=>g.ogs.forEach(og=>all.add(og)));
+  return [...all];
+}
 
 function getSpeciesPfx(geneId){
   const g=(geneId||"").split("|")[0].trim();
@@ -1009,19 +1017,20 @@ function drawHeatmap() {
 
   } else { // custom
     buildOGIndex();
-    if(!hmCustomOGs.length){
+    const effOGs=getEffectiveCustomOGs();
+    if(!effOGs.length){
       document.getElementById("heatmap-panel").innerHTML=
         '<p style="padding:30px 20px;color:#aaa;font-size:13px">'+
         'Use the search box above to add orthogroups to the custom view.<br>'+
-        'You can search by OG name or paste a gene name to find its OG.</p>';
+        'You can search by OG name, gene name, class or homology group.</p>';
       return;
     }
-    data=hmCustomOGs.map(og=>{
+    data=effOGs.map(og=>{
       const r=hmOGIndex[og]||{};
       return {id:og,species_counts:r.species_counts||{},total:r.total||0,family:r.family||"",cls:r.cls||""};
     });
     back.style.display="none";
-    crumb.textContent="Custom selection ("+hmCustomOGs.length+" OG"+(hmCustomOGs.length!==1?"s":"")+")";
+    crumb.textContent="Custom selection ("+effOGs.length+" OG"+(effOGs.length!==1?"s":"")+")";
     colLabel=d=>d.id;
     clickHandler=(_ev,d,sp)=>{
       const tRec=hmOGIndex[d.id]?TREE_INDEX.find(t=>t.id===hmOGIndex[d.id].hgId):null;
@@ -1037,6 +1046,15 @@ function drawHeatmap() {
       }
       setTimeout(focusHighlighted,80);
     };
+  }
+
+  // ── apply drag-reorder override ────────────────────────────────────────
+  if(hmColOrderOverride && hmColOrderOverride.length){
+    const byId=new Map(data.map(d=>[d.id,d]));
+    const reordered=hmColOrderOverride.filter(id=>byId.has(id)).map(id=>byId.get(id));
+    const inOv=new Set(hmColOrderOverride);
+    data.forEach(d=>{ if(!inOv.has(d.id)) reordered.push(d); });
+    data=reordered;
   }
 
   // ── apply free-text search filter (browse modes only) ─────────────────
@@ -1199,13 +1217,48 @@ function drawHeatmap() {
       .text(sp);
   });
 
-  // column headers
+  // column headers — drag to reorder, short-click to navigate
+  // Drag ghost + insert marker (rendered above everything else at end of drag)
+  const _dragGhost=svg.append("rect").attr("y",0).attr("height",svgH-28)
+    .attr("fill","rgba(74,144,217,0.13)").attr("stroke","#4a90d9").attr("stroke-width",1)
+    .attr("opacity",0).attr("pointer-events","none");
+  const _dragMarker=svg.append("line").attr("y1",0).attr("y2",svgH-28)
+    .attr("stroke","#4a90d9").attr("stroke-width",2.5)
+    .attr("opacity",0).attr("pointer-events","none");
+  let _hmDragIdx=null,_hmDragTgt=null,_hmDragMoved=false,_hmDragSX=0;
   svg.selectAll("text.hm-col").data(data).enter().append("text").attr("class","hm-col")
     .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W+cW/2},${hmTM-6}) rotate(-${hmColRotation})`)
-    .attr("font-size",hmColFontSize).style("cursor","pointer")
+    .attr("font-size",hmColFontSize).style("cursor","grab")
     .attr("text-anchor","start")
     .text(colLabelTrunc)
-    .on("click",clickHandler);
+    .call(d3.drag()
+      .on("start",(event,d)=>{
+        _hmDragIdx=data.findIndex(r=>r.id===d.id);
+        _hmDragMoved=false; _hmDragSX=event.x;
+        _dragGhost.attr("x",_hmDragIdx*cW+ROW_LABEL_W).attr("width",cW).attr("opacity",1);
+        svg.style("cursor","grabbing");
+      })
+      .on("drag",(event)=>{
+        if(Math.abs(event.x-_hmDragSX)>5) _hmDragMoved=true;
+        if(!_hmDragMoved) return;
+        const tgt=Math.max(0,Math.min(data.length,Math.round((event.x-ROW_LABEL_W)/cW)));
+        _hmDragTgt=tgt;
+        _dragMarker.attr("x1",tgt*cW+ROW_LABEL_W).attr("x2",tgt*cW+ROW_LABEL_W).attr("opacity",1);
+      })
+      .on("end",(event,d)=>{
+        _dragGhost.attr("opacity",0); _dragMarker.attr("opacity",0);
+        svg.style("cursor","");
+        if(!_hmDragMoved){
+          clickHandler(event,d,null);
+        } else if(_hmDragIdx!==null&&_hmDragTgt!==null&&_hmDragTgt!==_hmDragIdx&&_hmDragTgt!==_hmDragIdx+1){
+          const nd=[...data]; const [mv]=nd.splice(_hmDragIdx,1);
+          const ins=_hmDragTgt>_hmDragIdx?_hmDragTgt-1:_hmDragTgt;
+          nd.splice(ins,0,mv);
+          hmColOrderOverride=nd.map(r=>r.id);
+          drawHeatmap();
+        }
+        _hmDragIdx=null; _hmDragTgt=null;
+      }));
 
   // ── column-sum bar chart (below cells) ───────────────────────────────────
   const colTotals=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
@@ -1281,13 +1334,15 @@ function hmEnterCustom(){
 function hmExitCustom(){
   hmViewMode="class"; hmActiveClass=null; hmActiveFamily=null;
   hmActiveHG=null; hmActiveHGRec=null;
+  hmColOrderOverride=null;
   document.getElementById("hm-custom-bar").style.display="none";
   document.getElementById("hm-og-dropdown").style.display="none";
   drawHeatmap();
 }
 window.addEventListener("resize",_positionCustomBar);
 function hmCustomClear(){
-  hmCustomOGs=[]; renderCustomChips(); drawHeatmap();
+  hmCustomOGs=[]; hmCustomGroups=[]; hmColOrderOverride=null;
+  renderCustomChips(); drawHeatmap();
 }
 
 let _hmOGSearchHits=[], _hmOGSearchSel=-1;
@@ -1298,32 +1353,61 @@ function hmOGSearchInput(val){
   if(!val){ dd.style.display="none"; return; }
   buildOGIndex();
   const q=val.toLowerCase();
-  // OG name matches — exact-start first, then by descending gene count
+
+  // ── group hits: class and family that have OGs matching the query ──────
+  const clsMap=new Map(), famMap=new Map();
+  for(const [og,r] of Object.entries(hmOGIndex)){
+    if(og.toLowerCase().includes(q)||r.cls.toLowerCase().includes(q)){
+      if(r.cls){ if(!clsMap.has(r.cls)) clsMap.set(r.cls,[]); clsMap.get(r.cls).push(og); }
+    }
+    if(og.toLowerCase().includes(q)||r.family.toLowerCase().includes(q)){
+      if(r.family){ if(!famMap.has(r.family)) famMap.set(r.family,[]); famMap.get(r.family).push(og); }
+    }
+  }
+  const effOGs=new Set(getEffectiveCustomOGs());
+  const clsHits=[...clsMap.entries()]
+    .filter(([k])=>k.toLowerCase().includes(q))
+    .sort((a,b)=>b[1].length-a[1].length).slice(0,8)
+    .map(([k,ogs])=>({type:"group",groupType:"class",key:k,ogs,count:ogs.length}));
+  const famHits=[...famMap.entries()]
+    .filter(([k])=>k.toLowerCase().includes(q))
+    .sort((a,b)=>b[1].length-a[1].length).slice(0,8)
+    .map(([k,ogs])=>({type:"group",groupType:"family",key:k,ogs,count:ogs.length}));
+
+  // ── OG name matches — exact-start first, then by descending gene count ─
   const ogHits=Object.keys(hmOGIndex)
     .filter(k=>k.toLowerCase().includes(q))
     .sort((a,b)=>{
       const as=a.toLowerCase().startsWith(q),bs=b.toLowerCase().startsWith(q);
       if(as!==bs) return as?-1:1;
       return (hmOGIndex[b].total||0)-(hmOGIndex[a].total||0);
-    }).slice(0,40).map(og=>({og,matchedGene:null}));
-  // gene name matches → resolved to OG
+    }).slice(0,40).map(og=>({type:"og",og,matchedGene:null}));
+  // ── gene name matches → resolved to OG ─────────────────────────────────
   const seenOGs=new Set(ogHits.map(h=>h.og));
   const geneHits=Object.entries(hmGeneIndex)
     .filter(([g])=>g.toLowerCase().includes(q))
     .filter(([,og])=>!seenOGs.has(og))
     .sort((a,b)=>(hmOGIndex[b[1]]?.total||0)-(hmOGIndex[a[1]]?.total||0)).slice(0,20)
-    .map(([g,og])=>{ seenOGs.add(og); return {og,matchedGene:g}; });
-  _hmOGSearchHits=[...ogHits,...geneHits];
+    .map(([g,og])=>{ seenOGs.add(og); return {type:"og",og,matchedGene:g}; });
+
+  _hmOGSearchHits=[...clsHits,...famHits,...ogHits,...geneHits];
   _hmOGSearchSel=-1;
   dd.innerHTML=_hmOGSearchHits.map((hit,i)=>{
+    if(hit.type==="group"){
+      const alreadyAll=hit.ogs.every(og=>effOGs.has(og));
+      const existsGroup=hmCustomGroups.some(g=>g.groupType===hit.groupType&&g.key===hit.key);
+      const done=alreadyAll||existsGroup;
+      const icon=hit.groupType==="class"?"\uD83D\uDCC2":"\uD83E\uDDF9";
+      const label=`${icon} <b>${hit.key}</b><span style="color:#aaa;font-size:10px"> \u00b7 ${hit.groupType} \u00b7 ${hit.count} OGs</span>`;
+      return `<li data-i="${i}" style="padding:3px 10px;cursor:pointer;background:${done?"#e8f5e9":"#f0f6ff"};color:${done?"#2e7d32":"#1a4a7a"}" onmousedown="hmOGSearchSelect(${i})">${label}${done?`<span style="color:#27ae60;float:right">&#10003;</span>`:""}</li>`;
+    }
     const {og,matchedGene}=hit;
     const r=hmOGIndex[og]||{family:"",total:0};
-    const already=hmCustomOGs.includes(og);
-    const escapedOg=og.replace(/\\\\/g,"\\\\\\\\").replace(/'/g,"\\\\'");
+    const already=effOGs.has(og);
     const label=matchedGene
       ? `<span style="color:#888;font-size:10px">gene</span> <b>${matchedGene}</b><span style="color:#aaa;font-size:10px"> \u2192 ${og} \u00b7 ${r.family}</span>`
       : `<b>${og}</b><span style="color:#aaa;font-size:10px"> \u00b7 ${r.family} \u00b7 ${r.total} genes</span>`;
-    return `<li data-i="${i}" style="padding:3px 10px;cursor:pointer;background:${already?"#e8f5e9":"#fff"};color:${already?"#2e7d32":"#222"}" onmousedown="hmOGSearchAdd('${escapedOg}')">${label}${already?`<span style="color:#27ae60;float:right">&#10003;</span>`:""}</li>`;
+    return `<li data-i="${i}" style="padding:3px 10px;cursor:pointer;background:${already?"#e8f5e9":"#fff"};color:${already?"#2e7d32":"#222"}" onmousedown="hmOGSearchSelect(${i})">${label}${already?`<span style="color:#27ae60;float:right">&#10003;</span>`:""}</li>`;
   }).join("")||`<li style="padding:4px 10px;color:#aaa">No matches</li>`;
   dd.style.display="block";
 }
@@ -1334,20 +1418,36 @@ function hmOGSearchKey(ev){
   if(ev.key==="ArrowDown"){
     ev.preventDefault();
     _hmOGSearchSel=Math.min(_hmOGSearchSel+1,items.length-1);
-    items.forEach((li,i)=>li.style.background=i===_hmOGSearchSel?"#e3f0ff":(hmCustomOGs.includes((_hmOGSearchHits[i]||{}).og)?"#e8f5e9":"#fff"));
+    items.forEach((li,i)=>li.style.background=i===_hmOGSearchSel?"#e3f0ff":li.dataset.orig||"#fff");
   } else if(ev.key==="ArrowUp"){
     ev.preventDefault();
     _hmOGSearchSel=Math.max(_hmOGSearchSel-1,0);
-    items.forEach((li,i)=>li.style.background=i===_hmOGSearchSel?"#e3f0ff":(hmCustomOGs.includes((_hmOGSearchHits[i]||{}).og)?"#e8f5e9":"#fff"));
+    items.forEach((li,i)=>li.style.background=i===_hmOGSearchSel?"#e3f0ff":li.dataset.orig||"#fff");
   } else if(ev.key==="Enter"){
     ev.preventDefault();
     const idx=_hmOGSearchSel>=0?_hmOGSearchSel:(_hmOGSearchHits.length===1?0:-1);
-    if(idx>=0) hmOGSearchAdd(_hmOGSearchHits[idx].og);
+    if(idx>=0) hmOGSearchSelect(idx);
   } else if(ev.key==="Escape"){
     dd.style.display="none";
   }
 }
 
+function hmOGSearchSelect(i){
+  const hit=_hmOGSearchHits[i];
+  if(!hit) return;
+  if(hit.type==="group"){
+    if(!hmCustomGroups.some(g=>g.groupType===hit.groupType&&g.key===hit.key))
+      hmCustomGroups.push({groupType:hit.groupType,key:hit.key,label:hit.key,ogs:hit.ogs});
+  } else {
+    if(!hmCustomOGs.includes(hit.og)) hmCustomOGs.push(hit.og);
+  }
+  const inp=document.getElementById("hm-og-search");
+  inp.value=""; inp.focus();
+  document.getElementById("hm-og-dropdown").style.display="none";
+  renderCustomChips(); drawHeatmap();
+}
+
+// keep backward compat (called by old onmousedown attributes still in the page after first load)
 function hmOGSearchAdd(og){
   if(!hmCustomOGs.includes(og)) hmCustomOGs.push(og);
   const inp=document.getElementById("hm-og-search");
@@ -1357,7 +1457,12 @@ function hmOGSearchAdd(og){
 }
 
 function renderCustomChips(){
-  document.getElementById("hm-custom-chips").innerHTML=hmCustomOGs.map((og,i)=>`<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:10px;background:#4a90d9;color:#fff;font-size:10px">${og}<span style="cursor:pointer;margin-left:2px;opacity:.8" onclick="hmCustomOGs.splice(${i},1);renderCustomChips();drawHeatmap()">&#10005;</span></span>`).join("");
+  const grpChips=hmCustomGroups.map((g,i)=>{
+    const icon=g.groupType==="class"?"\uD83D\uDCC2":"\uD83E\uDDF9";
+    return `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:10px;background:#2c6e9e;color:#fff;font-size:10px">${icon} ${g.label} <span style="font-weight:normal;opacity:.8">(${g.ogs.length})</span><span style="cursor:pointer;margin-left:2px;opacity:.8" onclick="hmCustomGroups.splice(${i},1);renderCustomChips();drawHeatmap()">&#10005;</span></span>`;
+  }).join("");
+  const ogChips=hmCustomOGs.map((og,i)=>`<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:10px;background:#4a90d9;color:#fff;font-size:10px">${og}<span style="cursor:pointer;margin-left:2px;opacity:.8" onclick="hmCustomOGs.splice(${i},1);renderCustomChips();drawHeatmap()">&#10005;</span></span>`).join("");
+  document.getElementById("hm-custom-chips").innerHTML=grpChips+ogChips;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
