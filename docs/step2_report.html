@@ -36,7 +36,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 /* ── Heatmap pane ── */
 #pane-heatmap{flex-direction:row}
 #hm-layout{display:flex;flex:1;overflow:hidden}
-#tree-panel{width:200px;overflow-y:auto;border-right:1px solid #ccc;background:#fff;flex-shrink:0}
+#hm-right{display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0}
+#tree-panel{overflow-y:auto;background:#fff}
 #heatmap-panel{flex:1;overflow:auto;background:#fff}
 .hm-col{font-size:9px;cursor:pointer}
 .hm-col:hover{font-weight:700}
@@ -89,14 +90,19 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .link{fill:none;stroke:#d5d5d5}
 .node-g circle{cursor:pointer;transition:r .12s,fill .12s}
 .node-g circle:hover{stroke-width:2.5px !important}
-.col-tri{fill:rgba(90,130,170,0.13);stroke:#222;stroke-width:1px;cursor:pointer}
-.col-tri:hover{fill:rgba(90,130,170,0.25)}
+.col-tri{fill:#cccccc;stroke:#222;stroke-width:1px;cursor:pointer}
+.col-tri:hover{filter:brightness(0.88)}
 .leaf-label{pointer-events:none;font-family:monospace}
 .og-label{fill:#b5371f;pointer-events:none}
 .ctrl-btn.active-btn{background:#d5f5e3;border-color:#1abc9c;color:#1a6b4a}
 .scale-bar-g line{stroke:#999;stroke-width:1.5px}
 .scale-bar-g text{font-size:9px;fill:#888;text-anchor:middle}
 
+/* mini species tree floating panel */
+#mini-sp-panel{position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;box-shadow:0 3px 12px rgba(0,0,0,.18);z-index:300;overflow:auto;max-width:380px;max-height:60vh;padding:6px}
+#mini-sp-panel .msp-title{font-size:10px;font-weight:700;color:#555;margin-bottom:4px;padding:0 2px}
+#mini-sp-panel svg text.msp-node-lbl{cursor:pointer;fill:#2980b9;font-size:10px}
+#mini-sp-panel svg text.msp-node-lbl:hover{fill:#e74c3c}
 /* tooltip */
 #tooltip{position:fixed;display:none;pointer-events:none;background:rgba(255,255,255,.97);border:1px solid #bbb;border-radius:5px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:100;max-width:260px}
 /* collapsed-node popup */
@@ -121,9 +127,6 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <button class="btn" id="hm-back" style="display:none" onclick="hmBack()">&#8592; Back</button>
   <span id="hm-breadcrumb" style="font-size:11px"></span>
   <span id="tree-count" style="font-size:11px;color:#95a5a6;display:none"></span>
-  <label style="margin-left:auto">Prefix:
-    <select id="prefixSelect"></select>
-  </label>
 </div>
 
 <!-- ════════ Body: tab strip + panes ════════ -->
@@ -138,15 +141,35 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane active" id="pane-heatmap">
-    <div id="hm-controls" style="border-bottom:1px solid #ddd;background:#f5f5f5;flex-shrink:0">
-      <div style="display:flex;align-items:center;padding:3px 10px;gap:8px">
-        <button onclick="toggleHmColCtrl()" id="hm-col-ctrl-btn" style="font-size:11px;padding:1px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;display:flex;align-items:center;gap:4px">
-          <span id="hm-col-ctrl-arrow" style="font-size:9px">&#9654;</span> Column labels control
-        </button>
-        <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click a column label or cell to drill down &darr;</span>
+    <div id="hm-controls" style="border-bottom:1px solid #ddd;background:#f5f5f5;flex-shrink:0;display:flex;align-items:center;padding:3px 10px;gap:8px;flex-wrap:wrap">
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+        Colour:
+        <select id="hm-color-mode" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:3px">
+          <option value="zscore">Z-score (RdBu)</option>
+          <option value="absolute">Absolute count</option>
+        </select>
+      </label>
+      <input type="text" id="hm-text-search" placeholder="&#128269; Search gene family / HG…" style="font-size:11px;padding:2px 7px;border:1px solid #ccc;border-radius:3px;width:200px" oninput="hmTextFilter=this.value.toLowerCase().trim();drawHeatmap()">
+      <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click column header or cell to drill down &darr;</span>
+    </div>
+    <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
+      <span style="font-weight:600">Row groups:</span>
+      <span id="hm-split-tags"></span>
+      <button onclick="clearHmSplits()" style="margin-left:4px;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">&#10005; Clear</button>
+      <span style="font-size:10px;color:#aaa">(shift+click a node in the Species Tree tab to add a group)</span>
+    </div>
+    <div id="hm-layout">
+      <div style="display:flex;flex-direction:column;width:200px;flex-shrink:0;border-right:1px solid #ccc">
+        <div style="padding:4px 8px;background:#fafafa;border-bottom:1px solid #eee;flex-shrink:0">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Prefix: <select id="prefixSelect" style="font-size:11px;flex:1;padding:2px 4px;border:1px solid #ccc;border-radius:3px"></select>
+          </label>
+        </div>
+        <div id="tree-panel" style="flex:1;overflow-y:auto;background:#fff"></div>
       </div>
-      <div id="hm-col-ctrl-body" style="display:none;padding:5px 14px 7px;gap:14px">
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div id="hm-right" style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0">
+        <!-- column-label controls strip: always visible above the heatmap SVG -->
+        <div id="hm-col-strip" style="display:flex;align-items:center;gap:10px;padding:3px 10px;background:#fafafa;border-bottom:1px solid #eee;flex-shrink:0;flex-wrap:wrap">
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
             Label size:
             <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
@@ -157,24 +180,18 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
             <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
           </label>
+          <details style="margin-left:auto;font-size:10px">
+            <summary style="cursor:pointer;color:#888;list-style:none">&#9432; Help</summary>
+            <div style="position:absolute;z-index:50;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;box-shadow:0 2px 8px rgba(0,0,0,.12);line-height:1.7;color:#999;min-width:300px;right:10px">
+              <div><b style="color:#777">Navigate:</b> click a <i>column header</i> to drill into family &rarr; HG &rarr; OG</div>
+              <div><b style="color:#777">Open tree:</b> click a <i>cell</i> to open the gene tree and highlight that species</div>
+              <div><b style="color:#777">Row groups:</b> shift+click a node in the Species Tree tab to split rows by clade</div>
+              <div><b style="color:#777">Colour:</b> intensity = gene count; grey = absent</div>
+            </div>
+          </details>
         </div>
-        <div style="font-size:10px;color:#999;line-height:1.7;margin-top:3px">
-          <div><b style="color:#777">Navigate:</b> click a <i>column header</i> to drill into family &rarr; HG &rarr; OG</div>
-          <div><b style="color:#777">Open tree:</b> click a <i>cell</i> to open the gene tree and highlight that species</div>
-          <div><b style="color:#777">Row groups:</b> shift+click a node in the Species Tree tab to split rows by clade</div>
-          <div><b style="color:#777">Colour:</b> intensity = gene count; grey = absent</div>
-        </div>
+        <div id="heatmap-panel" style="flex:1;overflow:auto;background:#fff"></div>
       </div>
-    </div>
-    <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
-      <span style="font-weight:600">Row groups:</span>
-      <span id="hm-split-tags"></span>
-      <button onclick="clearHmSplits()" style="margin-left:4px;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">&#10005; Clear</button>
-      <span style="font-size:10px;color:#aaa">(shift+click a node in the Species Tree tab to add a group)</span>
-    </div>
-    <div id="hm-layout">
-      <div id="tree-panel"></div>
-      <div id="heatmap-panel"></div>
     </div>
   </div>
 
@@ -194,6 +211,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
           <button class="ctrl-btn" onclick="collapseToOGs()">Collapse to OGs</button>
           <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
+          <button class="ctrl-btn" id="btn-support" onclick="toggleSupport()">Support</button>
+          <button class="ctrl-btn" id="btn-mini-sp" onclick="toggleMiniSpPanel(event)" title="Show species tree with named nodes for clade highlight">&#x1F333; Sp. tree</button>
           <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()">Branch lengths</button>
           <button class="ctrl-btn" onclick="fitTree()">&#x2922; Fit</button>
           <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
@@ -238,6 +257,13 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <span style="margin-left:6px;border-left:1px solid #ddd;padding-left:8px">
               <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
             </span>
+            <span style="margin-left:6px;border-left:1px solid #ddd;padding-left:8px;display:flex;align-items:center;gap:4px">
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#555">
+                Collapsed size:
+                <input type="range" id="collapsed-frac-slider" min="0.1" max="1" step="0.05" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+                <span id="collapsed-frac-val" style="width:28px;text-align:right">1.0</span>
+              </label>
+            </span>
           </span>
         </div>
         <div id="tree-wrap">
@@ -255,6 +281,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         <input type="range" id="sptree-width-slider" min="20" max="100" step="5" value="50" style="width:90px;cursor:pointer;accent-color:#4a90d9">
         <span id="sptree-width-val">50</span>%
       </label>
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">
+        Triangle fill:
+        <input type="color" id="col-tri-fill" value="#cccccc" style="width:28px;height:22px;cursor:pointer;border:1px solid #bbb;border-radius:3px;padding:1px">
+      </label>
+      <button class="ctrl-btn" id="btn-dl-anno" onclick="downloadAnnotations()">&#11015; Annotations TSV</button>
       <button class="ctrl-btn" id="btn-dl-newick" onclick="downloadNewick()">&#11015; Newick</button>
     </div>
     <div id="sp-tree-wrap"></div>
@@ -262,6 +293,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
 </div>
 
+<div id="mini-sp-panel">
+  <div class="msp-title">Species tree — click a named node to highlight that clade</div>
+  <div id="mini-sp-svg-wrap"></div>
+</div>
 <div id="tooltip"></div>
 <div id="collapsed-popup">
   <div class="cp-title">Collapsed node</div>
@@ -402,12 +437,24 @@ let treeHeightMult = 1.0;        // vertical stretch multiplier for the tree
 let showGeneId    = true;        // tip label parts
 let showOGName    = true;
 let showRefOrtho  = true;
-let hideNonHl     = false;   // hide non-highlighted tip labels when hlSet active
+let showSupport        = false;   // show internal node support values
+let hideNonHl          = false;   // hide non-highlighted tip labels when hlSet active
+let collapsedFraction  = 1.0;     // fraction of proportional space for OG-collapsed tips (0.5–1.0)
 let hmSplitSets   = [];      // array of Set<species> for heatmap row splitting
 let hmSplitLabels = [];      // display label for each split group
 let hmColFontSize = 9;       // column label font size (px)
 let hmColRotation = 65;      // column label rotation angle (degrees)
+let hmColorMode   = "zscore"; // "zscore" | "absolute"
+let hmTextFilter  = "";       // free-text filter for heatmap columns
 const spCollapsed = new Set();   // node _ids collapsed in species tree
+let colTriFill = "#cccccc";      // fill colour for collapsed triangles
+// pre-computed metadata per species: {genes, families, hgs}
+const spMeta = (()=>{
+  const m={};
+  FAMILY_DATA.forEach(d=>{ for(const [sp,n] of Object.entries(d.species_counts)){ if(!m[sp]) m[sp]={genes:0,families:0,hgs:0}; m[sp].genes+=n; m[sp].families++; } });
+  HG_DATA.forEach(d=>{ for(const sp of Object.keys(d.species_counts)){ if(!m[sp]) m[sp]={genes:0,families:0,hgs:0}; m[sp].hgs++; } });
+  return m;
+})();
 let spTreeWidthPct = 50;         // % of pane width used by species tree SVG
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
 function hlTagColor(gi){ const q=hlQueries[gi]; return (q&&hlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
@@ -600,8 +647,11 @@ const hasHeatmapData = FAMILY_DATA.length > 0 || HG_DATA.length > 0;
 
 const cladoCollapsed  = new Set();   // stable node keys of collapsed cladogram nodes
 const cladoNames      = new Map();   // key → custom display name (user-editable)
+// map: clade label → sorted array of species (updated by drawCladogram, read by drawHeatmap)
+const hmCollapsedBands = [];  // [{species:[...], label}] — reset on each drawCladogram call
 
 function drawCladogram() {
+  hmCollapsedBands.length = 0;  // reset collapsed-clade shading bands
   const tp = document.getElementById("tree-panel");
   tp.innerHTML = "";
   if (!SP_TREE_DATA || !SP_TREE_DATA.children || !speciesOrder.length) return;
@@ -654,13 +704,24 @@ function drawCladogram() {
     if(cladoCollapsed.has(key)){
       const [y0,y1]=yRange(n);
       const displayName=cladoNames.get(key)||(n.name||"clade");
+      // collect leaf species for heatmap shading
+      function getLeafSp(nd){ return nd.children?nd.children.flatMap(getLeafSp):[nd.name]; }
+      hmCollapsedBands.push({species:getLeafSp(n),label:displayName});
       svg.append("polygon")
         .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
-        .attr("fill","#e8e8e8").attr("stroke","#333").attr("stroke-width",1.2)
+        .attr("fill",colTriFill).attr("stroke","#222").attr("stroke-width",1.2)
         .style("cursor","pointer")
         .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand &nbsp;·&nbsp; dbl-click label to rename</div>'))
         .on("mousemove",moveTip).on("mouseout",hideTip)
         .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); });
+      // small circle at triangle apex so the node is easy to click/uncollapse
+      svg.append("circle")
+        .attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
+        .attr("fill","#f5f5f5").attr("stroke","#555").attr("stroke-width",1.2)
+        .style("cursor","pointer")
+        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); })
+        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand</div>'))
+        .on("mousemove",moveTip).on("mouseout",hideTip);
       // editable label — double-click opens inline input
       const labelEl=svg.append("text")
         .attr("x",sx(n._d)+6).attr("y",n._y).attr("dy","0.35em")
@@ -727,13 +788,6 @@ function spNodeLeaves(n) {
 }
 const hmSplitColors     = ["rgba(231,76,60,0.10)","rgba(52,152,219,0.10)","rgba(39,174,96,0.10)","rgba(243,156,18,0.10)"];
 const hmSplitLineColors = ["#e74c3c","#3498db","#27ae60","#f39c12"];
-function toggleHmColCtrl() {
-  const body = document.getElementById("hm-col-ctrl-body");
-  const arrow = document.getElementById("hm-col-ctrl-arrow");
-  const open = body.style.display === "flex";
-  body.style.display = open ? "none" : "flex";
-  arrow.innerHTML = open ? "&#9654;" : "&#9660;";
-}
 
 function updateHmSplitBar() {
   const bar = document.getElementById("hm-split-bar");
@@ -831,9 +885,19 @@ function drawSpeciesTree() {
       // horizontal branch from parent edge to apex already drawn; draw triangle
       svg.append("polygon")
         .attr("points",`${x0},${yM} ${x1},${y0} ${x1},${y1}`)
-        .attr("fill","rgba(90,130,170,0.18)").attr("stroke","#7a9ab8").attr("stroke-width",1)
+        .attr("fill",colTriFill).attr("stroke","#222").attr("stroke-width",1)
         .style("cursor","pointer")
-        .on("click",()=>{ spCollapsed.delete(n._id); drawSpeciesTree(); });
+        .on("click",()=>{ spCollapsed.delete(n._id); drawSpeciesTree(); })
+        .on("mouseover",ev=>showTip(ev,'<div class="tt-name">'+n.name+'</div><div style="font-size:9px;color:#aaa">click to expand</div>'))
+        .on("mousemove",moveTip).on("mouseout",hideTip);
+      // small circle at apex for easy uncollapse
+      svg.append("circle")
+        .attr("cx",x0).attr("cy",yM).attr("r",5)
+        .attr("fill","#f5f5f5").attr("stroke","#555").attr("stroke-width",1.2)
+        .style("cursor","pointer")
+        .on("click",()=>{ spCollapsed.delete(n._id); drawSpeciesTree(); })
+        .on("mouseover",ev=>showTip(ev,(n.name?'<div class="tt-name">'+n.name+'</div>':'')+'<div style="font-size:9px;color:#aaa">click to expand</div>'))
+        .on("mousemove",moveTip).on("mouseout",hideTip);
       // node name badge at apex
       if(n.name){
         svg.append("text").attr("x",x0+4).attr("y",yM-3)
@@ -912,7 +976,15 @@ function drawSpeciesTree() {
       svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
         .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.5);
       svg.append("text").attr("x",sx(n._d)+8).attr("y",n._y).attr("dy","0.35em")
-        .attr("font-size",12).attr("fill",tc).attr("font-family","monospace").text(n.name);
+        .attr("font-size",12).attr("fill",tc).attr("font-family","monospace").text(n.name)
+        .style("cursor","default")
+        .on("mouseover",(ev)=>{
+          const m=spMeta[n.name]||{genes:0,families:0,hgs:0};
+          showTip(ev,'<div class="tt-name">'+n.name+'</div>'
+            +'<div class="tt-row"><span>Annotated genes</span><strong>'+m.genes+'</strong></div>'
+            +'<div class="tt-row"><span>Families</span><strong>'+m.families+'</strong></div>'
+            +'<div class="tt-row"><span>Homology groups</span><strong>'+m.hgs+'</strong></div>');
+        }).on("mousemove",moveTip).on("mouseout",hideTip);
       return;
     }
     n.children.forEach(drawLeaves);
@@ -956,7 +1028,14 @@ function drawHeatmap() {
                 .sort((a,b)=>b.total-a.total);
     back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily;
     colLabel=d=>d.hg||d.id;
-    clickHandler=(_ev,d)=>{ hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap(); };
+    clickHandler=(ev,d,sp)=>{
+      if(sp===undefined){ hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap(); return; }
+      // cell click: open gene tree for this HG with species highlighted
+      const tRec=TREE_INDEX.find(t=>t.id===d.id)||TREE_INDEX.find(t=>t.family===d.family&&t.hg===d.hg);
+      if(!tRec) return;
+      switchTab("trees"); selectTree(tRec); renderSidebar("");
+      if(d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); setTimeout(focusHighlighted,60); }
+    };
 
   } else { // og
     // robust lookup: try id first, fall back to family+hg match
@@ -978,9 +1057,19 @@ function drawHeatmap() {
       switchTab("trees"); selectTree(treeRec); renderSidebar("");
       if(sp && _d.species_counts[sp]){
         hlQueries=[sp]; rebuildHlSet();
+        // OG level: also highlight the specific OG so only its sequences are shown
+        ogHlQueries=[_d.id]; rebuildOgHlSet();
         setTimeout(focusHighlighted,60);
       }
     };
+  }
+
+  // ── apply free-text search filter ─────────────────────────────────────
+  if(hmTextFilter){
+    data=data.filter(d=>{
+      const s=(d.id||"").toLowerCase()+(d.family||"").toLowerCase()+(d.hg||"").toLowerCase()+(d.class||"").toLowerCase();
+      return s.includes(hmTextFilter);
+    });
   }
 
   // ── heatmap row splitting ──────────────────────────────────────────────
@@ -1062,23 +1151,29 @@ function drawHeatmap() {
   });
   const zAll=zMat.flat();
   const zMax=Math.max(Math.abs(d3.min(zAll)||0),Math.abs(d3.max(zAll)||0),0.01);
-  const color=d3.scaleDiverging().domain([zMax,0,-zMax]).interpolator(d3.interpolateRdBu);
+  const zColor=d3.scaleDiverging().domain([zMax,0,-zMax]).interpolator(d3.interpolateRdBu);
+  // absolute count colour scale
+  const allCounts=data.flatMap(rec=>hmOrder.map(s=>rec.species_counts[s]||0));
+  const maxAbsCount=d3.max(allCounts)||1;
+  const absColor=d3.scaleSequential().domain([0,maxAbsCount]).interpolator(d3.interpolateBlues);
+  const color=hmColorMode==="absolute"?absColor:zColor;
 
   data.forEach((rec,ci)=>{
     hmOrder.forEach((sp,ri)=>{
       const count=rec.species_counts[sp]||0;
       const z=zMat[ci][ri];
       const cellX=ci*cW+ROW_LABEL_W, cellY=ri*14+hmTM;
+      const cellFill=hmColorMode==="absolute"?absColor(count):zColor(z);
       svg.append("rect").attr("class","hm-cell")
         .attr("x",cellX).attr("y",cellY).attr("width",cW-2).attr("height",cH)
-        .attr("fill",color(z)).style("cursor","pointer")
+        .attr("fill",count===0&&hmColorMode==="absolute"?"#f5f5f5":cellFill).style("cursor","pointer")
         .on("mouseover",ev=>{
-          showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b><br>z: <b>'+z.toFixed(2)+'</b>');
+          showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b>'+(hmColorMode==="zscore"?'<br>z: <b>'+z.toFixed(2)+'</b>':""));
         })
         .on("mousemove",moveTip).on("mouseout",hideTip)
         .on("click",ev=>clickHandler(ev,rec,sp));
       if(count>0){
-        const fc=d3.color(color(z));
+        const fc=d3.color(cellFill);
         const lum=fc?(0.2126*fc.r+0.7152*fc.g+0.0722*fc.b)/255:1;
         svg.append("text")
           .attr("x",cellX+(cW-2)/2).attr("y",cellY+cH/2).attr("dy","0.35em")
@@ -1087,6 +1182,33 @@ function drawHeatmap() {
           .text(count>999?"≫":count);
       }
     });
+  });
+
+  // ── collapsed-clade shading bands in heatmap ─────────────────────────
+  hmCollapsedBands.forEach((band,bi)=>{
+    const rowsInBand=band.species.map(sp=>hmOrder.indexOf(sp)).filter(i=>i>=0).sort((a,b)=>a-b);
+    if(!rowsInBand.length) return;
+    const rMin=rowsInBand[0], rMax=rowsInBand[rowsInBand.length-1];
+    const bandY=rMin*14+hmTM, bandH=(rMax-rMin+1)*14;
+    const shadeFill=bi%2===0?"rgba(180,180,180,0.18)":"rgba(200,200,200,0.12)";
+    svg.insert("rect","rect.hm-cell")  // behind cells
+      .attr("x",ROW_LABEL_W).attr("y",bandY)
+      .attr("width",data.length*cW).attr("height",bandH)
+      .attr("fill",shadeFill).attr("pointer-events","none");
+    // separator lines at top and bottom
+    ["top","bottom"].forEach(edge=>{
+      const lineY=edge==="top"?bandY:bandY+bandH;
+      svg.append("line")
+        .attr("x1",0).attr("x2",ROW_LABEL_W+data.length*cW)
+        .attr("y1",lineY).attr("y2",lineY)
+        .attr("stroke","#aaa").attr("stroke-width",0.8).attr("stroke-dasharray","3,2")
+        .attr("pointer-events","none");
+    });
+    // label at left edge
+    svg.append("text")
+      .attr("x",2).attr("y",bandY+bandH/2).attr("dy","0.35em")
+      .attr("font-size",8).attr("fill","#888").attr("font-style","italic")
+      .text(band.label);
   });
 
   // row labels (coloured by group when grouping is active)
@@ -1325,6 +1447,12 @@ function addHlTag(query){
   if(!query||hlQueries.includes(query)) return;
   hlQueries.push(query);
   document.getElementById("hl-search").value="";
+  // auto-switch to "by species" so the highlight is visible
+  if(colorMode!=="species"){
+    const sel=document.getElementById("color-by");
+    sel.value="species";
+    sel.dispatchEvent(new Event("change"));
+  }
   rebuildHlSet();
 }
 
@@ -1428,6 +1556,14 @@ document.getElementById("hm-col-rot-slider").addEventListener("input",function()
   document.getElementById("hm-col-rot-val").textContent=this.value;
   drawHeatmap();
 });
+document.getElementById("hm-color-mode").addEventListener("change",function(){
+  hmColorMode=this.value; drawHeatmap();
+});
+document.getElementById("collapsed-frac-slider").addEventListener("input",function(){
+  collapsedFraction=+this.value;
+  document.getElementById("collapsed-frac-val").textContent=parseFloat(this.value).toFixed(2);
+  if(rootNode) renderTree(true);
+});
 
 document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
 document.getElementById("chk-og").addEventListener("change",function(){ showOGName=this.checked; if(currentIndex) renderTree(); });
@@ -1439,6 +1575,12 @@ document.getElementById("sptree-width-slider").addEventListener("input",function
   document.getElementById("sptree-width-val").textContent=this.value;
   drawSpeciesTree();
 });
+document.getElementById("col-tri-fill").addEventListener("input",function(){
+  colTriFill=this.value;
+  // update already-drawn triangles immediately
+  document.querySelectorAll(".col-tri").forEach(el=>{ el.style.fill=colTriFill; });
+  drawCladogram(); drawSpeciesTree();
+});
 
 function downloadNewick(){
   if(!NEWICK_RAW){ alert("No species tree loaded."); return; }
@@ -1446,6 +1588,28 @@ function downloadNewick(){
   a.href=URL.createObjectURL(new Blob([NEWICK_RAW],{type:"text/plain"}));
   a.download="species_tree.nwk";
   a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function downloadAnnotations(){
+  // Build species × class annotation table from FAMILY_DATA
+  const rows=[];
+  const spSet=new Set(ALL_SPECIES);
+  // gather unique classes
+  const classes=[...new Set(FAMILY_DATA.map(d=>d.class||d.pref||"other"))].sort();
+  rows.push(["species","total_genes","total_hgs",...classes].join("\t"));
+  ALL_SPECIES.forEach(sp=>{
+    const m=spMeta[sp]||{genes:0,hgs:0};
+    const perClass={};
+    classes.forEach(c=>{ perClass[c]=0; });
+    FAMILY_DATA.filter(d=>(d.class||d.pref||"other")&&d.species_counts[sp])
+               .forEach(d=>{ const c=d.class||d.pref||"other"; perClass[c]=(perClass[c]||0)+d.species_counts[sp]; });
+    rows.push([sp,m.genes,m.hgs,...classes.map(c=>perClass[c]||0)].join("\t"));
+  });
+  const blob=new Blob([rows.join("\n")],{type:"text/tab-separated-values"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="species_annotations.tsv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }
 
@@ -1600,6 +1764,81 @@ function elbowPath(s, t, mg, r){
     : `M${sx},${sy}V${ty+r}A${r},${r} 0 0,0 ${sx+r},${ty}H${tx}`;
 }
 
+function toggleSupport(){
+  showSupport=!showSupport;
+  document.getElementById("btn-support").classList.toggle("active-btn", showSupport);
+  if(rootNode) renderTree(false);
+}
+
+// ── Mini species tree floating panel ──────────────────────────────────────────
+function toggleMiniSpPanel(ev){
+  const panel=document.getElementById("mini-sp-panel");
+  if(panel.style.display==="block"){ panel.style.display="none"; return; }
+  // position near button
+  const btn=document.getElementById("btn-mini-sp");
+  const r=btn.getBoundingClientRect();
+  panel.style.top=(r.bottom+6)+"px";
+  panel.style.left=Math.max(0,r.left-180)+"px";
+  panel.style.display="block";
+  drawMiniSpTree();
+}
+document.addEventListener("click",ev=>{
+  const panel=document.getElementById("mini-sp-panel");
+  if(panel.style.display==="block"&&!panel.contains(ev.target)&&ev.target.id!=="btn-mini-sp")
+    panel.style.display="none";
+});
+
+function drawMiniSpTree(){
+  const wrap=document.getElementById("mini-sp-svg-wrap"); wrap.innerHTML="";
+  if(!SP_TREE_DATA) return;
+  // simple recursive layout
+  function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
+  function clone(n){ return Object.assign({},n,{children:n.children?n.children.map(clone):null}); }
+  const tree=clone(SP_TREE_DATA);
+  const allN=flat(tree);
+  // collect only species present in current tree
+  const activeSp=currentIndex?new Set(currentIndex.species):new Set(ALL_SPECIES);
+  // assign y: leaves in order
+  const leaves=allN.filter(n=>!n.children);
+  const leafH=14, leftM=6, W=340;
+  leaves.forEach((l,i)=>{ l._y=i*leafH+leafH/2; });
+  // propagate y to internals
+  function assignY(n){ if(n.children){ n.children.forEach(assignY); n._y=(n.children[0]._y+n.children[n.children.length-1]._y)/2; } }
+  assignY(tree);
+  // depth
+  let maxD=0;
+  function assignD(n,d){ n._d=d; maxD=Math.max(maxD,d); if(n.children) n.children.forEach(c=>assignD(c,d+1)); }
+  assignD(tree,0);
+  const sx=d=>leftM+(d/Math.max(1,maxD))*(W-leftM-100);
+  const H=leaves.length*leafH+10;
+  const svg=d3.select(wrap).append("svg").attr("width",W).attr("height",H);
+  // draw branches
+  function drawB(n){ if(!n.children) return; const ys=n.children.map(c=>c._y); svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d)).attr("y1",d3.min(ys)).attr("y2",d3.max(ys)).attr("stroke","#bbb"); n.children.forEach(c=>{ svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(c._d)).attr("y1",c._y).attr("y2",c._y).attr("stroke","#bbb"); drawB(c); }); }
+  drawB(tree);
+  // leaves
+  leaves.forEach(l=>{ const inTree=activeSp.has(l.name); svg.append("circle").attr("cx",sx(maxD)).attr("cy",l._y).attr("r",3).attr("fill",inTree?"#2c3e50":"#ccc"); svg.append("text").attr("x",sx(maxD)+6).attr("y",l._y).attr("dy","0.35em").attr("font-size",9).attr("fill",inTree?"#333":"#bbb").attr("font-family","monospace").text(l.name); });
+  // named internal nodes — clickable to add highlight
+  function drawInternals(n){ if(!n.children) return;
+    if(n.name){
+      svg.append("text").attr("class","msp-node-lbl").attr("x",sx(n._d)).attr("y",n._y-5)
+        .attr("text-anchor","middle").text(n.name)
+        .on("click",()=>{
+          // collect all leaves under this clade that are in the active tree
+          function sp2(nd){ return nd.children?nd.children.flatMap(sp2):[nd.name]; }
+          const cladeSps=sp2(n).filter(s=>activeSp.has(s));
+          if(!cladeSps.length) return;
+          // try clade name first (works if in CLADE_DATA); else add species individually
+          const resolved=resolveQuery(n.name);
+          if(resolved.size>0){ addHlTag(n.name); }
+          else { cladeSps.forEach(s=>addHlTag(s)); }
+          document.getElementById("mini-sp-panel").style.display="none";
+        });
+    }
+    n.children.forEach(drawInternals);
+  }
+  drawInternals(tree);
+}
+
 function toggleLengths(){
   useBranchLen=!useBranchLen;
   const btn=document.getElementById("btn-lengths");
@@ -1680,7 +1919,7 @@ function renderTree(animate){
   // collapsed node gets nLeaves * rowH vertical space, preventing overlap.
   {
     const vLeaves = rootNode.leaves(); // includes ._children nodes (D3 sees them as leaves)
-    const wts = vLeaves.map(d => (d._children && d._isOgCol) ? countAllLeaves(d) : 1);
+    const wts = vLeaves.map(d => (d._children && d._isOgCol) ? Math.max(1, countAllLeaves(d) * collapsedFraction) : 1);
     const anyCollapsed = wts.some(w => w > 1);
     if (anyCollapsed) {
       const effRow = rowH * treeHeightMult;   // apply height multiplier here too
@@ -1736,6 +1975,7 @@ function renderTree(animate){
           .attr("dy","0.35em").attr("text-anchor","middle").attr("pointer-events","none");
         g.append("text").attr("class","leaf-label");
         g.append("text").attr("class","og-label");
+        g.append("text").attr("class","support-lbl");
         return g;
       },
       update=>update,
@@ -1772,7 +2012,18 @@ function renderTree(animate){
     .attr("stroke",d=>d.data.leaf?"none":isOGNode(d)?"#b03a2e":"#aaa")
     .attr("stroke-width",d=>isOGNode(d)?1.8:0.8)
     .on("click",(event,d)=>{
-      if(d.data.leaf)return; event.stopPropagation();
+      if(d.data.leaf){
+        const tipName=d.data.gene_id||d.data.name||"";
+        if(tipName&&navigator.clipboard) navigator.clipboard.writeText(tipName).then(()=>{
+          const tt=document.getElementById("tooltip");
+          tt.style.display="block"; tt.innerHTML="<span style='color:#1abc9c'>&#10003; Copied!</span>";
+          tt.style.left=Math.min(event.clientX+12,window.innerWidth-tt.offsetWidth-5)+"px";
+          tt.style.top=Math.min(event.clientY+12,window.innerHeight-tt.offsetHeight-5)+"px";
+          setTimeout(()=>{ tt.style.display="none"; },900);
+        });
+        return;
+      }
+      event.stopPropagation();
       if(d._children){ d.children=d._children; d._children=null; renderTree(true); }
       else if(d.children){d._children=d.children;d.children=null; renderTree(true);}
     })
@@ -1788,8 +2039,13 @@ function renderTree(animate){
       return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
     })
     .attr("fill",d=>{
-      if(!d._children||!d._isOgCol||colorMode!=="og") return null;
+      if(!d._children||!d._isOgCol) return null;
       const ogName=d.data._og_label||d.data.name||"";
+      if(ogHlSet!==null){
+        if(ogHlSet.has(ogName)){ const gi=ogHlGroupIndex.get(ogName)??0; return ogHlTagColor(gi)+"bb"; }
+        return "#e8e8e8";
+      }
+      if(colorMode!=="og") return null;
       const col=ogName2Color[ogName];
       return col ? col+"55" : null;
     })
@@ -1870,8 +2126,24 @@ function renderTree(animate){
     .attr("dy","0.35em")
     .attr("text-anchor",d=>d._children?"start":"end")
     .attr("font-size",tipFontSVG())
+    .attr("fill",d=>{
+      const ogName=d._isOgCol?(d.data._og_label||d.data.name||""):(isOGNode(d)?d.data.name:"");
+      if(ogName&&ogHlSet!==null){
+        if(ogHlSet.has(ogName)){ const gi=ogHlGroupIndex.get(ogName)??0; return ogHlTagColor(gi); }
+        return "#ccc";
+      }
+      return "#b5371f";
+    })
     .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(!d._children&&isOGNode(d))))?null:"none")
     .text(d=>d._isOgCol?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
+
+  // support labels: shown on internal nodes when showSupport is true
+  nodeSel.select(".support-lbl")
+    .attr("x",-4).attr("dy","-0.4em").attr("text-anchor","end")
+    .attr("font-size",Math.max(7,tipFontSVG()*0.75))
+    .attr("fill","#888").attr("pointer-events","none")
+    .attr("display",d=>(showSupport&&!d.data.leaf&&d.data.support!=null&&!d._children)?null:"none")
+    .text(d=>(d.data.support!=null)?d.data.support:"");
   applyTipFontSize();
 }
 
