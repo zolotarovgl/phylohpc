@@ -90,7 +90,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .link{fill:none;stroke:#d5d5d5}
 .node-g circle{cursor:pointer;transition:r .12s,fill .12s}
 .node-g circle:hover{stroke-width:2.5px !important}
-.col-tri{fill:#cccccc;stroke:#222;stroke-width:1px;cursor:pointer}
+.col-tri{fill:#ffffff;stroke:#222;stroke-width:1px;cursor:pointer}
 .col-tri:hover{filter:brightness(0.88)}
 .leaf-label{pointer-events:none;font-family:monospace}
 .og-label{fill:#b5371f;pointer-events:none}
@@ -293,7 +293,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
       </label>
       <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">
         Triangle fill:
-        <input type="color" id="col-tri-fill" value="#cccccc" style="width:28px;height:22px;cursor:pointer;border:1px solid #bbb;border-radius:3px;padding:1px">
+        <input type="color" id="col-tri-fill" value="#ffffff" style="width:28px;height:22px;cursor:pointer;border:1px solid #bbb;border-radius:3px;padding:1px">
       </label>
       <button class="ctrl-btn" id="btn-dl-anno" onclick="downloadAnnotations()">&#11015; Annotations TSV</button>
       <button class="ctrl-btn" id="btn-dl-newick" onclick="downloadNewick()">&#11015; Newick</button>
@@ -457,7 +457,7 @@ let hmColRotation = 65;      // column label rotation angle (degrees)
 let hmColorMode   = "zscore"; // "zscore" | "absolute"
 let hmTextFilter  = "";       // free-text filter for heatmap columns
 const spCollapsed = new Set();   // node _ids collapsed in species tree
-let colTriFill = "#cccccc";      // fill colour for collapsed triangles
+let colTriFill = "#ffffff";      // fill colour for collapsed triangles
 // pre-computed metadata per species: {genes, families, hgs}
 const spMeta = (()=>{
   const m={};
@@ -726,7 +726,7 @@ function drawCladogram() {
         .style("cursor","pointer")
         .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand &nbsp;·&nbsp; dbl-click label to rename</div>'))
         .on("mousemove",moveTip).on("mouseout",hideTip)
-        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); });
+        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap(); });
       // small circle at triangle apex so the node is easy to click/uncollapse
       svg.append("circle")
         .attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
@@ -787,6 +787,7 @@ function drawCladogram() {
           updateHmSplitBar(); drawHeatmap(); // drawCladogram called at end of drawHeatmap
         } else {
           cladoCollapsed.add(key); drawCladogram();
+          if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
         }
       });
     n.children.forEach(drawCladoNodes);
