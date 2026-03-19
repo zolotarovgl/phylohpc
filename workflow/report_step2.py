@@ -1070,12 +1070,29 @@ function drawHeatmap() {
   }
 
   // ── heatmap row splitting ──────────────────────────────────────────────
-  // Build species → group index map and reorder speciesOrder by group
-  let spSplitGroup = new Map(); // species → group index (0,1,… or -1 for "other")
+  // ── row grouping: driven by species-tree splits OR active highlight queries ──
+  // Priority: hmSplitSets > hlSet.  Both reorder rows and draw separator bands.
+  let spSplitGroup = new Map(); // species → group index
+  let bandLineColors = hmSplitLineColors;
+  let bandFillColors = hmSplitColors;
+  let bandLabels     = hmSplitLabels;
+  let nSplitGroups   = 0;
+
   if (hmSplitSets.length > 0) {
     hmSplitSets.forEach((sSet,gi) => sSet.forEach(sp => { if (!spSplitGroup.has(sp)) spSplitGroup.set(sp,gi); }));
+    nSplitGroups = hmSplitSets.length;
+  } else if (hlSet !== null) {
+    for (const [sp,gi] of hlGroupIndex) spSplitGroup.set(sp, gi);
+    nSplitGroups = hlQueries.length;
+    bandLineColors = hlTagColors;
+    bandFillColors = hlTagColors.map(c=>{ const o=d3.color(c); return o?`rgba(${o.r},${o.g},${o.b},0.09)`:c; });
+    bandLabels     = hlQueries;
+  }
+
+  if (nSplitGroups > 0) {
+    // reorder rows: each group in phylo order, then non-group species
     const grouped = [];
-    for (let gi=0; gi<hmSplitSets.length; gi++)
+    for (let gi=0; gi<nSplitGroups; gi++)
       speciesOrder.filter(s=>spSplitGroup.get(s)===gi).forEach(s=>grouped.push(s));
     speciesOrder.filter(s=>!spSplitGroup.has(s)).forEach(s=>grouped.push(s));
     speciesOrder = grouped;
@@ -1091,30 +1108,27 @@ function drawHeatmap() {
   if(!data.length){ svg.append("text").attr("x",40).attr("y",TOP_MARGIN+30).attr("fill","#999").text("No data for this selection."); return; }
 
   // draw group background bands before cells (SVG paint order: back to front)
-  if (hmSplitSets.length > 0) {
+  if (nSplitGroups > 0) {
     let gi0 = spSplitGroup.has(speciesOrder[0]) ? spSplitGroup.get(speciesOrder[0]) : -1;
     let bandStart = 0;
     for (let ri=1; ri<=speciesOrder.length; ri++) {
       const gi1 = ri<speciesOrder.length ? (spSplitGroup.has(speciesOrder[ri]) ? spSplitGroup.get(speciesOrder[ri]) : -1) : -2;
       if (gi1 !== gi0) {
         if (gi0 >= 0) {
-          // shaded band for a split group
           svg.append("rect")
             .attr("x",0).attr("y",bandStart*14+TOP_MARGIN)
             .attr("width",svgW).attr("height",(ri-bandStart)*14)
-            .attr("fill",hmSplitColors[gi0%hmSplitColors.length]);
-          // group label on left edge
+            .attr("fill",bandFillColors[gi0%bandFillColors.length]);
           const midY=bandStart*14+TOP_MARGIN+(ri-bandStart)*7;
           svg.append("text").attr("x",4).attr("y",midY).attr("dy","0.35em")
-            .attr("font-size",8).attr("fill",hmSplitLineColors[gi0%hmSplitLineColors.length])
-            .attr("font-weight","bold").text(hmSplitLabels[gi0]||("Group "+(gi0+1)));
+            .attr("font-size",8).attr("fill",bandLineColors[gi0%bandLineColors.length])
+            .attr("font-weight","bold").text(bandLabels[gi0]||("Group "+(gi0+1)));
         }
-        // separator line at boundary
         if (ri<speciesOrder.length) {
           svg.append("line")
             .attr("x1",0).attr("x2",svgW)
             .attr("y1",ri*14+TOP_MARGIN).attr("y2",ri*14+TOP_MARGIN)
-            .attr("stroke","#666").attr("stroke-width",1.5).attr("stroke-dasharray","4,2");
+            .attr("stroke","#999").attr("stroke-width",1.5).attr("stroke-dasharray","4,2");
         }
         gi0 = gi1; bandStart = ri;
       }
@@ -1145,11 +1159,15 @@ function drawHeatmap() {
     });
   });
 
-  // row labels
+  // row labels (coloured by group when grouping is active)
   speciesOrder.forEach((sp,ri)=>{
+    const gi = spSplitGroup.get(sp);
+    const labelCol = gi!==undefined
+      ? bandLineColors[gi%bandLineColors.length]
+      : (nSplitGroups>0 ? "#bbb" : "#333");
     svg.append("text")
       .attr("x",ROW_LABEL_W-4).attr("y",ri*14+TOP_MARGIN+9)
-      .attr("text-anchor","end").attr("font-size",11).attr("fill","#333")
+      .attr("text-anchor","end").attr("font-size",11).attr("fill",labelCol)
       .text(sp);
   });
 
@@ -1335,6 +1353,7 @@ function rebuildHlSet(){
   renderHlTags();
   document.getElementById("btn-focus-hl").style.display=hlSet?"inline":"none";
   if(currentIndex) renderTree();
+  if(hmSplitSets.length===0) drawHeatmap();  // heatmap groups driven by hlSet when no explicit splits
 }
 
 function renderHlTags(){
@@ -1372,7 +1391,7 @@ document.getElementById("hl-search").addEventListener("change",function(){
 document.getElementById("tip-font-slider").addEventListener("input",function(){
   tipFontSize=+this.value;
   document.getElementById("tip-font-val").textContent=this.value;
-  if(currentIndex){ renderTree(); requestAnimationFrame(fitTree); }
+  if(currentIndex) renderTree();
 });
 
 document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
