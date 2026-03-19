@@ -1769,6 +1769,7 @@ function applyTipFontSize(){
   gMain.selectAll(".og-label").attr("font-size",fs);
   gMain.selectAll(".count-label").attr("font-size",fs);
   gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",Math.max(10,fs*0.9));
+  gMain.selectAll("circle").filter(d=>d&&!d._children).attr("r",d=>d.data&&d.data.leaf?fs*0.36:isOGNode(d)?fs*0.5:fs*0.26);
   gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
 }
 
@@ -1981,7 +1982,7 @@ function renderTree(animate){
   // circle (leaves and expanded internals)
   nodeSel.select("circle")
     .attr("display",d=>d._children?"none":null)
-    .attr("r",d=>d.data.leaf?4:isOGNode(d)?5.5:2.8)
+    .attr("r",d=>d.data.leaf?tipFontSVG()*0.36:isOGNode(d)?tipFontSVG()*0.5:tipFontSVG()*0.26)
     .attr("fill",d=>{
       if(d.data.leaf){
         const gid2=d.data.gene_id||d.data.name;
