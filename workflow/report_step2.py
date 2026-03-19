@@ -476,24 +476,26 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         </button>
         <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click a column label or cell to drill down &darr;</span>
       </div>
-      <div id="hm-col-ctrl-body" style="display:none;padding:5px 14px 7px;align-items:center;gap:14px">
-        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
-          Label size:
-          <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
-          <span id="hm-col-font-val" style="width:20px;text-align:right">9</span>px
-        </label>
-        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
-          Rotation:
-          <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
-          <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
-        </label>
+      <div id="hm-col-ctrl-body" style="display:none;padding:5px 14px 7px;gap:14px">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Label size:
+            <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="hm-col-font-val" style="width:20px;text-align:right">9</span>px
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Rotation:
+            <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
+          </label>
+        </div>
+        <div style="font-size:10px;color:#999;line-height:1.7;margin-top:3px">
+          <div><b style="color:#777">Navigate:</b> click a <i>column header</i> to drill into family &rarr; HG &rarr; OG</div>
+          <div><b style="color:#777">Open tree:</b> click a <i>cell</i> to open the gene tree and highlight that species</div>
+          <div><b style="color:#777">Row groups:</b> shift+click a node in the Species Tree tab to split rows by clade</div>
+          <div><b style="color:#777">Colour:</b> intensity = gene count; grey = absent</div>
+        </div>
       </div>
-    </div>
-    <div id="hm-help" style="padding:5px 14px 6px;font-size:10px;color:#888;background:#fafafa;border-bottom:1px solid #eee;display:flex;gap:20px;flex-wrap:wrap">
-      <span><b style="color:#666">Navigate:</b> click a <i>column header</i> to drill into a family/HG &rarr; OG level</span>
-      <span><b style="color:#666">Open tree:</b> click a <i>cell</i> to jump to the gene tree and highlight that species</span>
-      <span><b style="color:#666">Row groups:</b> <i>shift+click</i> a node in the Species Tree tab to split rows by clade</span>
-      <span><b style="color:#666">Legend:</b> colour intensity = gene count per species in that OG</span>
     </div>
     <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
       <span style="font-weight:600">Row groups:</span>
