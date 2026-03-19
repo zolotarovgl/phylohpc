@@ -1068,12 +1068,13 @@ function drawHeatmap() {
     clickHandler=(_ev,_d,sp)=>{
       if(!treeRec) return;
       switchTab("trees"); selectTree(treeRec); renderSidebar("");
-      if(sp && _d.species_counts[sp]){
-        hlQueries=[sp]; rebuildHlSet();
-        // OG level: also highlight the specific OG so only its sequences are shown
-        ogHlQueries=[_d.id]; rebuildOgHlSet();
-        setTimeout(focusHighlighted,60);
-      }
+      // always highlight the OG and activate focus/hide mode
+      ogHlQueries=[_d.id]; rebuildOgHlSet();
+      if(sp && _d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); }
+      hideNonHl=true;
+      const chkHide=document.getElementById("chk-hide-nonhl");
+      if(chkHide) chkHide.checked=true;
+      setTimeout(focusHighlighted,80);
     };
 
   } else { // custom
@@ -1093,12 +1094,15 @@ function drawHeatmap() {
     crumb.textContent="Custom selection ("+hmCustomOGs.length+" OG"+(hmCustomOGs.length!==1?"s":"")+")";
     colLabel=d=>d.id;
     clickHandler=(_ev,d,sp)=>{
-      if(!sp) return;
       const tRec=hmOGIndex[d.id]?TREE_INDEX.find(t=>t.id===hmOGIndex[d.id].hgId):null;
       if(!tRec) return;
       switchTab("trees"); selectTree(tRec); renderSidebar("");
       ogHlQueries=[d.id]; rebuildOgHlSet();
-      if(d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); setTimeout(focusHighlighted,60); }
+      if(sp && d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); }
+      hideNonHl=true;
+      const chkHide=document.getElementById("chk-hide-nonhl");
+      if(chkHide) chkHide.checked=true;
+      setTimeout(focusHighlighted,80);
     };
   }
 
@@ -2341,14 +2345,23 @@ function collapseAll(){
 }
 
 function focusHighlighted(){
-  if(!hlSet||!rootNode)return;
+  if((!hlSet&&!ogHlSet)||!rootNode)return;
   // expand all
   rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;}});
   // mark nodes that have ≥1 highlighted descendant (post-order)
+  // a leaf passes if it satisfies BOTH active filters (species AND/OR OG)
   const hasHl=new Map();
   rootNode.eachAfter(d=>{
-    if(d.data.leaf){ hasHl.set(d,hlSet.has(d.data.species||"")); }
-    else { hasHl.set(d,(d.children||[]).some(c=>hasHl.get(c))); }
+    if(d.data.leaf){
+      const sp=d.data.species||"";
+      const gid=d.data.gene_id||d.data.name;
+      const og=d.data.og||ogGene2Name[gid]||"";
+      const spOk=!hlSet||hlSet.has(sp);
+      const ogOk=!ogHlSet||ogHlSet.has(og);
+      hasHl.set(d,spOk&&ogOk);
+    } else {
+      hasHl.set(d,(d.children||[]).some(c=>hasHl.get(c)));
+    }
   });
   // collapse subtrees with no highlighted leaf
   rootNode.each(d=>{
