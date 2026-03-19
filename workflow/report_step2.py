@@ -389,6 +389,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 #hl-search{font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px;width:180px}
 #hl-clear{padding:2px 6px;border:1px solid #bbb;border-radius:3px;cursor:pointer;background:#fff;font-size:11px}
 #hl-clear:hover{background:#eee}
+#hl-tags{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.hl-tag{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:10px;color:#fff;white-space:nowrap;cursor:default}
+.hl-tag-x{cursor:pointer;opacity:.7;font-size:12px;line-height:1}
+.hl-tag-x:hover{opacity:1}
 
 /* tree svg */
 #tree-wrap{flex:1;overflow:hidden;position:relative;background:#fff}
@@ -478,9 +482,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
               <option value="species">by species</option>
             </select>
           </label>
-          <input id="hl-search" list="hl-list" placeholder="Highlight species or clade…">
+          <div id="hl-tags"></div>
+          <input id="hl-search" list="hl-list" placeholder="Highlight… (Enter to add)">
           <datalist id="hl-list"></datalist>
-          <button id="hl-clear" onclick="clearHighlight()">&#10005;</button>
+          <button id="hl-clear" onclick="clearHighlight()" title="Clear all highlights">&#10005;</button>
           <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
         </div>
         <div id="tree-wrap">
@@ -542,17 +547,27 @@ let cladeGrpColor = {};
 let ogLeaf2Color  = {};   // gene_id → color
 let ogName2Color  = {};   // og_name → color
 let ogGene2Name   = {};   // gene_id → og_name
-let hlSet         = null;        // null = off;  Set<species> when active
+let hlSet         = null;        // null = off; union Set<species> when active
+let hlQueries     = [];          // committed query strings (tags)
+let hlGroupIndex  = new Map();   // species → group index (for per-group color)
+const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
 
 function leafColor(sp) {
-  const base = colorMode === "species" ? spColor(sp) : (cladeSp2Color[sp] || "#ccc");
-  if (hlSet !== null) return hlSet.has(sp) ? base : "#ccc";
-  return base;
+  if (hlSet !== null) {
+    if (!hlSet.has(sp)) return "#ccc";
+    const gi = hlGroupIndex.get(sp);
+    return gi !== undefined ? hlTagColors[gi % hlTagColors.length]
+                            : (colorMode === "species" ? spColor(sp) : (cladeSp2Color[sp] || "#ccc"));
+  }
+  return colorMode === "species" ? spColor(sp) : (cladeSp2Color[sp] || "#ccc");
 }
 function ogLeafColor(geneId, species) {
-  const base = ogLeaf2Color[geneId] || "#ccc";
-  if (hlSet !== null) return hlSet.has(species||"") ? base : "#ccc";
-  return base;
+  if (hlSet !== null) {
+    if (!hlSet.has(species||"")) return "#ccc";
+    const gi = hlGroupIndex.get(species||"");
+    return gi !== undefined ? hlTagColors[gi % hlTagColors.length] : (ogLeaf2Color[geneId] || "#ccc");
+  }
+  return ogLeaf2Color[geneId] || "#ccc";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -983,30 +998,61 @@ function populateDatalist(){
   }
 }
 
-function applyHighlight(query){
-  query=(query||"").trim();
-  if(!query){ hlSet=null; }
-  else {
-    const lq=query.toLowerCase();
-    // try clade name (exact then partial)
-    const clade = CLADE_DATA.find(c=>c.name.toLowerCase()===lq)
-               || CLADE_DATA.find(c=>c.name.toLowerCase().includes(lq));
-    if(clade){
-      hlSet=new Set(Object.keys(clade.groups));
-    } else {
-      hlSet=new Set();
-      if(currentIndex) for(const sp of currentIndex.species){ if(sp.toLowerCase().includes(lq)) hlSet.add(sp); }
-      // also check all species globally
-      ALL_SPECIES.forEach(sp=>{ if(sp.toLowerCase().includes(lq)) hlSet.add(sp); });
-      if(!hlSet.size) hlSet=null;
-    }
-  }
-  document.getElementById("btn-focus-hl").style.display = hlSet ? "inline" : "none";
-  if(currentIndex){ renderTree(); requestAnimationFrame(fitTree); }
+function resolveQuery(query){
+  const lq=(query||"").toLowerCase().trim();
+  if(!lq) return new Set();
+  const clade=CLADE_DATA.find(c=>c.name.toLowerCase()===lq)||CLADE_DATA.find(c=>c.name.toLowerCase().includes(lq));
+  if(clade) return new Set(Object.keys(clade.groups));
+  const sp=new Set();
+  if(currentIndex) for(const s of currentIndex.species){ if(s.toLowerCase().includes(lq)) sp.add(s); }
+  ALL_SPECIES.forEach(s=>{ if(s.toLowerCase().includes(lq)) sp.add(s); });
+  return sp;
 }
-function clearHighlight(){ document.getElementById("hl-search").value=""; applyHighlight(""); }
 
-document.getElementById("hl-search").addEventListener("input",function(){ applyHighlight(this.value); });
+function rebuildHlSet(){
+  hlGroupIndex=new Map();
+  if(!hlQueries.length){ hlSet=null; }
+  else {
+    const union=new Set();
+    hlQueries.forEach((q,i)=>{ resolveQuery(q).forEach(s=>{ union.add(s); if(!hlGroupIndex.has(s)) hlGroupIndex.set(s,i); }); });
+    hlSet=union.size?union:null;
+  }
+  renderHlTags();
+  document.getElementById("btn-focus-hl").style.display=hlSet?"inline":"none";
+  if(currentIndex) renderTree();
+}
+
+function renderHlTags(){
+  const el=document.getElementById("hl-tags"); el.innerHTML="";
+  hlQueries.forEach((q,i)=>{
+    const chip=document.createElement("span"); chip.className="hl-tag";
+    chip.style.background=hlTagColors[i%hlTagColors.length];
+    const lbl=document.createTextNode(q+" ");
+    const x=document.createElement("span"); x.className="hl-tag-x"; x.textContent="\u00d7";
+    x.onclick=()=>removeHlTag(i);
+    chip.appendChild(lbl); chip.appendChild(x);
+    el.appendChild(chip);
+  });
+}
+
+function addHlTag(query){
+  query=(query||"").trim();
+  if(!query||hlQueries.includes(query)) return;
+  hlQueries.push(query);
+  document.getElementById("hl-search").value="";
+  rebuildHlSet();
+}
+
+function removeHlTag(i){ hlQueries.splice(i,1); rebuildHlSet(); }
+
+function clearHighlight(){ hlQueries=[]; document.getElementById("hl-search").value=""; rebuildHlSet(); }
+
+document.getElementById("hl-search").addEventListener("keydown",function(e){
+  if(e.key==="Enter"&&this.value.trim()){ addHlTag(this.value); e.preventDefault(); }
+});
+document.getElementById("hl-search").addEventListener("change",function(){
+  if(this.value.trim()) addHlTag(this.value);
+});
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1017,7 +1063,9 @@ function selectTree(rec){
   currentDetail=loadDetail(rec.id);
   if(!currentDetail){ console.warn("No detail data for",rec.id); return; }
   // reset colour state – default to OG colouring
-  hlSet=null; document.getElementById("hl-search").value="";
+  hlSet=null; hlQueries=[]; hlGroupIndex=new Map();
+  document.getElementById("hl-search").value="";
+  renderHlTags();
   cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   colorMode="og";
 
