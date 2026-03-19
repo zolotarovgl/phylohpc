@@ -250,7 +250,7 @@ def load_possvm_trees(possvm_dir: Path, source: str = "generax") -> tuple[list, 
             prefix, family, hg = stem, "", stem
 
         try:
-            t = Tree(str(nwk), format=1)
+            t = Tree(str(nwk), format=0)
         except Exception as exc:
             print(f"WARN: cannot parse {nwk.name}: {exc}", file=sys.stderr)
             continue
