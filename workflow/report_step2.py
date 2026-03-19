@@ -548,6 +548,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <input type="range" id="line-width-slider" min="1" max="8" step="0.5" value="1.3" style="width:70px;cursor:pointer;accent-color:#4a90d9">
             <span id="line-width-val" style="width:20px;text-align:right">1.3</span>px
           </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px;margin-left:8px">
+            Tree height:
+            <input type="range" id="tree-height-slider" min="0.5" max="5" step="0.1" value="1" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="tree-height-val" style="width:24px;text-align:right">1</span>&times;
+          </label>
           <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:8px;margin-left:4px">
             Show:
             <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-geneid" checked> gene&nbsp;ID</label>
@@ -637,8 +642,9 @@ let hlGroupIndex  = new Map();   // species → group index (for per-group color
 let ogHlSet       = null;        // null = off; Set<og_name> when active
 let ogHlQueries   = [];          // committed OG query strings
 let ogHlGroupIndex= new Map();   // og_name → group index
-let tipFontSize   = null;        // null = auto; number = user override (px)
-let treeLinkWidth = 1.3;         // branch stroke-width in screen px
+let tipFontSize    = null;        // null = auto; number = user override (px)
+let treeLinkWidth  = 1.3;        // branch stroke-width in screen px
+let treeHeightMult = 1.0;        // vertical stretch multiplier for the tree
 let showGeneId    = true;        // tip label parts
 let showOGName    = true;
 let showRefOrtho  = true;
@@ -1638,6 +1644,12 @@ document.getElementById("line-width-slider").addEventListener("input",function()
   if(gMain) gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
 });
 
+document.getElementById("tree-height-slider").addEventListener("input",function(){
+  treeHeightMult=+this.value;
+  document.getElementById("tree-height-val").textContent=this.value;
+  if(rootNode) renderTree(false);
+});
+
 document.getElementById("hm-col-font-slider").addEventListener("input",function(){
   hmColFontSize=+this.value;
   document.getElementById("hm-col-font-val").textContent=this.value;
@@ -1888,7 +1900,7 @@ function renderTree(animate){
   const fsEff = tipFontSize !== null ? tipFontSize : 11;
   const minRowH = Math.max(14, Math.ceil(fsEff * 1.3));
   const rowH = Math.max(minRowH, Math.min(Math.max(minRowH, 36), Math.floor(iH/Math.max(nAll,1))));
-  const tH=Math.max(iH,nAll*rowH);
+  const tH=Math.max(iH, nAll*rowH) * treeHeightMult;
   d3.cluster().size([tH,iW])(rootNode);
 
   // Proportional Y-spacing for OG-collapsed nodes.
