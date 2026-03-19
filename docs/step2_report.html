@@ -150,7 +150,17 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         </select>
       </label>
       <input type="text" id="hm-text-search" placeholder="&#128269; Search gene family / HG…" style="font-size:11px;padding:2px 7px;border:1px solid #ccc;border-radius:3px;width:200px" oninput="hmTextFilter=this.value.toLowerCase().trim();drawHeatmap()">
-      <span style="font-size:10px;color:#aaa;font-style:italic;margin-left:auto">Click column header or cell to drill down &darr;</span>
+      <button id="btn-hm-custom" onclick="hmEnterCustom()" style="margin-left:auto;padding:2px 10px;font-size:11px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer;font-weight:600">&#9998; Custom selection</button>
+    </div>
+    <div id="hm-custom-bar" style="display:none;flex-shrink:0;border-bottom:1px solid #ddd;background:#fffbf0;padding:4px 10px;gap:6px;flex-wrap:wrap;align-items:center;position:relative">
+      <span style="font-size:11px;color:#888;font-weight:600">Custom OG heatmap:</span>
+      <div style="position:relative;display:inline-block">
+        <input id="hm-og-search" type="text" placeholder="&#128269; Search OG or gene name&#8230;" autocomplete="off" style="font-size:11px;padding:2px 8px;border:1px solid #ccc;border-radius:3px;width:240px" oninput="hmOGSearchInput(this.value)" onkeydown="hmOGSearchKey(event)">
+        <ul id="hm-og-dropdown" style="display:none;position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ccc;border-radius:0 0 4px 4px;list-style:none;margin:0;padding:0;max-height:220px;overflow-y:auto;min-width:300px;box-shadow:0 3px 8px rgba(0,0,0,.12);font-size:11px"></ul>
+      </div>
+      <span id="hm-custom-chips" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"></span>
+      <button onclick="hmCustomClear()" style="margin-left:auto;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">Clear all</button>
+      <button onclick="hmExitCustom()" style="padding:1px 8px;font-size:10px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer">&#8592; Browse mode</button>
     </div>
     <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
       <span style="font-weight:600">Row groups:</span>
@@ -496,6 +506,9 @@ let hmActiveClass  = null;
 let hmActiveFamily = null;
 let hmActiveHG     = null;   // id string from HG_DATA
 let hmActiveHGRec  = null;   // full HG_DATA record (for fallback lookup)
+let hmCustomOGs    = [];     // user-selected OG names for custom view
+let hmOGIndex      = null;   // lazy: {og_name → {hgId,family,cls,total,species_counts}}
+let hmGeneIndex    = null;   // lazy: {gene_id → og_name}
 
 function getSpeciesPfx(geneId){
   const g=(geneId||"").split("|")[0].trim();
@@ -1037,7 +1050,7 @@ function drawHeatmap() {
       if(d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); setTimeout(focusHighlighted,60); }
     };
 
-  } else { // og
+  } else if(hmViewMode==="og") { // og
     // robust lookup: try id first, fall back to family+hg match
     const r=hmActiveHGRec;
     const treeRec=TREE_INDEX.find(t=>t.id===hmActiveHG)
@@ -1062,10 +1075,35 @@ function drawHeatmap() {
         setTimeout(focusHighlighted,60);
       }
     };
+
+  } else { // custom
+    buildOGIndex();
+    if(!hmCustomOGs.length){
+      document.getElementById("heatmap-panel").innerHTML=
+        '<p style="padding:30px 20px;color:#aaa;font-size:13px">'+
+        'Use the search box above to add orthogroups to the custom view.<br>'+
+        'You can search by OG name or paste a gene name to find its OG.</p>';
+      return;
+    }
+    data=hmCustomOGs.map(og=>{
+      const r=hmOGIndex[og]||{};
+      return {id:og,species_counts:r.species_counts||{},total:r.total||0,family:r.family||"",cls:r.cls||""};
+    });
+    back.style.display="none";
+    crumb.textContent="Custom selection ("+hmCustomOGs.length+" OG"+(hmCustomOGs.length!==1?"s":"")+")";
+    colLabel=d=>d.id;
+    clickHandler=(_ev,d,sp)=>{
+      if(!sp) return;
+      const tRec=hmOGIndex[d.id]?TREE_INDEX.find(t=>t.id===hmOGIndex[d.id].hgId):null;
+      if(!tRec) return;
+      switchTab("trees"); selectTree(tRec); renderSidebar("");
+      ogHlQueries=[d.id]; rebuildOgHlSet();
+      if(d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); setTimeout(focusHighlighted,60); }
+    };
   }
 
-  // ── apply free-text search filter ─────────────────────────────────────
-  if(hmTextFilter){
+  // ── apply free-text search filter (browse modes only) ─────────────────
+  if(hmViewMode!=="custom" && hmTextFilter){
     data=data.filter(d=>{
       const s=(d.id||"").toLowerCase()+(d.family||"").toLowerCase()+(d.hg||"").toLowerCase()+(d.class||"").toLowerCase();
       return s.includes(hmTextFilter);
@@ -1283,12 +1321,119 @@ function hmBack(){
   drawHeatmap();
 }
 
+// ── Custom OG selection helpers ────────────────────────────────────────────
+function hmEnterCustom(){
+  buildOGIndex();
+  hmViewMode="custom";
+  document.getElementById("hm-custom-bar").style.display="flex";
+  document.getElementById("hm-og-search").focus();
+  drawHeatmap();
+}
+function hmExitCustom(){
+  hmViewMode="class"; hmActiveClass=null; hmActiveFamily=null;
+  hmActiveHG=null; hmActiveHGRec=null;
+  document.getElementById("hm-custom-bar").style.display="none";
+  document.getElementById("hm-og-dropdown").style.display="none";
+  drawHeatmap();
+}
+function hmCustomClear(){
+  hmCustomOGs=[]; renderCustomChips(); drawHeatmap();
+}
+
+let _hmOGSearchHits=[], _hmOGSearchSel=-1;
+
+function hmOGSearchInput(val){
+  val=(val||"").trim();
+  const dd=document.getElementById("hm-og-dropdown");
+  if(!val){ dd.style.display="none"; return; }
+  buildOGIndex();
+  const q=val.toLowerCase();
+  // OG name matches
+  const ogHits=Object.keys(hmOGIndex)
+    .filter(k=>k.toLowerCase().includes(q))
+    .sort((a,b)=>{
+      const as=a.toLowerCase().startsWith(q),bs=b.toLowerCase().startsWith(q);
+      return (as===bs)?a.localeCompare(b):(as?-1:1);
+    }).slice(0,40).map(og=>({og,matchedGene:null}));
+  // gene name matches → resolved to OG
+  const seenOGs=new Set(ogHits.map(h=>h.og));
+  const geneHits=Object.entries(hmGeneIndex)
+    .filter(([g])=>g.toLowerCase().includes(q))
+    .filter(([,og])=>!seenOGs.has(og))
+    .sort((a,b)=>a[0].localeCompare(b[0])).slice(0,20)
+    .map(([g,og])=>{ seenOGs.add(og); return {og,matchedGene:g}; });
+  _hmOGSearchHits=[...ogHits,...geneHits];
+  _hmOGSearchSel=-1;
+  dd.innerHTML=_hmOGSearchHits.map((hit,i)=>{
+    const {og,matchedGene}=hit;
+    const r=hmOGIndex[og]||{family:"",total:0};
+    const already=hmCustomOGs.includes(og);
+    const escapedOg=og.replace(/\\\\/g,"\\\\\\\\").replace(/'/g,"\\\\'");
+    const label=matchedGene
+      ? `<span style="color:#888;font-size:10px">gene</span> <b>${matchedGene}</b><span style="color:#aaa;font-size:10px"> \u2192 ${og} \u00b7 ${r.family}</span>`
+      : `<b>${og}</b><span style="color:#aaa;font-size:10px"> \u00b7 ${r.family} \u00b7 ${r.total} genes</span>`;
+    return `<li data-i="${i}" style="padding:3px 10px;cursor:pointer;background:${already?"#e8f5e9":"#fff"};color:${already?"#2e7d32":"#222"}" onmousedown="hmOGSearchAdd('${escapedOg}')">${label}${already?`<span style="color:#27ae60;float:right">&#10003;</span>`:""}</li>`;
+  }).join("")||`<li style="padding:4px 10px;color:#aaa">No matches</li>`;
+  dd.style.display="block";
+}
+
+function hmOGSearchKey(ev){
+  const dd=document.getElementById("hm-og-dropdown");
+  const items=dd.querySelectorAll("li[data-i]");
+  if(ev.key==="ArrowDown"){
+    ev.preventDefault();
+    _hmOGSearchSel=Math.min(_hmOGSearchSel+1,items.length-1);
+    items.forEach((li,i)=>li.style.background=i===_hmOGSearchSel?"#e3f0ff":(hmCustomOGs.includes((_hmOGSearchHits[i]||{}).og)?"#e8f5e9":"#fff"));
+  } else if(ev.key==="ArrowUp"){
+    ev.preventDefault();
+    _hmOGSearchSel=Math.max(_hmOGSearchSel-1,0);
+    items.forEach((li,i)=>li.style.background=i===_hmOGSearchSel?"#e3f0ff":(hmCustomOGs.includes((_hmOGSearchHits[i]||{}).og)?"#e8f5e9":"#fff"));
+  } else if(ev.key==="Enter"){
+    ev.preventDefault();
+    const idx=_hmOGSearchSel>=0?_hmOGSearchSel:(_hmOGSearchHits.length===1?0:-1);
+    if(idx>=0) hmOGSearchAdd(_hmOGSearchHits[idx].og);
+  } else if(ev.key==="Escape"){
+    dd.style.display="none";
+  }
+}
+
+function hmOGSearchAdd(og){
+  if(!hmCustomOGs.includes(og)) hmCustomOGs.push(og);
+  const inp=document.getElementById("hm-og-search");
+  inp.value=""; inp.focus();
+  document.getElementById("hm-og-dropdown").style.display="none";
+  renderCustomChips(); drawHeatmap();
+}
+
+function renderCustomChips(){
+  document.getElementById("hm-custom-chips").innerHTML=hmCustomOGs.map((og,i)=>`<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:10px;background:#4a90d9;color:#fff;font-size:10px">${og}<span style="cursor:pointer;margin-left:2px;opacity:.8" onclick="hmCustomOGs.splice(${i},1);renderCustomChips();drawHeatmap()">&#10005;</span></span>`).join("");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TREE VIEW – SIDEBAR
 // ═══════════════════════════════════════════════════════════════════════════════
 let currentIndex  = null;
 let currentDetail = null;
 let treeSource    = "generax";   // "generax" | "original"
+
+function buildOGIndex(){
+  if(hmOGIndex) return;
+  hmOGIndex={}; hmGeneIndex={};
+  for(const tRec of TREE_INDEX){
+    const detail=loadDetail(tRec.id);
+    if(!detail||!detail.ogs) continue;
+    for(const [og,gids] of Object.entries(detail.ogs)){
+      const sc={};
+      gids.forEach(g=>{
+        const sp=getSpeciesPfx(g);
+        if(sp) sc[sp]=(sc[sp]||0)+1;
+        hmGeneIndex[g]=og;
+      });
+      hmOGIndex[og]={hgId:tRec.id,family:tRec.family,cls:tRec.class||tRec.prefix,
+                     total:gids.length,species_counts:sc};
+    }
+  }
+}
 
 function loadDetail(id) {
   const el=document.getElementById("treedata-"+id);
@@ -1786,6 +1931,11 @@ document.addEventListener("click",ev=>{
   const panel=document.getElementById("mini-sp-panel");
   if(panel.style.display==="block"&&!panel.contains(ev.target)&&ev.target.id!=="btn-mini-sp")
     panel.style.display="none";
+  // close OG search dropdown when clicking outside
+  if(!ev.target.closest("#hm-og-search")&&!ev.target.closest("#hm-og-dropdown")){
+    const dd=document.getElementById("hm-og-dropdown");
+    if(dd) dd.style.display="none";
+  }
 });
 
 function drawMiniSpTree(){
