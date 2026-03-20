@@ -21,3 +21,10 @@ Report2:
 - [ ] gene trees tab - when in the "focus" mode, the collapsed branches occupy too much vertical space - each tip occupies an equal space. Add an option to control the fraction of space occupied by the collapsed tips (from 1 to, say 0.5), so one can adjust this dynamically  
 - [ ] gene trees tab - add a small button with a tree symbol that would expand into a species tree with named nodes (only when hovering over them, that would allow to click on the node to be selected for highlight (in addition to be able to text-search the species / clades))
 - [ ] gene trees tab - Color: tab - when the specific species / clade has been selected (or multiple), the value of that one should go to the "by species" to not create a confusion   
+- [ ] gene trees tab - node collapsing does not work (triangle / circle )
+
+
+Create the report   
+```bash
+python workflow/report_step2.py --species_tree data/species_tree.full.newick --family_info genefam.csv --possvm_dir results/possvm --possvm_prev_dir results/possvm_prev/ --output report2.html
+```
