@@ -671,6 +671,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         Triangle fill:
         <input type="color" id="col-tri-fill" value="#ffffff" style="width:28px;height:22px;cursor:pointer;border:1px solid #bbb;border-radius:3px;padding:1px">
       </label>
+      <button class="ctrl-btn" id="btn-prune-sptree" onclick="toggleSpPrune()" title="Toggle pruning the tree to only species present in the gene-tree data">Prune to data</button>
       <button class="ctrl-btn" id="btn-dl-anno" onclick="downloadAnnotations()">&#11015; Annotations TSV</button>
       <button class="ctrl-btn" id="btn-dl-newick" onclick="downloadNewick()">&#11015; Newick</button>
     </div>
@@ -679,6 +680,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
 </div>
 
+<div id="sp-annot-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:300;min-width:150px">
+  <div style="font-size:10px;color:#888;margin-bottom:6px;font-weight:600" id="sp-annot-popup-title"></div>
+  <div id="sp-annot-popup-btns" style="display:flex;flex-direction:column;gap:4px"></div>
+</div>
 <div id="mini-sp-panel">
   <div class="msp-title">Species tree — click a named node to highlight that clade</div>
   <div id="mini-sp-svg-wrap"></div>
@@ -828,6 +833,7 @@ const spMeta = (()=>{
   return m;
 })();
 let spTreeWidthPct = 50;         // % of pane width used by species tree SVG
+let spPruneToData  = false;      // when true, drawSpeciesTree hides species absent from gene-tree data
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
 function hlTagColor(gi){ const q=hlQueries[gi]; return (q&&hlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
 function ogHlTagColor(gi){ const q=ogHlQueries[gi]; return (q&&ogHlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
@@ -1320,7 +1326,7 @@ function drawSpeciesTree() {
   // ── helpers ──────────────────────────────────────────────────────────
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
   function prune(n){
-    if(!n.children) return SPECIES_ORDER.includes(n.name)?n:null;
+    if(!n.children) return (spPruneToData?inPhylo.has(n.name):SPECIES_ORDER.includes(n.name))?n:null;
     const k=n.children.map(prune).filter(Boolean);
     if(!k.length) return null;
     if(k.length===1) return k[0];
@@ -1495,14 +1501,21 @@ function drawSpeciesTree() {
             +'<div class="tt-row"><span>Annotated genes</span><strong>'+m.genes+'</strong></div>'
             +'<div class="tt-row"><span>Families</span><strong>'+m.families+'</strong></div>'
             +'<div class="tt-row"><span>Homology groups</span><strong>'+m.hgs+'</strong></div>'
-            +'<div style="font-size:9px;color:#aaa;margin-top:3px">click to download gene list</div>');
+            +'<div style="font-size:9px;color:#aaa;margin-top:3px">click to export annotations</div>');
         }).on("mousemove",moveTip).on("mouseout",hideTip)
-        .on("click",()=>{ hideTip(); downloadSpeciesGenes(n.name); });
+        .on("click",(ev)=>{ hideTip(); showSpAnnotPopup(ev, n.name); });
       return;
     }
     n.children.forEach(drawLeaves);
   }
   drawLeaves(tree);
+}
+
+function toggleSpPrune(){
+  spPruneToData=!spPruneToData;
+  const btn=document.getElementById("btn-prune-sptree");
+  if(btn){ btn.style.background=spPruneToData?"#d0e8ff":""; btn.style.fontWeight=spPruneToData?"600":""; }
+  drawSpeciesTree();
 }
 
 // ── helpers for sort-by-species buttons ───────────────────────────────────
@@ -2563,21 +2576,53 @@ function downloadNewick(){
   URL.revokeObjectURL(a.href);
 }
 
-function downloadSpeciesGenes(sp){
+function downloadSpeciesGenes(sp, cls){
   buildOGIndex();
   const rows=["gene_id\tog_name\thg_id\tfamily\tclass"];
   for(const [gene,og] of Object.entries(hmGeneIndex)){
     if(getSpeciesPfx(gene)!==sp) continue;
     const r=hmOGIndex[og]||{};
+    if(cls && (r.cls||"other")!==cls) continue;
     rows.push([gene,og,r.hgId||"",r.family||"",r.cls||""].join("\t"));
   }
-  if(rows.length===1){ alert("No gene data found for "+sp); return; }
+  if(rows.length===1){ alert("No gene data found for "+sp+(cls?" ("+cls+")":"")); return; }
   const blob=new Blob([rows.join("\n")],{type:"text/tab-separated-values"});
   const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob); a.download=sp+"_genes.tsv";
+  a.href=URL.createObjectURL(blob); a.download=sp+(cls?"_"+cls:"")+"_genes.tsv";
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }
+
+function showSpAnnotPopup(event, sp){
+  buildOGIndex();
+  const classes=new Set();
+  for(const [gene,og] of Object.entries(hmGeneIndex)){
+    if(getSpeciesPfx(gene)!==sp) continue;
+    classes.add((hmOGIndex[og]||{}).cls||"other");
+  }
+  const sorted=[...classes].sort();
+  if(!sorted.length){ downloadSpeciesGenes(sp); return; }
+  const pop=document.getElementById("sp-annot-popup");
+  document.getElementById("sp-annot-popup-title").textContent=sp;
+  const btns=document.getElementById("sp-annot-popup-btns"); btns.innerHTML="";
+  const btnStyle="padding:3px 8px;font-size:11px;border:1px solid #aaa;border-radius:3px;background:#f8f8f8;cursor:pointer;text-align:left;width:100%";
+  const mkBtn=(label,cls)=>{
+    const b=document.createElement("button"); b.style.cssText=btnStyle; b.textContent=label;
+    b.onclick=()=>{ pop.style.display="none"; downloadSpeciesGenes(sp,cls); };
+    btns.appendChild(b);
+  };
+  mkBtn("All classes", undefined);
+  sorted.forEach(c=>mkBtn(c, c));
+  event.stopPropagation();
+  pop.style.display="block";
+  const x=Math.min(event.clientX+8,window.innerWidth-pop.offsetWidth-8);
+  const y=Math.min(event.clientY+8,window.innerHeight-pop.offsetHeight-8);
+  pop.style.left=Math.max(4,x)+"px"; pop.style.top=Math.max(4,y)+"px";
+}
+document.addEventListener("click",(e)=>{
+  const pop=document.getElementById("sp-annot-popup");
+  if(pop&&!pop.contains(e.target)&&e.target.id!=="sp-annot-popup") pop.style.display="none";
+});
 
 function downloadAnnotations(){
   // Build species × class annotation table from FAMILY_DATA
@@ -3306,26 +3351,30 @@ function renderTree(animate){
     .attr("font-size",tipFontSVG())
     .style("cursor",d=>{
       if(_compareNode1) return "crosshair";
-      return (d._isOgCol||(d.children&&!d._children))?"pointer":"default";
+      if(d._isOgCol) return "pointer";
+      if(!d._children&&(isOGNode(d)||d.data._og_label)) return "pointer";
+      return "default";
     })
     .attr("fill",d=>{
-      // manually collapsed (no _og_label): dark gray; OG-labelled: red (or highlight colour)
-      const isManual=d._isOgCol&&!d.data._og_label&&!isOGNode(d);
+      // OG nodes (named or annotated) → red; all collapsed non-OG nodes → grey
       const ogName=d._isOgCol?(d.data._og_label||d.data.name||""):(isOGNode(d)?d.data.name:(d.data._og_label||""));
       if(ogName&&ogHlSet!==null){
         if(ogHlSet.has(ogName)){ const gi=ogHlGroupIndex.get(ogName)??0; return ogHlTagColor(gi); }
         return "#ccc";
       }
-      if(isManual) return "#444";
-      return "#b5371f";
+      if(isOGNode(d)||d.data._og_label) return "#b5371f";
+      return "#444";
     })
     .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(showOGLabels&&!d._children&&(isOGNode(d)||d.data._og_label))))?null:"none")
     .on("click",(event,d)=>{
       event.stopPropagation();
       if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
-      // Normal click: triangle popup for collapsed OG, collapse-choice for expanded OG
+      // Triangle popup for collapsed OG; for expanded OG/annotated nodes toggle OG highlight
       if(d._children&&d._isOgCol) showTriActionPopup(event,d);
-      else if(d.children&&!d._children) showCollapseChoicePopup(event,d);
+      else if(!d._children&&(isOGNode(d)||d.data._og_label)){
+        const ogName=d.data._og_label||(isOGNode(d)?d.data.name:"");
+        if(ogName){ const idx=ogHlQueries.indexOf(ogName); if(idx>=0) removeOgHlTag(idx); else addOgHlTag(ogName); }
+      }
     })
     .text("")
     .each(function(d){
@@ -3339,8 +3388,9 @@ function renderTree(animate){
       }
       if(!mainLbl) return;
       el.append("tspan").text(mainLbl);
-      // For OG-collapsed nodes, append MRCA label on a second line
-      if(d._isOgCol){
+      // For OG-collapsed nodes (actual OG or annotated), append MRCA clade name on a second line
+      // Skip for plain manual collapses: their label is already the MRCA name
+      if(d._isOgCol&&(isOGNode(d)||d.data._og_label)){
         const sc={};
         (function cnt(ch){ if(!ch)return; for(const c of ch){
           if(c.data.leaf){const sp=c.data.species||"?";sc[sp]=(sc[sp]||0)+1;}
