@@ -340,6 +340,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <div style="display:flex;gap:6px">
     <button id="ccp-triangle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a filled triangle (proportional size)">&#x25BD; Triangle</button>
     <button id="ccp-circle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a circle with leaf count">&#x25EF; Circle</button>
+    <button id="ccp-compare" style="padding:4px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer" title="Compare species coverage with another node">&#x2316; Compare</button>
   </div>
 </div>
 <div id="tri-action-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
@@ -348,6 +349,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button id="tap-expand" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x25B7; Expand</button>
     <button id="tap-rename" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x270F; Rename</button>
     <button id="tap-color"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Color</button>
+    <button id="tap-compare" style="padding:3px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer">&#x2316; Compare</button>
     <input id="tap-color-input" type="color" style="display:none">
   </div>
 </div>
@@ -371,6 +373,20 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button class="cp-btn" onclick="cpExpand()">Expand</button>
     <button class="cp-btn" onclick="cpClose()">Close</button>
   </div>
+</div>
+
+<!-- ── Species compare banner + result panel ── -->
+<div id="sp-compare-banner" style="display:none;position:fixed;z-index:400;bottom:28px;left:50%;transform:translateX(-50%);background:#fffbea;border:1px solid #e8c840;border-radius:20px;padding:5px 16px;font-size:11px;color:#7a5c00;box-shadow:0 2px 8px rgba(0,0,0,.18);align-items:center;gap:10px;white-space:nowrap">
+  <span>&#x2316; Click a second node to compare species&hellip;</span>
+  <button onclick="exitCompareMode()" style="padding:1px 8px;font-size:10px;border:1px solid #c8a030;border-radius:10px;background:#fff;cursor:pointer;color:#7a5c00">Cancel</button>
+</div>
+<div id="sp-compare-panel" style="display:none;position:fixed;z-index:410;top:30%;left:50%;transform:translate(-50%,0);background:#fff;border:1px solid #bbb;border-radius:8px;padding:12px 16px;font-size:11px;box-shadow:0 6px 20px rgba(0,0,0,.22);min-width:240px;max-width:380px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <b style="font-size:12px;color:#333">Species overlap</b>
+    <span onclick="document.getElementById('sp-compare-panel').style.display='none'" style="cursor:pointer;color:#aaa;font-size:16px;line-height:1;padding:0 2px" title="Close">&times;</span>
+  </div>
+  <div id="scp-legend" style="font-size:10px;color:#666;margin-bottom:8px;line-height:1.6"></div>
+  <div id="scp-content"></div>
 </div>
 
 <!-- ── Per-HG lazy data ── -->
@@ -605,6 +621,10 @@ function collectLeafGenes(children) {
     node._children=node.children; node.children=null;
     node._isOgCol=false; renderTree(true);
   });
+  document.getElementById("ccp-compare").addEventListener("click",()=>{
+    const node=_ccpNode; if(!node) return; hide();
+    enterCompareMode(node);
+  });
   window.showCollapseChoicePopup=function(event,d){
     _ccpNode=d; cancelHide();
     pop.style.display="flex";
@@ -676,6 +696,10 @@ const nodeTriColors=new Map(); // _uid → custom fill override for gene-tree tr
     nodeTriColors.set(_nd._uid,colorInput.value);
     // update the polygon inline without full re-render
     gMain&&gMain.selectAll(".col-tri").filter(d=>d&&d._uid===_nd._uid).style("fill",colorInput.value);
+  });
+  document.getElementById("tap-compare").addEventListener("click",()=>{
+    const node=_nd; if(!node) return; hide();
+    enterCompareMode(node);
   });
   document.addEventListener("click",(e)=>{ if(!pop.contains(e.target)) hide(); });
   window.showTriActionPopup=function(event,d){
@@ -2244,6 +2268,7 @@ function activeOgs(){
 
 const treeSvg = d3.select("#tree-svg");
 let rootNode=null, gMain=null, _uid=0, _zoom=null, _zoomScale=1;
+let _compareNode1=null;  // first node selected for species comparison
 let useBranchLen=false, _phyloScale=1;
 
 function tipFontSVG(){ return (tipFontSize!==null?tipFontSize:11)/_zoomScale; }
@@ -2305,6 +2330,54 @@ function countDescLeaves(children){
   }
   return n;
 }
+
+// ── Species comparison helpers ─────────────────────────────────────────────
+function getSpeciesUnder(d){
+  const sp=new Set();
+  (function walk(n){
+    const ch=n.children||n._children;
+    if(!ch||!ch.length){ const s=n.data.species||getSpeciesPfx(n.data.gene_id||n.data.name||""); if(s) sp.add(s); return; }
+    for(const c of ch) walk(c);
+  })(d);
+  return sp;
+}
+function getNodeCompareLabel(d){
+  if(d._uid&&customNodeNames[d._uid]) return customNodeNames[d._uid];
+  const lbl=d.data._og_label||(isOGNode(d)?d.data.name:"")||d.data.name||"";
+  const n=countAllLeaves(d);
+  return (lbl||"node")+" ("+n+" tips)";
+}
+function enterCompareMode(node){
+  _compareNode1=node;
+  document.getElementById("sp-compare-banner").style.display="flex";
+  const svg=document.getElementById("tree-svg"); if(svg) svg.style.cursor="crosshair";
+}
+function exitCompareMode(){
+  _compareNode1=null;
+  document.getElementById("sp-compare-banner").style.display="none";
+  const svg=document.getElementById("tree-svg"); if(svg) svg.style.cursor="";
+}
+function runSpeciesComparison(nodeB){
+  const nodeA=_compareNode1; exitCompareMode();
+  const spA=getSpeciesUnder(nodeA), spB=getSpeciesUnder(nodeB);
+  const both=[...spA].filter(s=>spB.has(s)).sort();
+  const onlyA=[...spA].filter(s=>!spB.has(s)).sort();
+  const onlyB=[...spB].filter(s=>!spA.has(s)).sort();
+  const lA=getNodeCompareLabel(nodeA), lB=getNodeCompareLabel(nodeB);
+  function spPills(arr,bg,fg){
+    if(!arr.length) return `<span style="color:#aaa;font-style:italic;font-size:10px">none</span>`;
+    return arr.map(s=>`<span style="display:inline-block;padding:1px 7px;margin:2px 2px 0;border-radius:10px;background:${bg};color:${fg};font-size:10px">${s}</span>`).join("");
+  }
+  document.getElementById("scp-legend").innerHTML=
+    `<span style="color:#2980b9;font-weight:600">[A]</span> ${lA}<br>`+
+    `<span style="color:#c0392b;font-weight:600">[B]</span> ${lB}`;
+  document.getElementById("scp-content").innerHTML=
+    `<div style="margin-bottom:6px"><b style="color:#27ae60">Shared (${both.length})</b><div style="margin-top:3px;line-height:1.8">${spPills(both,"#d4efdf","#1a6b3a")}</div></div>`+
+    `<div style="margin-bottom:6px"><b style="color:#2980b9">Only in A (${onlyA.length})</b><div style="margin-top:3px;line-height:1.8">${spPills(onlyA,"#d6eaf8","#1a4a6b")}</div></div>`+
+    `<div><b style="color:#c0392b">Only in B (${onlyB.length})</b><div style="margin-top:3px;line-height:1.8">${spPills(onlyB,"#fadbd8","#7b241c")}</div></div>`;
+  document.getElementById("sp-compare-panel").style.display="block";
+}
+document.addEventListener("keydown",ev=>{ if(ev.key==="Escape"&&_compareNode1) exitCompareMode(); });
 
 function collapsedLabel(d){
   const n=countDescLeaves(d._children);
@@ -2671,6 +2744,7 @@ function renderTree(animate){
         return;
       }
       event.stopPropagation();
+      if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
       if(d._children){ d.children=d._children; d._children=null; d._isOgCol=false; renderTree(true); hideTip(); }
       else if(d.children){ showCollapseChoicePopup(event,d); }
     })
@@ -2710,6 +2784,7 @@ function renderTree(animate){
     .attr("stroke-width",d=>(d._children&&d._isOgCol)?treeLinkWidth/_zoomScale:null)
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
+      if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
       showTriActionPopup(event,d);
     })
     .on("mouseover",(ev,d)=>{
