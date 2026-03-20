@@ -1326,7 +1326,7 @@ function drawSpeciesTree() {
   // ── helpers ──────────────────────────────────────────────────────────
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
   function prune(n){
-    if(!n.children) return (spPruneToData?inPhylo.has(n.name):SPECIES_ORDER.includes(n.name))?n:null;
+    if(!n.children) return (spPruneToData?(inPhylo.has(n.name)||dataSpecies.has(n.name)):SPECIES_ORDER.includes(n.name))?n:null;
     const k=n.children.map(prune).filter(Boolean);
     if(!k.length) return null;
     if(k.length===1) return k[0];
@@ -2132,8 +2132,9 @@ function buildOGIndex(){
   hmOGIndex={}; hmGeneIndex={};
   for(const tRec of TREE_INDEX){
     const detail=loadDetail(tRec.id);
-    if(!detail||!detail.ogs) continue;
-    for(const [og,gids] of Object.entries(detail.ogs)){
+    if(!detail) continue;
+    const ogs=detail.ogs||{};
+    for(const [og,gids] of Object.entries(ogs)){
       const sc={};
       gids.forEach(g=>{
         const sp=getSpeciesPfx(g);
@@ -2143,6 +2144,22 @@ function buildOGIndex(){
       hmOGIndex[og]={hgId:tRec.id,family:tRec.family,cls:tRec.class||tRec.prefix,
                      total:gids.length,species_counts:sc};
     }
+    const UNCL="Unclassified";
+    const oggedGenes=new Set(Object.values(ogs).flat());
+    (function walk(n){
+      if(!n) return;
+      if(n.leaf){
+        const gid=n.gene_id||n.name||"";
+        if(gid&&!oggedGenes.has(gid)){
+          hmGeneIndex[gid]=UNCL;
+          if(!hmOGIndex[UNCL]) hmOGIndex[UNCL]={hgId:"",family:"",cls:UNCL,total:0,species_counts:{}};
+          const sp=getSpeciesPfx(gid);
+          if(sp){ hmOGIndex[UNCL].species_counts[sp]=(hmOGIndex[UNCL].species_counts[sp]||0)+1; }
+          hmOGIndex[UNCL].total++;
+        }
+      }
+      (n.children||[]).forEach(walk);
+    })(detail.tree);
   }
 }
 
