@@ -90,7 +90,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .link{fill:none;stroke:#d5d5d5}
 .node-g circle{cursor:pointer;transition:r .12s,fill .12s}
 .node-g circle:hover{stroke-width:2.5px !important}
-.col-tri{fill:#ffffff;stroke:#222;stroke-width:1px;cursor:pointer}
+.col-tri{stroke:#222;stroke-width:1px;cursor:pointer}
 .col-tri:hover{filter:brightness(0.88)}
 .leaf-label{pointer-events:none;font-family:monospace}
 .og-label{fill:#b5371f;pointer-events:none}
@@ -661,7 +661,7 @@ const nodeTriColors=new Map(); // _uid → custom fill override for gene-tree tr
     if(!_nd) return;
     nodeTriColors.set(_nd._uid,colorInput.value);
     // update the polygon inline without full re-render
-    gMain&&gMain.selectAll(".col-tri").filter(d=>d&&d._uid===_nd._uid).attr("fill",colorInput.value);
+    gMain&&gMain.selectAll(".col-tri").filter(d=>d&&d._uid===_nd._uid).style("fill",colorInput.value);
   });
   document.addEventListener("click",(e)=>{ if(!pop.contains(e.target)) hide(); });
   window.showTriActionPopup=function(event,d){
@@ -2296,6 +2296,28 @@ function elbowPath(s, t, mg, r){
     : `M${sx},${sy}V${ty+r}A${r},${r} 0 0,0 ${sx+r},${ty}H${tx}`;
 }
 
+/** Annotate expanded internal nodes with _og_label via MRCA from tip OG data.
+ *  Used for trees where OG info is in pipe-separated tip labels (not named internals).
+ *  Only sets labels on currently-visible (expanded) internal nodes. */
+function annotateOGNodes(){
+  if(!rootNode) return;
+  // If tree already has named OG internal nodes, nothing to annotate
+  if(rootNode.descendants().some(d=>isOGNode(d))) return;
+  // Clear previous non-collapsed annotations (leave _og_label on _isOgCol nodes alone)
+  rootNode.each(d=>{ if(!d._isOgCol) d.data._og_label=null; });
+  // Collect OG → visible leaf nodes
+  const ogGroups={};
+  rootNode.each(d=>{
+    if(!d.data.leaf) return;
+    const og=d.data.og||ogGene2Name[d.data.gene_id||d.data.name]||"";
+    if(og)(ogGroups[og]=ogGroups[og]||[]).push(d);
+  });
+  for(const [og,leaves] of Object.entries(ogGroups)){
+    const mrca=findMRCA(leaves);
+    if(mrca&&!mrca.data.leaf&&!mrca._isOgCol){ mrca.data._og_label=og; }
+  }
+}
+
 function toggleOGLabels(){
   showOGLabels=!showOGLabels;
   document.getElementById("btn-og-labels").classList.toggle("active-btn", showOGLabels);
@@ -2441,6 +2463,8 @@ const BADGE_W=96, BADGE_H=17;
 
 function renderTree(animate){
   if(!rootNode) return;
+  // Annotate internal nodes with OG labels for pipe-sep tip format (no-op for named-internal trees)
+  if(showOGLabels) annotateOGNodes();
   const wrap=document.getElementById("tree-wrap");
   const W=wrap.clientWidth||800, H=wrap.clientHeight||600;
   const mg={top:20,right:240,bottom:36,left:36};
@@ -2588,7 +2612,7 @@ function renderTree(animate){
       const halfH=Math.max(rowH*0.45, nL*effRow*collapsedFraction*0.48);
       return `0,0 ${BADGE_W},${-halfH} ${BADGE_W},${halfH}`;
     })
-    .attr("fill",d=>{
+    .style("fill",d=>{
       if(!d._children||!d._isOgCol) return null;
       // per-node user color override takes priority
       if(nodeTriColors.has(d._uid)) return nodeTriColors.get(d._uid);
@@ -2599,9 +2623,9 @@ function renderTree(animate){
       }
       if(colorMode==="og"){
         const col=ogName2Color[ogName];
-        return col ? col+"55" : null;
+        return col ? col+"55" : "#ffffff";
       }
-      return null;  // falls back to CSS .col-tri fill
+      return "#ffffff";
     })
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
@@ -2688,7 +2712,7 @@ function renderTree(animate){
     .attr("fill",d=>{
       // manually collapsed (no _og_label): dark gray; OG-labelled: red (or highlight colour)
       const isManual=d._isOgCol&&!d.data._og_label&&!isOGNode(d);
-      const ogName=d._isOgCol?(d.data._og_label||d.data.name||""):(isOGNode(d)?d.data.name:"");
+      const ogName=d._isOgCol?(d.data._og_label||d.data.name||""):(isOGNode(d)?d.data.name:(d.data._og_label||""));
       if(ogName&&ogHlSet!==null){
         if(ogHlSet.has(ogName)){ const gi=ogHlGroupIndex.get(ogName)??0; return ogHlTagColor(gi); }
         return "#ccc";
@@ -2696,8 +2720,8 @@ function renderTree(animate){
       if(isManual) return "#444";
       return "#b5371f";
     })
-    .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(showOGLabels&&!d._children&&isOGNode(d))))?null:"none")
-    .text(d=>d._isOgCol?collapsedLabel(d):(isOGNode(d)?d.data.name:""));
+    .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(showOGLabels&&!d._children&&(isOGNode(d)||d.data._og_label))))?null:"none")
+    .text(d=>d._isOgCol?collapsedLabel(d):(isOGNode(d)?d.data.name:(d.data._og_label||"")));
 
   // support labels: shown on internal nodes when showSupport is true
   nodeSel.select(".support-lbl")
