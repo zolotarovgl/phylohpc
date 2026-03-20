@@ -2108,7 +2108,7 @@ function rebuildHlSet(){
   }
   renderHlTags();
   document.getElementById("btn-focus-hl").style.display=hlSet?"inline":"none";
-  if(currentIndex) renderTree();
+  if(currentIndex!==null) renderTree();
 }
 
 function renderHlTags(){
@@ -2168,7 +2168,7 @@ function rebuildOgHlSet(){
     if(ogHlSet) hmFocusGids=null; // user's new highlight overrides heatmap-navigation focus
   }
   renderOgHlTags();
-  if(currentIndex) renderTree();
+  if(currentIndex!==null) renderTree();
 }
 
 function renderOgHlTags(){
@@ -2251,10 +2251,10 @@ document.getElementById("collapsed-frac-slider").addEventListener("input",functi
   if(rootNode) renderTree(true);
 });
 
-document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex) renderTree(); });
-document.getElementById("chk-og").addEventListener("change",function(){ showOGName=this.checked; if(currentIndex) renderTree(); });
-document.getElementById("chk-ref").addEventListener("change",function(){ showRefOrtho=this.checked; if(currentIndex) renderTree(); });
-document.getElementById("chk-hide-nonhl").addEventListener("change",function(){ hideNonHl=this.checked; if(currentIndex) renderTree(); });
+document.getElementById("chk-geneid").addEventListener("change",function(){ showGeneId=this.checked; if(currentIndex!==null) renderTree(); });
+document.getElementById("chk-og").addEventListener("change",function(){ showOGName=this.checked; if(currentIndex!==null) renderTree(); });
+document.getElementById("chk-ref").addEventListener("change",function(){ showRefOrtho=this.checked; if(currentIndex!==null) renderTree(); });
+document.getElementById("chk-hide-nonhl").addEventListener("change",function(){ hideNonHl=this.checked; if(currentIndex!==null) renderTree(); });
 
 document.getElementById("sptree-width-slider").addEventListener("input",function(){
   spTreeWidthPct=+this.value;
@@ -2669,6 +2669,7 @@ function renderTree(animate){
   const minRowH = Math.max(14, Math.ceil(fsEff * 1.3));
   const rowH = Math.max(minRowH, Math.min(Math.max(minRowH, 36), Math.floor(iH/Math.max(nAll,1))));
   const tH=Math.max(iH, nAll*rowH) * treeHeightMult;
+  const effRow = rowH * treeHeightMult;  // used here and in triangle points below
   d3.cluster().size([tH,iW])(rootNode);
 
   // Proportional Y-spacing for OG-collapsed nodes.
@@ -2679,7 +2680,6 @@ function renderTree(animate){
     const wts = vLeaves.map(d => (d._children && d._isOgCol) ? Math.max(1, countAllLeaves(d) * collapsedFraction) : 1);
     const anyCollapsed = wts.some(w => w > 1);
     if (anyCollapsed) {
-      const effRow = rowH * treeHeightMult;   // apply height multiplier here too
       let cy = effRow / 2;
       vLeaves.forEach((d, i) => {
         d.x = cy + wts[i] * effRow / 2;
