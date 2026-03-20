@@ -637,14 +637,14 @@ function collectLeafGenes(children) {
   pop.addEventListener("mouseenter",cancelHide);
   pop.addEventListener("mouseleave",schedHide);
   document.getElementById("ccp-triangle").addEventListener("click",()=>{
-    if(!_ccpNode) return; hide();
-    _ccpNode._children=_ccpNode.children; _ccpNode.children=null;
-    _ccpNode._isOgCol=true; renderTree(true);
+    const node=_ccpNode; if(!node) return; hide();
+    node._children=node.children; node.children=null;
+    node._isOgCol=true; renderTree(true);
   });
   document.getElementById("ccp-circle").addEventListener("click",()=>{
-    if(!_ccpNode) return; hide();
-    _ccpNode._children=_ccpNode.children; _ccpNode.children=null;
-    _ccpNode._isOgCol=false; renderTree(true);
+    const node=_ccpNode; if(!node) return; hide();
+    node._children=node.children; node.children=null;
+    node._isOgCol=false; renderTree(true);
   });
   window.showCollapseChoicePopup=function(event,d){
     _ccpNode=d; cancelHide();
@@ -2020,8 +2020,8 @@ function _buildCombinedHeatmapSVG(){
   const cladoInner=cladoSvg?cladoSvg.innerHTML:"";
   const heatInner=heatSvg.innerHTML;
   return {svgStr:
-    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}">` +
-    `<style>${css}</style>` +
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" style="font-family:sans-serif">` +
+    `<style>text{font-family:sans-serif}${css}</style>` +
     `<rect width="${W}" height="${H}" fill="#fff"/>` +
     (cladoInner?`<g>${cladoInner}</g>`:"") +
     `<g transform="translate(${cBB.w},0)">${heatInner}</g>` +
