@@ -110,8 +110,8 @@ process PHY {
     tuple val(id), path(aln)
 
     output:
-    tuple val(id), path("${id}.treefile"), path(aln)
-    path("${id}.ckp.gz"), optional: true
+    tuple val(id), path("${id}.treefile"), path(aln), emit: trees
+    path("${id}.ckp.gz"), optional: true, emit: ckp
 
     script:
 
@@ -380,7 +380,8 @@ refnames_ch     = Channel.value( file(params.REFNAMES) )
 
 workflow {
 
-    phy_out = hg_fastas | ALN | PHY
+    PHY(hg_fastas | ALN)
+    phy_out = PHY.out.trees
 
     if (params.run_generax) {
 
