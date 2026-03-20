@@ -666,6 +666,15 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button id="ccp-circle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a circle with leaf count">&#x25EF; Circle</button>
   </div>
 </div>
+<div id="tri-action-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="tri-popup-title"></div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap">
+    <button id="tap-expand" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x25B7; Expand</button>
+    <button id="tap-rename" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x270F; Rename</button>
+    <button id="tap-color"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Color</button>
+    <input id="tap-color-input" type="color" style="display:none">
+  </div>
+</div>
 <div id="clado-action-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
   <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="clado-popup-title"></div>
   <div style="display:flex;gap:5px;flex-wrap:wrap">
@@ -956,7 +965,44 @@ function collectLeafGenes(children) {
   window.showCladoActionPopup=function(event,key,displayName,redrawFn){
     _key=key; _drawFn=redrawFn;
     title.textContent=displayName;
-    colorInput.value=cladoColors.get(key)||colTriFill;
+    colorInput.value=cladoColors.get(key)||"#e0e0e0";
+    pop.style.display="flex";
+    const x=Math.min(event.clientX+8,window.innerWidth-pop.offsetWidth-8);
+    const y=Math.min(event.clientY+8,window.innerHeight-pop.offsetHeight-8);
+    pop.style.left=Math.max(4,x)+"px"; pop.style.top=Math.max(4,y)+"px";
+  };
+})();
+
+// ── Gene-tree collapsed-triangle action popup ───────────────────────────────
+const nodeTriColors=new Map(); // _uid → custom fill override for gene-tree triangles
+(function(){
+  const pop=document.getElementById("tri-action-popup");
+  const title=document.getElementById("tri-popup-title");
+  let _nd=null;
+  function hide(){ pop.style.display="none"; _nd=null; }
+  document.getElementById("tap-expand").addEventListener("click",()=>{
+    const node=_nd; if(!node) return; hide();
+    node.children=node._children; node._children=null; node._isOgCol=false; renderTree(true);
+  });
+  document.getElementById("tap-rename").addEventListener("click",()=>{
+    const node=_nd; if(!node) return; hide();
+    const cur=customNodeNames[node._uid]||collapsedLabel(node);
+    const v=window.prompt("Rename collapsed node:",cur); if(v===null) return;
+    customNodeNames[node._uid]=v.trim()||cur; renderTree(true);
+  });
+  const colorInput=document.getElementById("tap-color-input");
+  document.getElementById("tap-color").addEventListener("click",()=>{ colorInput.click(); });
+  colorInput.addEventListener("input",()=>{
+    if(!_nd) return;
+    nodeTriColors.set(_nd._uid,colorInput.value);
+    // update the polygon inline without full re-render
+    gMain&&gMain.selectAll(".col-tri").filter(d=>d&&d._uid===_nd._uid).attr("fill",colorInput.value);
+  });
+  document.addEventListener("click",(e)=>{ if(!pop.contains(e.target)) hide(); });
+  window.showTriActionPopup=function(event,d){
+    _nd=d; event.stopPropagation();
+    title.textContent=collapsedLabel(d);
+    colorInput.value=nodeTriColors.get(d._uid)||colTriFill||"#ffffff";
     pop.style.display="flex";
     const x=Math.min(event.clientX+8,window.innerWidth-pop.offsetWidth-8);
     const y=Math.min(event.clientY+8,window.innerHeight-pop.offsetHeight-8);
@@ -1045,7 +1091,7 @@ function drawCladogram() {
 
   const W = 270, H = speciesOrder.length*14+hmTopActual+40;
   const svg = d3.select(tp).append("svg").attr("width",W).attr("height",H);
-  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=hmTopActual+i*14; });
+  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=hmTopActual+i*14+7; });
 
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
   function prune(n){
@@ -1094,7 +1140,7 @@ function drawCladogram() {
       // collect leaf species for heatmap shading
       function getLeafSp(nd){ return nd.children?nd.children.flatMap(getLeafSp):[nd.name]; }
       hmCollapsedBands.push({species:getLeafSp(n),label:displayName});
-      const triColor=cladoColors.get(key)||colTriFill;
+      const triColor=cladoColors.get(key)||"#e0e0e0";
       const redraw=()=>{ drawCladogram(); };
       svg.append("polygon")
         .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
@@ -2291,9 +2337,9 @@ document.getElementById("sptree-width-slider").addEventListener("input",function
 });
 document.getElementById("col-tri-fill").addEventListener("input",function(){
   colTriFill=this.value;
-  // update already-drawn triangles immediately
-  document.querySelectorAll(".col-tri").forEach(el=>{ el.style.fill=colTriFill; });
-  drawCladogram(); drawSpeciesTree();
+  // only gene-tree .col-tri and the species-tree view use this global colour
+  document.querySelectorAll("#tree-svg .col-tri").forEach(el=>{ el.style.fill=colTriFill; });
+  drawSpeciesTree();
 });
 
 function _buildCombinedHeatmapSVG(){
@@ -2537,18 +2583,17 @@ function countDescLeaves(children){
 function collapsedLabel(d){
   const n=countDescLeaves(d._children);
   if(d._uid&&customNodeNames[d._uid]) return customNodeNames[d._uid]+" ["+n+"]";
-  const lbl=d.data._og_label||d.data.name||"";
+  // only use d.data.name as a label when it's a verified OG name (not a support value)
+  const lbl=d.data._og_label||(isOGNode(d)?d.data.name:"")||"";
   if(lbl) return lbl+" ["+n+"]";
-  // manually collapsed: collect species, optionally prefix with sp-tree MRCA name
+  // manually collapsed: show MRCA name from species tree + count
   const sc={};
   (function cnt(ch){ if(!ch)return; for(const c of ch){
     if(c.data.leaf){const sp=c.data.species||"?";sc[sp]=(sc[sp]||0)+1;}
     else{cnt(c.children);cnt(c._children);}
   }})(d._children);
-  const top=Object.entries(sc).sort((a,b)=>b[1]-a[1]).slice(0,3)
-    .map(([sp,c])=>c>1?sp+"\u00d7"+c:sp);
   const mrca=spMRCAName(new Set(Object.keys(sc)));
-  return (mrca?mrca+" \u00b7 ":"")+top.join(",")+"\u00a0["+n+"]";
+  return (mrca||"clade")+" ["+n+"]";
 }
 
 /** Full label with species breakdown for collapsed-node tooltip. */
@@ -2874,21 +2919,25 @@ function renderTree(animate){
     })
     .attr("fill",d=>{
       if(!d._children||!d._isOgCol) return null;
+      // per-node user color override takes priority
+      if(nodeTriColors.has(d._uid)) return nodeTriColors.get(d._uid);
       const ogName=d.data._og_label||d.data.name||"";
       if(ogHlSet!==null){
         if(ogHlSet.has(ogName)){ const gi=ogHlGroupIndex.get(ogName)??0; return ogHlTagColor(gi)+"bb"; }
         return "#e8e8e8";
       }
-      if(colorMode!=="og") return null;
-      const col=ogName2Color[ogName];
-      return col ? col+"55" : null;
+      if(colorMode==="og"){
+        const col=ogName2Color[ogName];
+        return col ? col+"55" : null;
+      }
+      return null;  // falls back to CSS .col-tri fill
     })
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
-      d.children=d._children; d._children=null; d._isOgCol=false; renderTree(true);
+      showTriActionPopup(event,d);
     })
     .on("mouseover",(ev,d)=>{
-      if(d._children) showTip(ev,collapsedTooltip(d)+'<div style="font-size:9px;color:#aaa;margin-top:4px">click to expand</div>');
+      if(d._children) showTip(ev,collapsedTooltip(d)+'<div style="font-size:9px;color:#aaa;margin-top:4px">click for options</div>');
     }).on("mousemove",moveTip).on("mouseout",hideTip);
 
   // manual-collapse: larger circle + leaf count label
@@ -2967,7 +3016,7 @@ function renderTree(animate){
     .attr("font-size",tipFontSVG())
     .attr("fill",d=>{
       // manually collapsed (no _og_label): dark gray; OG-labelled: red (or highlight colour)
-      const isManual=d._isOgCol&&!d.data._og_label&&!d.data.name;
+      const isManual=d._isOgCol&&!d.data._og_label&&!isOGNode(d);
       const ogName=d._isOgCol?(d.data._og_label||d.data.name||""):(isOGNode(d)?d.data.name:"");
       if(ogName&&ogHlSet!==null){
         if(ogHlSet.has(ogName)){ const gi=ogHlGroupIndex.get(ogName)??0; return ogHlTagColor(gi); }
