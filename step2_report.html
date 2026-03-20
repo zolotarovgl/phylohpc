@@ -90,7 +90,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .link{fill:none;stroke:#d5d5d5}
 .node-g circle{cursor:pointer;transition:r .12s,fill .12s}
 .node-g circle:hover{stroke-width:2.5px !important}
-.col-tri{stroke:#222;stroke-width:1px;cursor:pointer}
+.col-tri{stroke:#222;cursor:pointer}
 .col-tri:hover{filter:brightness(0.88)}
 .leaf-label{pointer-events:none;font-family:monospace}
 .og-label{fill:#b5371f;pointer-events:none}
@@ -170,6 +170,16 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
       <div id="hm-right" style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0">
         <!-- column-label controls strip: always visible above the heatmap SVG -->
         <div id="hm-col-strip" style="display:flex;align-items:center;gap:10px;padding:3px 10px;background:#fafafa;border-bottom:1px solid #eee;flex-shrink:0;flex-wrap:wrap">
+          <div style="position:relative;display:inline-block">
+            <input id="hm-text-search" type="text" placeholder="&#128269; Search classes, families, HGs&hellip;" autocomplete="off"
+              style="font-size:11px;padding:2px 8px;border:1px solid #ccc;border-radius:3px;width:210px"
+              oninput="hmTextSearchInput(this.value)" onkeydown="hmTextSearchKey(event)">
+            <div id="hm-search-dd"
+              style="display:none;position:absolute;top:100%;left:0;z-index:300;background:#fff;
+                     border:1px solid #ccc;border-radius:0 0 4px 4px;max-height:220px;
+                     overflow-y:auto;min-width:290px;box-shadow:0 3px 8px rgba(0,0,0,.12);
+                     font-size:11px"></div>
+          </div>
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
             Label size:
             <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
@@ -238,6 +248,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <button class="ctrl-btn" id="btn-support" onclick="toggleSupport()">Support</button>
           <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()">Branch lengths</button>
           <button class="ctrl-btn" onclick="fitTree()">&#x2922; Fit</button>
+          <button class="ctrl-btn" onclick="downloadTreeSVG()" title="Download gene tree as SVG">&#11015; SVG</button>
+          <button class="ctrl-btn" onclick="downloadTreePNG()" title="Download gene tree as PNG">&#11015; PNG</button>
           <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
           <span id="tree-title"></span>
           <span id="n-ogs-label"></span>
@@ -262,6 +274,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             Height:
             <input type="range" id="tree-height-slider" min="0.5" max="5" step="0.1" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="tree-height-val" style="width:24px;text-align:right">1</span>&times;
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Width:
+            <input type="range" id="tree-width-slider" min="0.3" max="4" step="0.1" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+            <span id="tree-width-val" style="width:24px;text-align:right">1.0</span>&times;
           </label>
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
             Collapsed:
@@ -410,6 +427,7 @@ let showOGLabels   = true;        // toggle OG-node labels on expanded internals
 let tipFontSize    = null;        // null = auto; number = user override (px)
 let treeLinkWidth  = 1.3;        // branch stroke-width in screen px
 let treeHeightMult = 1.0;        // vertical stretch multiplier for the tree
+let treeWidthMult  = 1.0;        // horizontal stretch multiplier for the tree
 let showGeneId    = true;        // tip label parts
 let showOGName    = true;
 let showRefOrtho  = true;
@@ -479,6 +497,7 @@ let hmCustomGroups = [];     // bulk selections: [{type:"class"|"family", key, l
 let hmColOrderOverride = null; // drag-reorder: array of column ids overriding natural order
 let hmOGIndex      = null;   // lazy: {og_name → {hgId,family,cls,total,species_counts}}
 let hmGeneIndex    = null;   // lazy: {gene_id → og_name}
+let hmSearchIndex  = null;   // lazy: [{label,type,cls,fam,hg_id}] for global search
 
 function getEffectiveCustomOGs(){
   const all=new Set(hmCustomOGs);
@@ -805,7 +824,7 @@ function drawCladogram() {
       // collect leaf species for heatmap shading
       function getLeafSp(nd){ return nd.children?nd.children.flatMap(getLeafSp):[nd.name]; }
       hmCollapsedBands.push({species:getLeafSp(n),label:displayName});
-      const triColor=cladoColors.get(key)||"#e0e0e0";
+      const triColor=cladoColors.get(key)||"#ffffff";
       const redraw=()=>{ drawCladogram(); };
       svg.append("polygon")
         .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
@@ -1515,6 +1534,44 @@ function hmBack(){
   drawHeatmap();
 }
 
+// ── Heatmap global text search ─────────────────────────────────────────────
+let _hmSearchHits=[], _hmSearchSel=-1;
+function hmTextSearchInput(val){
+  buildHmSearchIndex();
+  const dd=document.getElementById("hm-search-dd");
+  hmTextFilter=val.trim().toLowerCase(); drawHeatmap();
+  if(!val.trim()){ dd.style.display="none"; return; }
+  const q=val.toLowerCase();
+  _hmSearchHits=hmSearchIndex.filter(r=>r.label.toLowerCase().includes(q)).slice(0,30);
+  _hmSearchSel=-1;
+  dd.innerHTML=_hmSearchHits.map((h,i)=>`<div data-i="${i}"
+    style="padding:4px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;
+    color:${h.type==="hg"?"#333":h.type==="family"?"#555":"#888"}"
+    onmousedown="hmTextSearchGo(${i})">${h.label}</div>`).join("")
+    ||`<div style="padding:6px 10px;color:#aaa">No matches</div>`;
+  dd.style.display="block";
+}
+function hmTextSearchKey(ev){
+  const dd=document.getElementById("hm-search-dd");
+  const items=dd.querySelectorAll("[data-i]");
+  if(ev.key==="ArrowDown"){ ev.preventDefault(); _hmSearchSel=Math.min(_hmSearchSel+1,items.length-1); items.forEach((el,i)=>el.style.background=i===_hmSearchSel?"#e3f0ff":""); }
+  else if(ev.key==="ArrowUp"){ ev.preventDefault(); _hmSearchSel=Math.max(_hmSearchSel-1,0); items.forEach((el,i)=>el.style.background=i===_hmSearchSel?"#e3f0ff":""); }
+  else if(ev.key==="Enter"){ const idx=_hmSearchSel>=0?_hmSearchSel:(_hmSearchHits.length===1?0:-1); if(idx>=0){hmTextSearchGo(idx);ev.preventDefault();} }
+  else if(ev.key==="Escape"){ dd.style.display="none"; }
+}
+function hmTextSearchGo(i){
+  const h=_hmSearchHits[i]; if(!h) return;
+  document.getElementById("hm-search-dd").style.display="none";
+  document.getElementById("hm-text-search").value=""; hmTextFilter="";
+  if(h.type==="class"){ hmViewMode="class"; hmActiveClass=h.cls; hmActiveFamily=hmActiveHG=hmActiveHGRec=null; }
+  else if(h.type==="family"){ hmViewMode="family"; hmActiveClass=h.cls; hmActiveFamily=h.fam; hmActiveHG=hmActiveHGRec=null; }
+  else if(h.type==="hg"){
+    const rec=TREE_INDEX.find(r=>r.id===h.hg_id); if(!rec) return;
+    hmViewMode="og"; hmActiveClass=h.cls; hmActiveFamily=h.fam; hmActiveHG=h.hg_id; hmActiveHGRec=rec;
+  }
+  drawHeatmap();
+}
+
 // ── Custom OG selection helpers ────────────────────────────────────────────
 function _positionCustomBar(){
   const strip=document.getElementById("hm-col-strip");
@@ -1711,6 +1768,23 @@ function buildOGIndex(){
                      total:gids.length,species_counts:sc};
     }
   }
+}
+
+function buildHmSearchIndex(){
+  if(hmSearchIndex) return;
+  hmSearchIndex=[];
+  const classes=[...new Set(FAMILY_DATA.map(d=>d.class||"").filter(Boolean))].sort();
+  classes.forEach(cls=>hmSearchIndex.push({label:cls,type:"class",cls,fam:null,hg_id:null}));
+  const famSeen=new Set();
+  FAMILY_DATA.forEach(d=>{
+    const key=(d.class||"")+"\x00"+(d.family||"");
+    if(!famSeen.has(key)){ famSeen.add(key);
+      hmSearchIndex.push({label:(d.class?"["+d.class+"] ":"")+d.family,
+                          type:"family",cls:d.class||null,fam:d.family,hg_id:null}); }
+  });
+  TREE_INDEX.forEach(r=>hmSearchIndex.push({
+    label:(r.class?"["+r.class+"] ":"")+(r.family?r.family+" \u203a ":"")+r.hg,
+    type:"hg",cls:r.class||null,fam:r.family||null,hg_id:r.id}));
 }
 
 function loadDetail(id) {
@@ -1963,11 +2037,18 @@ document.getElementById("line-width-slider").addEventListener("input",function()
   treeLinkWidth=+this.value;
   document.getElementById("line-width-val").textContent=this.value;
   if(gMain) gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
+  if(gMain) gMain.selectAll(".col-tri").attr("stroke-width",treeLinkWidth/_zoomScale);
 });
 
 document.getElementById("tree-height-slider").addEventListener("input",function(){
   treeHeightMult=+this.value;
   document.getElementById("tree-height-val").textContent=this.value;
+  if(rootNode) renderTree(false);
+});
+
+document.getElementById("tree-width-slider").addEventListener("input",function(){
+  treeWidthMult=+this.value;
+  document.getElementById("tree-width-val").textContent=parseFloat(this.value).toFixed(1);
   if(rootNode) renderTree(false);
 });
 
@@ -2052,6 +2133,39 @@ function downloadHeatmapPNG(){
     URL.revokeObjectURL(url);
     const a=document.createElement("a"); a.download="heatmap.png";
     a.href=canvas.toDataURL("image/png"); a.click();
+  };
+  img.src=url;
+}
+
+function _getTreeSVGSrc(){
+  const svgEl=document.getElementById("tree-svg");
+  if(!svgEl||!rootNode) return null;
+  const W=+svgEl.getAttribute("width")||800, H=+svgEl.getAttribute("height")||600;
+  const serial=new XMLSerializer();
+  const css=Array.from(document.styleSheets).flatMap(s=>{try{return Array.from(s.cssRules).map(r=>r.cssText);}catch(e){return[];}}).join("\n");
+  const inner=serial.serializeToString(svgEl).replace(/^<svg[^>]*>/,"").replace(/<\/svg>$/,"");
+  return {src:'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+    +' width="'+W+'" height="'+H+'" style="font-family:sans-serif">'
+    +'<style>text{font-family:sans-serif}'+css+'</style>'
+    +inner+'</svg>', W, H};
+}
+function downloadTreeSVG(){
+  const r=_getTreeSVGSrc(); if(!r){ alert("No tree to export."); return; }
+  const a=document.createElement("a"); a.download="gene_tree.svg";
+  a.href=URL.createObjectURL(new Blob([r.src],{type:"image/svg+xml"})); a.click();
+  URL.revokeObjectURL(a.href);
+}
+function downloadTreePNG(){
+  const r=_getTreeSVGSrc(); if(!r){ alert("No tree to export."); return; }
+  const url=URL.createObjectURL(new Blob([r.src],{type:"image/svg+xml"}));
+  const img=new Image(); img.onload=()=>{
+    const canvas=document.createElement("canvas");
+    canvas.width=r.W*2; canvas.height=r.H*2;
+    const ctx=canvas.getContext("2d"); ctx.scale(2,2);
+    ctx.fillStyle="#fff"; ctx.fillRect(0,0,r.W,r.H); ctx.drawImage(img,0,0);
+    const a=document.createElement("a"); a.download="gene_tree.png";
+    a.href=canvas.toDataURL("image/png"); a.click();
+    URL.revokeObjectURL(url);
   };
   img.src=url;
 }
@@ -2351,6 +2465,11 @@ document.addEventListener("click",ev=>{
     const dd=document.getElementById("hm-og-dropdown");
     if(dd) dd.style.display="none";
   }
+  // close global heatmap search dropdown when clicking outside
+  if(!ev.target.closest("#hm-text-search")&&!ev.target.closest("#hm-search-dd")){
+    const dd=document.getElementById("hm-search-dd");
+    if(dd) dd.style.display="none";
+  }
 });
 
 function drawMiniSpTree(){
@@ -2480,14 +2599,16 @@ function renderTree(animate){
   const rowH = Math.max(minRowH, Math.min(Math.max(minRowH, 36), Math.floor(iH/Math.max(nAll,1))));
   const tH=Math.max(iH, nAll*rowH) * treeHeightMult;
   const effRow = rowH * treeHeightMult;  // used here and in triangle points below
-  d3.cluster().size([tH,iW])(rootNode);
+  const iWeff = iW * treeWidthMult;
+  d3.cluster().size([tH,iWeff])(rootNode);
+  treeSvg.attr("width", Math.max(W, mg.left + iWeff + mg.right));
 
   // Proportional Y-spacing for OG-collapsed nodes.
   // D3 cluster treats each collapsed node as 1 leaf; we redistribute so each
   // collapsed node gets nLeaves * rowH vertical space, preventing overlap.
   {
     const vLeaves = rootNode.leaves(); // includes ._children nodes (D3 sees them as leaves)
-    const wts = vLeaves.map(d => (d._children && d._isOgCol) ? Math.max(1, countAllLeaves(d) * collapsedFraction) : 1);
+    const wts = vLeaves.map(d => d._children ? Math.max(1, countAllLeaves(d) * collapsedFraction) : 1);
     const anyCollapsed = wts.some(w => w > 1);
     if (anyCollapsed) {
       let cy = effRow / 2;
@@ -2559,7 +2680,13 @@ function renderTree(animate){
   nodeSel.select("circle")
     .attr("display",d=>d._children?"none":null)
     .attr("cx",0)   // reset any offset from manual-collapse state
-    .attr("r",d=>d.data.leaf?tipFontSVG()*0.36:isOGNode(d)?tipFontSVG()*0.5:tipFontSVG()*0.26)
+    .attr("r",d=>{
+      if(d.data.leaf) return tipFontSVG()*0.36;
+      const isOGlbl=showOGLabels&&(isOGNode(d)||d.data._og_label);
+      if(isOGlbl) return tipFontSVG()*0.55;
+      if(isOGNode(d)) return tipFontSVG()*0.5;
+      return tipFontSVG()*0.26;
+    })
     .attr("fill",d=>{
       if(d.data.leaf){
         const gid2=d.data.gene_id||d.data.name;
@@ -2573,11 +2700,22 @@ function renderTree(animate){
         const c=leafColor(d.data.species||"");
         return hlSet&&!hlSet.has(d.data.species||"")?"#e8e8e8":c;
       }
+      if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return "#222";
       if(isOGNode(d))return "#e74c3c";
       return "#ccc";
     })
-    .attr("stroke",d=>d.data.leaf?"none":isOGNode(d)?"#b03a2e":"#aaa")
-    .attr("stroke-width",d=>isOGNode(d)?1.8:0.8)
+    .attr("stroke",d=>{
+      if(d.data.leaf) return "none";
+      if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return "#000";
+      if(isOGNode(d)) return "#b03a2e";
+      return "#aaa";
+    })
+    .attr("stroke-width",d=>{
+      if(d.data.leaf) return null;
+      if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return 2;
+      if(isOGNode(d)) return 1.8;
+      return 0.8;
+    })
     .on("click",(event,d)=>{
       if(d.data.leaf){
         const tipName=d.data.gene_id||d.data.name||"";
@@ -2627,6 +2765,7 @@ function renderTree(animate){
       }
       return "#ffffff";
     })
+    .attr("stroke-width",d=>(d._children&&d._isOgCol)?treeLinkWidth/_zoomScale:null)
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
       showTriActionPopup(event,d);
