@@ -437,8 +437,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .node-g circle:hover{stroke-width:2.5px !important}
 .col-tri{stroke:#222;cursor:pointer}
 .col-tri:hover{filter:brightness(0.88)}
-.leaf-label{pointer-events:none;font-family:monospace}
-.og-label{fill:#b5371f;pointer-events:none}
+.leaf-label{font-family:monospace}
+.og-label{fill:#b5371f}
 .ctrl-btn.active-btn{background:#d5f5e3;border-color:#1abc9c;color:#1a6b4a}
 .scale-bar-g line{stroke:#999;stroke-width:1.5px}
 .scale-bar-g text{font-size:9px;fill:#888;text-anchor:middle}
@@ -516,7 +516,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
               style="font-size:11px;padding:2px 8px;border:1px solid #ccc;border-radius:3px;width:210px"
               oninput="hmTextSearchInput(this.value)" onkeydown="hmTextSearchKey(event)">
             <div id="hm-search-dd"
-              style="display:none;position:absolute;top:100%;left:0;z-index:300;background:#fff;
+              style="display:none;position:absolute;top:100%;left:0;z-index:520;background:#fff;
                      border:1px solid #ccc;border-radius:0 0 4px 4px;max-height:220px;
                      overflow-y:auto;min-width:290px;box-shadow:0 3px 8px rgba(0,0,0,.12);
                      font-size:11px"></div>
@@ -633,6 +633,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-og" checked> OG</label>
             <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-ref" checked> ref</label>
             <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
+            <button id="btn-focus-collapse-style" class="ctrl-btn active-btn" onclick="toggleFocusCollapseStyle()" title="Toggle collapse style used by Focus and hide non-hl: triangle (MRCA) or circle" style="padding:1px 6px;font-size:10px">&#9660; MRCA</button>
           </span>
           <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
           <!-- group 5: species + OG highlight + species tree -->
@@ -644,8 +645,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
           <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
           <div id="og-hl-tags"></div>
-          <input id="og-hl-search" list="og-hl-list" placeholder="OG name… (Enter)" style="width:120px">
-          <datalist id="og-hl-list"></datalist>
+          <div style="position:relative;display:inline-block">
+            <input id="og-hl-search" autocomplete="off" placeholder="OG name… (Enter)" style="width:140px;font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px"
+              oninput="ogHlSearchInput(this.value)" onkeydown="ogHlSearchKey(event)">
+            <div id="og-hl-dd" style="display:none;position:absolute;top:100%;left:0;z-index:520;background:#fff;border:1px solid #ccc;border-radius:0 0 4px 4px;max-height:200px;overflow-y:auto;min-width:200px;box-shadow:0 3px 8px rgba(0,0,0,.12);font-size:11px"></div>
+          </div>
           <button id="og-hl-clear" onclick="clearOgHighlight()" title="Clear OG highlights">&#10005;</button>
         </div>
         <div id="tree-wrap">
@@ -716,6 +720,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button class="cp-btn" onclick="cpRename()">Rename</button>
     <button class="cp-btn" onclick="cpCopy()">Copy genes</button>
     <button class="cp-btn" onclick="cpExpand()">Expand</button>
+    <button class="cp-btn" onclick="cpCompare()" title="Compare species coverage with another node">&#x2316; Compare</button>
     <button class="cp-btn" onclick="cpClose()">Close</button>
   </div>
 </div>
@@ -804,6 +809,7 @@ let showOGName    = true;
 let showRefOrtho  = true;
 let showSupport        = false;   // show internal node support values
 let hideNonHl          = false;   // hide non-highlighted tip labels when hlSet active
+let focusCollapseAsTri = true;    // true=triangle (MRCA), false=circle for focus/hide-nonhl collapses
 let hmFocusGids        = null;    // Set<gene_id> when navigating from heatmap cell; null otherwise
 let collapsedFraction  = 1.0;     // fraction of proportional space for OG-collapsed tips (0.5–1.0)
 let hmSplitSets   = [];      // array of Set<species> for heatmap row splitting
@@ -1111,6 +1117,13 @@ function cpExpand() {
   if (d && d._children) { d.children = d._children; d._children = null; renderTree(true); }
 }
 
+function cpCompare() {
+  const d = cpActiveNode;
+  if (!d) return;
+  cpClose();
+  enterCompareMode(d);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // HEATMAP VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1152,9 +1165,17 @@ function drawCladogram() {
   tp.innerHTML = "";
   if (!SP_TREE_DATA || !SP_TREE_DATA.children || !speciesOrder.length) return;
 
-  const W = 270, H = speciesOrder.length*14+hmTopActual+40;
+  // Dynamic vertical offset so cladogram rows align with heatmap rows.
+  // tree-panel and heatmap-panel may start at different viewport y-positions
+  // (hm-col-strip sits above heatmap-panel; prefix selector sits above tree-panel).
+  const hp = document.getElementById("heatmap-panel");
+  const topPad = (hp)
+    ? Math.max(0, Math.round(hp.getBoundingClientRect().top - tp.getBoundingClientRect().top))
+    : 0;
+
+  const W = 270, H = speciesOrder.length*14+hmTopActual+topPad+40;
   const svg = d3.select(tp).append("svg").attr("width",W).attr("height",H);
-  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=hmTopActual+i*14+7; });
+  const leafY = {}; speciesOrder.forEach((s,i)=>{ leafY[s]=hmTopActual+topPad+i*14+7; });
 
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
   function prune(n){
@@ -2350,23 +2371,45 @@ function addOgHlTag(query){
   if(!query||ogHlQueries.includes(query)) return;
   ogHlQueries.push(query);
   document.getElementById("og-hl-search").value="";
+  ogHlHideDD();
   rebuildOgHlSet();
 }
 function removeOgHlTag(i){ delete ogHlQueryColors[ogHlQueries[i]]; ogHlQueries.splice(i,1); rebuildOgHlSet(); }
 function clearOgHighlight(){ ogHlQueries=[]; ogHlQueryColors={}; document.getElementById("og-hl-search").value=""; rebuildOgHlSet(); }
+
+// ── OG highlight search dropdown ──────────────────────────────────────────────
+let _ogHlDDSel=-1;
+function ogHlHideDD(){ document.getElementById("og-hl-dd").style.display="none"; _ogHlDDSel=-1; }
+function ogHlSearchInput(val){
+  const dd=document.getElementById("og-hl-dd");
+  val=(val||"").trim().toLowerCase();
+  if(!val){ ogHlHideDD(); return; }
+  const allOgs=Array.from(new Set([...Object.values(ogGene2Name),...Object.keys(ogName2Color)]));
+  const hits=allOgs.filter(og=>og.toLowerCase().includes(val)).slice(0,40);
+  if(!hits.length){ ogHlHideDD(); return; }
+  _ogHlDDSel=-1;
+  dd.innerHTML=hits.map((og,i)=>`<div data-i="${i}" data-og="${og}" style="padding:4px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0" onmousedown="event.preventDefault();addOgHlTag('${og.replace(/'/g,"\\'")}');document.getElementById('og-hl-search').value=''">${og}</div>`).join("");
+  dd.style.display="block";
+}
+function ogHlSearchKey(e){
+  const dd=document.getElementById("og-hl-dd");
+  const items=dd.querySelectorAll("div[data-og]");
+  if(e.key==="ArrowDown"){ e.preventDefault(); _ogHlDDSel=Math.min(_ogHlDDSel+1,items.length-1); items.forEach((el,i)=>el.style.background=i===_ogHlDDSel?"#e8f0fe":""); return; }
+  if(e.key==="ArrowUp"){ e.preventDefault(); _ogHlDDSel=Math.max(_ogHlDDSel-1,0); items.forEach((el,i)=>el.style.background=i===_ogHlDDSel?"#e8f0fe":""); return; }
+  if(e.key==="Enter"){
+    e.preventDefault();
+    if(_ogHlDDSel>=0&&items[_ogHlDDSel]){ addOgHlTag(items[_ogHlDDSel].dataset.og); document.getElementById("og-hl-search").value=""; }
+    else if(document.getElementById("og-hl-search").value.trim()) addOgHlTag(document.getElementById("og-hl-search").value.trim());
+    return;
+  }
+  if(e.key==="Escape"){ ogHlHideDD(); return; }
+}
 
 document.getElementById("hl-search").addEventListener("keydown",function(e){
   if(e.key==="Enter"&&this.value.trim()){ addHlTag(this.value); e.preventDefault(); }
 });
 document.getElementById("hl-search").addEventListener("change",function(){
   if(this.value.trim()) addHlTag(this.value);
-});
-
-document.getElementById("og-hl-search").addEventListener("keydown",function(e){
-  if(e.key==="Enter"&&this.value.trim()){ addOgHlTag(this.value.trim()); e.preventDefault(); }
-});
-document.getElementById("og-hl-search").addEventListener("change",function(){
-  if(this.value.trim()) addOgHlTag(this.value.trim());
 });
 
 document.getElementById("tip-font-slider").addEventListener("input",function(){
@@ -2650,6 +2693,8 @@ function applyTipFontSize(){
   const fs=tipFontSVG();
   gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?fs:0);
   gMain.selectAll(".og-label").attr("font-size",fs);
+  // update MRCA sub-label tspan inside og-label
+  gMain.selectAll(".og-label tspan:nth-child(2)").attr("font-size",Math.max(7,fs*0.82));
   const colR2=Math.max(10,fs*0.9), leafR2=fs*0.36, colCx2=-(colR2-leafR2);
   gMain.selectAll(".count-label").attr("font-size",fs).attr("x",d=>d&&d._children&&!d._isOgCol?colCx2:null);
   gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",colR2).attr("cx",colCx2);
@@ -2840,6 +2885,13 @@ function toggleOGLabels(){
   if(rootNode) renderTree(false);
 }
 
+function toggleFocusCollapseStyle(){
+  focusCollapseAsTri=!focusCollapseAsTri;
+  const btn=document.getElementById("btn-focus-collapse-style");
+  btn.classList.toggle("active-btn", focusCollapseAsTri);
+  btn.textContent=focusCollapseAsTri?"\u25BC MRCA":"\u25CB Circle";
+}
+
 function toggleSupport(){
   showSupport=!showSupport;
   document.getElementById("btn-support").classList.toggle("active-btn", showSupport);
@@ -2867,6 +2919,8 @@ document.addEventListener("click",ev=>{
     const dd=document.getElementById("hm-search-dd");
     if(dd) dd.style.display="none";
   }
+  // close OG highlight dropdown when clicking outside
+  if(!ev.target.closest("#og-hl-search")&&!ev.target.closest("#og-hl-dd")) ogHlHideDD();
 });
 
 function drawMiniSpTree(){
@@ -3197,6 +3251,11 @@ function renderTree(animate){
   nodeSel.select(".leaf-label")
     .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
     .attr("font-size",d=>d.data.leaf?tipFontSVG():0)
+    .style("cursor",()=>_compareNode1?"crosshair":"default")
+    .on("click",(event,d)=>{
+      // In compare mode, leaf labels also act as a click target for the second node
+      if(_compareNode1!==null&&_compareNode1!==d){ event.stopPropagation(); runSpeciesComparison(d); hideTip(); }
+    })
     .attr("display",d=>{
       if(!d.data.leaf) return "none";
       if(hideNonHl){
@@ -3248,6 +3307,10 @@ function renderTree(animate){
     .attr("dy","0.35em")
     .attr("text-anchor",d=>d._children?"start":"end")
     .attr("font-size",tipFontSVG())
+    .style("cursor",d=>{
+      if(_compareNode1) return "crosshair";
+      return (d._isOgCol||(d.children&&!d._children))?"pointer":"default";
+    })
     .attr("fill",d=>{
       // manually collapsed (no _og_label): dark gray; OG-labelled: red (or highlight colour)
       const isManual=d._isOgCol&&!d.data._og_label&&!isOGNode(d);
@@ -3260,7 +3323,42 @@ function renderTree(animate){
       return "#b5371f";
     })
     .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(showOGLabels&&!d._children&&(isOGNode(d)||d.data._og_label))))?null:"none")
-    .text(d=>d._isOgCol?collapsedLabel(d):(isOGNode(d)?d.data.name:(d.data._og_label||"")));
+    .on("click",(event,d)=>{
+      event.stopPropagation();
+      if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
+      // Normal click: triangle popup for collapsed OG, collapse-choice for expanded OG
+      if(d._children&&d._isOgCol) showTriActionPopup(event,d);
+      else if(d.children&&!d._children) showCollapseChoicePopup(event,d);
+    })
+    .text("")
+    .each(function(d){
+      const el=d3.select(this);
+      el.selectAll("tspan").remove();
+      let mainLbl;
+      if(d._isOgCol){
+        mainLbl=collapsedLabel(d);
+      } else {
+        mainLbl=isOGNode(d)?d.data.name:(d.data._og_label||"");
+      }
+      if(!mainLbl) return;
+      el.append("tspan").text(mainLbl);
+      // For OG-collapsed nodes, append MRCA label on a second line
+      if(d._isOgCol){
+        const sc={};
+        (function cnt(ch){ if(!ch)return; for(const c of ch){
+          if(c.data.leaf){const sp=c.data.species||"?";sc[sp]=(sc[sp]||0)+1;}
+          else{cnt(c.children);cnt(c._children);}
+        }})(d._children);
+        const mrca=spMRCAName(new Set(Object.keys(sc)));
+        if(mrca){
+          el.append("tspan")
+            .attr("x",BADGE_W+6).attr("dy","1.2em")
+            .attr("font-size",Math.max(7,tipFontSVG()*0.82))
+            .attr("fill","#888")
+            .text(mrca);
+        }
+      }
+    });
 
   // support labels: shown on internal nodes when showSupport is true
   nodeSel.select(".support-lbl")
@@ -3338,8 +3436,12 @@ function focusHighlighted(){
     }
   });
   // collapse subtrees with no matching leaf
+  // use triangle (MRCA) or circle depending on focusCollapseAsTri
   rootNode.each(d=>{
-    if(!d.data.leaf&&d.children&&!hasHl.get(d)){d._children=d.children;d.children=null;}
+    if(!d.data.leaf&&d.children&&!hasHl.get(d)){
+      d._children=d.children; d.children=null;
+      d._isOgCol=focusCollapseAsTri;
+    }
   });
   renderTree(true);
   setTimeout(fitTree, 260);
