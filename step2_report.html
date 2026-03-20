@@ -2015,10 +2015,7 @@ function renderOgHlTags(){
     chip.onclick=()=>openColorPicker(col,c=>{ ogHlQueryColors[q]=c; rebuildOgHlSet(); });
     chip.append(lbl,btn); el.appendChild(chip);
   });
-  // populate datalist for autocomplete
-  const dl=document.getElementById("og-hl-list"); dl.innerHTML="";
-  const allOgs=new Set([...Object.values(ogGene2Name),...Object.keys(ogName2Color)]);
-  allOgs.forEach(og=>{ const o=document.createElement("option"); o.value=og; dl.appendChild(o); });
+  // (datalist removed – autocomplete is now handled by the live og-hl-dd dropdown)
 }
 
 function addOgHlTag(query){
