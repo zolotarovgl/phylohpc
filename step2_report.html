@@ -329,6 +329,15 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button id="ccp-circle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a circle with leaf count">&#x25EF; Circle</button>
   </div>
 </div>
+<div id="clado-action-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="clado-popup-title"></div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap">
+    <button id="cap-expand"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x25B7; Expand</button>
+    <button id="cap-rename"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x270F; Rename</button>
+    <button id="cap-color"   style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Color</button>
+    <input id="cap-color-input" type="color" style="display:none">
+  </div>
+</div>
 <div id="collapsed-popup">
   <div class="cp-title">Collapsed node</div>
   <div class="cp-row"><span>Name:</span><input id="cp-name" type="text"></div>
@@ -582,6 +591,42 @@ function collectLeafGenes(children) {
   document.addEventListener("click",(e)=>{ if(!pop.contains(e.target)) hide(); });
 })();
 
+// ── Cladogram collapsed-clade action popup ──────────────────────────────────
+(function(){
+  const pop=document.getElementById("clado-action-popup");
+  const title=document.getElementById("clado-popup-title");
+  let _key=null, _drawFn=null;
+  function hide(){ pop.style.display="none"; _key=null; _drawFn=null; }
+  document.getElementById("cap-expand").addEventListener("click",()=>{
+    if(!_key) return; const k=_key, fn=_drawFn; hide();
+    cladoCollapsed.delete(k); fn();
+    if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
+  });
+  document.getElementById("cap-rename").addEventListener("click",()=>{
+    if(!_key) return; const k=_key, name=title.textContent, fn=_drawFn; hide();
+    const v=window.prompt("Rename clade:",name); if(v===null) return;
+    cladoNames.set(k,v.trim()||name); fn();
+    if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
+  });
+  const colorInput=document.getElementById("cap-color-input");
+  document.getElementById("cap-color").addEventListener("click",()=>{ colorInput.click(); });
+  colorInput.addEventListener("input",()=>{
+    if(!_key) return; const k=_key, fn=_drawFn;
+    cladoColors.set(k,colorInput.value); fn();
+    if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
+  });
+  document.addEventListener("click",(e)=>{ if(!pop.contains(e.target)) hide(); });
+  window.showCladoActionPopup=function(event,key,displayName,redrawFn){
+    _key=key; _drawFn=redrawFn;
+    title.textContent=displayName;
+    colorInput.value=cladoColors.get(key)||colTriFill;
+    pop.style.display="flex";
+    const x=Math.min(event.clientX+8,window.innerWidth-pop.offsetWidth-8);
+    const y=Math.min(event.clientY+8,window.innerHeight-pop.offsetHeight-8);
+    pop.style.left=Math.max(4,x)+"px"; pop.style.top=Math.max(4,y)+"px";
+  };
+})();
+
 function showCollapsedPopup(event, d) {
   event.stopPropagation();
   cpActiveNode = d;
@@ -651,6 +696,7 @@ const hasHeatmapData = FAMILY_DATA.length > 0 || HG_DATA.length > 0;
 
 const cladoCollapsed  = new Set();   // stable node keys of collapsed cladogram nodes
 const cladoNames      = new Map();   // key → custom display name (user-editable)
+const cladoColors     = new Map();   // key → custom fill color override
 // map: clade label → sorted array of species (updated by drawCladogram, read by drawHeatmap)
 const hmCollapsedBands = [];  // [{species:[...], label}] — reset on each drawCladogram call
 
@@ -711,41 +757,23 @@ function drawCladogram() {
       // collect leaf species for heatmap shading
       function getLeafSp(nd){ return nd.children?nd.children.flatMap(getLeafSp):[nd.name]; }
       hmCollapsedBands.push({species:getLeafSp(n),label:displayName});
+      const triColor=cladoColors.get(key)||colTriFill;
+      const redraw=()=>{ drawCladogram(); };
       svg.append("polygon")
         .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
-        .attr("fill",colTriFill).attr("stroke","#222").attr("stroke-width",1.2)
+        .attr("fill",triColor).attr("stroke","#222").attr("stroke-width",1.2)
         .style("cursor","pointer")
-        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand &nbsp;·&nbsp; dbl-click label to rename</div>'))
+        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click for options</div>'))
         .on("mousemove",moveTip).on("mouseout",hideTip)
-        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap(); });
-      // small circle at triangle apex so the node is easy to click/uncollapse
-      svg.append("circle")
-        .attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
-        .attr("fill","#f5f5f5").attr("stroke","#555").attr("stroke-width",1.2)
-        .style("cursor","pointer")
-        .on("click",()=>{ cladoCollapsed.delete(key); hideTip(); drawCladogram(); })
-        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand</div>'))
-        .on("mousemove",moveTip).on("mouseout",hideTip);
-      // editable label — double-click opens inline input
-      const labelEl=svg.append("text")
+        .on("click",(ev)=>{ ev.stopPropagation(); hideTip(); showCladoActionPopup(ev,key,displayName,redraw); });
+      // label — normal font, clickable
+      svg.append("text")
         .attr("x",sx(n._d)+6).attr("y",n._y).attr("dy","0.35em")
-        .attr("font-size",9).attr("fill","#333").attr("font-style","italic")
-        .style("cursor","text").text(displayName);
-      labelEl.on("dblclick",(ev)=>{
-        ev.stopPropagation();
-        // build a tiny foreignObject with an <input> for inline editing
-        const fo=svg.append("foreignObject")
-          .attr("x",sx(n._d)+4).attr("y",n._y-9)
-          .attr("width",sx(maxD)-sx(n._d)+60).attr("height",18);
-        const inp=fo.append("xhtml:input")
-          .attr("value",displayName)
-          .style("font-size","9px").style("font-style","italic")
-          .style("width","100%").style("border","1px solid #4a90d9")
-          .style("border-radius","2px").style("padding","0 2px").style("outline","none");
-        const inpNode=inp.node(); inpNode.focus(); inpNode.select();
-        function commit(){ cladoNames.set(key,inpNode.value.trim()||displayName); fo.remove(); drawCladogram(); }
-        inp.on("blur",commit).on("keydown",(e)=>{ if(e.key==="Enter") commit(); if(e.key==="Escape"){ fo.remove(); } });
-      });
+        .attr("font-size",9).attr("fill","#333")
+        .style("cursor","pointer").text(displayName)
+        .on("click",(ev)=>{ ev.stopPropagation(); hideTip(); showCladoActionPopup(ev,key,displayName,redraw); })
+        .on("mouseover",ev=>showTip(ev,displayName+'<div style="font-size:9px;color:#aaa;margin-top:2px">click for options</div>'))
+        .on("mousemove",moveTip).on("mouseout",hideTip);
       return;
     }
     n.children.forEach(drawCollapsedTriangles);
