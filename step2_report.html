@@ -99,7 +99,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .scale-bar-g text{font-size:9px;fill:#888;text-anchor:middle}
 
 /* mini species tree floating panel */
-#mini-sp-panel{position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;box-shadow:0 3px 12px rgba(0,0,0,.18);z-index:300;overflow:auto;max-width:380px;max-height:60vh;padding:6px}
+#mini-sp-panel{position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;box-shadow:0 3px 12px rgba(0,0,0,.18);z-index:300;overflow:auto;max-width:560px;max-height:70vh;padding:6px}
 #mini-sp-panel .msp-title{font-size:10px;font-weight:700;color:#555;margin-bottom:4px;padding:0 2px}
 #mini-sp-panel svg text.msp-node-lbl{cursor:pointer;fill:#2980b9;font-size:10px}
 #mini-sp-panel svg text.msp-node-lbl:hover{fill:#e74c3c}
@@ -282,7 +282,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <input id="hl-search" list="hl-list" placeholder="Species… (Enter)">
           <datalist id="hl-list"></datalist>
           <button id="hl-clear" onclick="clearHighlight()" title="Clear all species highlights">&#10005;</button>
-          <button class="ctrl-btn" id="btn-mini-sp" onclick="toggleMiniSpPanel(event)" title="Show species tree — click a named node to highlight that clade">&#x1F333; Sp. tree</button>
+          <button class="ctrl-btn" id="btn-mini-sp" onclick="toggleMiniSpPanel(event)" title="Show species tree — click a named node to highlight that clade">&#x1F333; Species tree</button>
           <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
           <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
           <div id="og-hl-tags"></div>
@@ -2070,6 +2070,7 @@ function selectTree(rec){
     const col=palette[i%palette.length]; ogName2Color[og]=col;
     for(const gid of _ogs[og]){ ogLeaf2Color[gid]=col; ogGene2Name[gid]=og; }
   });
+  renderOgHlTags(); // refresh datalist now that ogName2Color is populated
   drawGeneTree(currentDetail.tree);
   setTimeout(fitTree, 260);
 }
@@ -2123,6 +2124,32 @@ function applyTipFontSize(){
 
 function isOGNode(d){ return !d.data.leaf && d.data.name && activeOgs()[d.data.name]!==undefined; }
 
+// Species-tree hierarchy for MRCA lookup (built once from SP_TREE_DATA)
+const _spHier=(function(){
+  if(!SP_TREE_DATA||!SP_TREE_DATA.children) return null;
+  return d3.hierarchy(SP_TREE_DATA,d=>d.children||null);
+})();
+
+/** Given a Set of species names, return the name of the deepest named MRCA
+ *  in the species tree, or null if no named ancestor is found. */
+function spMRCAName(speciesSet){
+  if(!_spHier||!speciesSet||!speciesSet.size) return null;
+  const leaves=_spHier.leaves().filter(l=>speciesSet.has(l.data.name));
+  if(!leaves.length) return null;
+  // find MRCA by walking paths to root
+  const paths=leaves.map(l=>{ const p=[]; let n=l; while(n){p.push(n);n=n.parent;} return p; });
+  const sets=paths.map(p=>new Set(p));
+  for(const anc of paths[0]){
+    if(sets.every(s=>s.has(anc))){
+      // anc is the MRCA — return the nearest named node at or above it
+      let n=anc;
+      while(n){ if(n.data.name&&!n.data.leaf) return n.data.name; n=n.parent; }
+      return null;
+    }
+  }
+  return null;
+}
+
 /** Return the MRCA node for a list of d3-hierarchy leaf nodes. */
 function findMRCA(leaves){
   if(!leaves.length) return null;
@@ -2147,6 +2174,7 @@ function collapsedLabel(d){
   if(d._uid&&customNodeNames[d._uid]) return customNodeNames[d._uid]+" ["+n+"]";
   const lbl=d.data._og_label||d.data.name||"";
   if(lbl) return lbl+" ["+n+"]";
+  // manually collapsed: collect species, optionally prefix with sp-tree MRCA name
   const sc={};
   (function cnt(ch){ if(!ch)return; for(const c of ch){
     if(c.data.leaf){const sp=c.data.species||"?";sc[sp]=(sc[sp]||0)+1;}
@@ -2154,7 +2182,21 @@ function collapsedLabel(d){
   }})(d._children);
   const top=Object.entries(sc).sort((a,b)=>b[1]-a[1]).slice(0,3)
     .map(([sp,c])=>c>1?sp+"\u00d7"+c:sp);
-  return top.join(",")+"\u00a0["+n+"]";
+  const mrca=spMRCAName(new Set(Object.keys(sc)));
+  return (mrca?mrca+" \u00b7 ":"")+top.join(",")+"\u00a0["+n+"]";
+}
+
+/** Full label with species breakdown for collapsed-node tooltip. */
+function collapsedTooltip(d){
+  const base=collapsedLabel(d);
+  const sc={};
+  (function cnt(ch){ if(!ch)return; for(const c of ch){
+    if(c.data.leaf){const sp=c.data.species||"?";sc[sp]=(sc[sp]||0)+1;}
+    else{cnt(c.children);cnt(c._children);}
+  }})(d._children);
+  const rows=Object.entries(sc).sort((a,b)=>b[1]-a[1])
+    .map(([sp,c])=>`<div style="display:flex;gap:6px"><span style="color:${leafColor(sp)}">${sp}</span><span>${c}</span></div>`).join("");
+  return `<b>${base}</b>${rows?'<div style="margin-top:4px;font-size:10px">'+rows+'</div>':""}`;
 }
 
 /** Assign cumulative branch-length positions (_by) to all nodes. */
@@ -2220,7 +2262,7 @@ function drawMiniSpTree(){
   const activeSp=currentIndex?new Set(currentIndex.species):new Set(ALL_SPECIES);
   // assign y: leaves in order
   const leaves=allN.filter(n=>!n.children);
-  const leafH=14, leftM=6, W=340;
+  const leafH=14, leftM=6, W=520;
   leaves.forEach((l,i)=>{ l._y=i*leafH+leafH/2; });
   // propagate y to internals
   function assignY(n){ if(n.children){ n.children.forEach(assignY); n._y=(n.children[0]._y+n.children[n.children.length-1]._y)/2; } }
@@ -2481,7 +2523,7 @@ function renderTree(animate){
       d.children=d._children; d._children=null; d._isOgCol=false; renderTree(true);
     })
     .on("mouseover",(ev,d)=>{
-      if(d._children) showTip(ev,collapsedLabel(d)+'<div style="font-size:9px;color:#aaa;margin-top:2px">click to expand</div>');
+      if(d._children) showTip(ev,collapsedTooltip(d)+'<div style="font-size:9px;color:#aaa;margin-top:4px">click to expand</div>');
     }).on("mousemove",moveTip).on("mouseout",hideTip);
 
   // manual-collapse: larger circle + leaf count label
@@ -2559,11 +2601,14 @@ function renderTree(animate){
     .attr("text-anchor",d=>d._children?"start":"end")
     .attr("font-size",tipFontSVG())
     .attr("fill",d=>{
+      // manually collapsed (no _og_label): dark gray; OG-labelled: red (or highlight colour)
+      const isManual=d._isOgCol&&!d.data._og_label&&!d.data.name;
       const ogName=d._isOgCol?(d.data._og_label||d.data.name||""):(isOGNode(d)?d.data.name:"");
       if(ogName&&ogHlSet!==null){
         if(ogHlSet.has(ogName)){ const gi=ogHlGroupIndex.get(ogName)??0; return ogHlTagColor(gi); }
         return "#ccc";
       }
+      if(isManual) return "#444";
       return "#b5371f";
     })
     .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(!d._children&&isOGNode(d))))?null:"none")
