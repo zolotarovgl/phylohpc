@@ -480,13 +480,13 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- vertical tab strip -->
   <div id="tab-strip">
-    <button class="tab-btn active" data-tab="heatmap" onclick="switchTab('heatmap')">&#9639; Counts</button>
+    <button class="tab-btn active" data-tab="sptree" onclick="switchTab('sptree')">&#10022; Species Tree</button>
+    <button class="tab-btn" data-tab="heatmap" onclick="switchTab('heatmap')">&#9639; Counts</button>
     <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">&#11044; Gene Trees</button>
-    <button class="tab-btn" data-tab="sptree" onclick="switchTab('sptree')">&#10022; Species Tree</button>
   </div>
 
   <!-- ── Heatmap pane ── -->
-  <div class="tab-pane active" id="pane-heatmap">
+  <div class="tab-pane" id="pane-heatmap">
     <div id="hm-custom-bar" style="display:none;position:fixed;z-index:500;border:1px solid #c8b96e;border-top:none;background:#fffbf0;padding:6px 12px;gap:6px;flex-wrap:wrap;align-items:center;box-shadow:0 4px 12px rgba(0,0,0,.15);border-radius:0 0 6px 6px">
       <span style="font-size:11px;color:#888;font-weight:600">Custom selection:</span>
       <span id="hm-custom-chips" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"></span>
@@ -656,7 +656,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   </div>
 
   <!-- ── Species tree pane ── -->
-  <div class="tab-pane" id="pane-sptree">
+  <div class="tab-pane active" id="pane-sptree">
     <div id="sptree-controls">
       <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:6px">
         Tree width:
@@ -763,6 +763,21 @@ const palette = [
 const SP_COLORS = {};
 ALL_SPECIES.forEach((sp,i) => { SP_COLORS[sp] = palette[i % palette.length]; });
 function spColor(sp) { return SP_COLORS[sp] || "#aaa"; }
+
+// ── Stable IDs for SP_TREE_DATA nodes (allows editing original by reference) ──
+const spNodeById = new Map();   // _spId → SP_TREE_DATA node reference
+(function tagSpNodes(n, i={v:0}){
+  n._spId = String(i.v++);
+  spNodeById.set(n._spId, n);
+  (n.children||[]).forEach(c=>tagSpNodes(c,i));
+})(SP_TREE_DATA || {});
+
+function treeToNewick(n){
+  const name=(n.name||"").replace(/[(),:;]/g,"_");
+  const dist=n.dist!=null?":"+n.dist:"";
+  if(!n.children||!n.children.length) return name+dist;
+  return "("+n.children.map(treeToNewick).join(",")+")"+(name||"")+dist;
+}
 
 let colorMode     = "species";   // "species" | "clade" | "og"
 let cladeSp2Color = {};
@@ -1398,10 +1413,21 @@ function drawSpeciesTree() {
       const nodeCol=isSplit?hmSplitLineColors[splitIdx%hmSplitLineColors.length]:"#999";
       const tip=nodeLabel+'<div style="font-size:9px;color:#aaa;margin-top:3px">click to collapse &nbsp;·&nbsp; shift+click to split heatmap</div>';
       // always-visible node name label (italic, small, to the right of the dot)
+      // double-click to edit the name; edits propagate to SP_TREE_DATA
       if(n.name)
         svg.append("text").attr("x",sx(n._d)+7).attr("y",n._y).attr("dy","0.35em")
           .attr("font-size",9).attr("fill",nodeCol).attr("font-style","italic")
-          .style("pointer-events","none").text(n.name);
+          .style("cursor","text").style("user-select","none").text(n.name)
+          .on("dblclick",(ev)=>{
+            ev.stopPropagation();
+            const orig=spNodeById.get(n._spId);
+            if(!orig) return;
+            const v=window.prompt("Edit node label:",orig.name||"");
+            if(v===null) return;
+            orig.name=v.trim();
+            drawSpeciesTree(); drawCladogram();
+            if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
+          });
       svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
         .attr("fill",isSplit?hmSplitColors[splitIdx%hmSplitColors.length]:"#fff")
         .attr("stroke",nodeCol).attr("stroke-width",isSplit?2:1.2)
@@ -2487,9 +2513,11 @@ function downloadTreePNG(){
 }
 
 function downloadNewick(){
-  if(!NEWICK_RAW){ alert("No species tree loaded."); return; }
+  if(!SP_TREE_DATA||!SP_TREE_DATA.children){ alert("No species tree loaded."); return; }
+  // Regenerate Newick from (possibly edited) SP_TREE_DATA so label edits are preserved
+  const nwk=treeToNewick(SP_TREE_DATA)+";";
   const a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob([NEWICK_RAW],{type:"text/plain"}));
+  a.href=URL.createObjectURL(new Blob([nwk],{type:"text/plain"}));
   a.download="species_tree.nwk";
   a.click();
   URL.revokeObjectURL(a.href);
@@ -2782,18 +2810,27 @@ function annotateOGNodes(){
   if(!rootNode) return;
   // If tree already has named OG internal nodes, nothing to annotate
   if(rootNode.descendants().some(d=>isOGNode(d))) return;
-  // Clear previous non-collapsed annotations (leave _og_label on _isOgCol nodes alone)
+  // Clear previous non-collapsed annotations
   rootNode.each(d=>{ if(!d._isOgCol) d.data._og_label=null; });
-  // Collect OG → visible leaf nodes
+  // Build set of currently-visible nodes (only those reachable via children, not _children)
+  const visibleNodes=new Set(rootNode.descendants());
+  // Collect OG → ALL leaf nodes, including inside collapsed (_children) subtrees.
+  // This keeps the MRCA stable when subclades are collapsed: the MRCA is computed
+  // from the full leaf set, then we only annotate it if it is itself visible.
   const ogGroups={};
-  rootNode.each(d=>{
-    if(!d.data.leaf) return;
-    const og=d.data.og||ogGene2Name[d.data.gene_id||d.data.name]||"";
-    if(og)(ogGroups[og]=ogGroups[og]||[]).push(d);
-  });
+  (function walkAll(n){
+    if(n.data.leaf){
+      const og=n.data.og||ogGene2Name[n.data.gene_id||n.data.name]||"";
+      if(og)(ogGroups[og]=ogGroups[og]||[]).push(n);
+      return;
+    }
+    for(const c of (n.children||[])) walkAll(c);
+    for(const c of (n._children||[])) walkAll(c);
+  })(rootNode);
   for(const [og,leaves] of Object.entries(ogGroups)){
     const mrca=findMRCA(leaves);
-    if(mrca&&!mrca.data.leaf&&!mrca._isOgCol){ mrca.data._og_label=og; }
+    // Only annotate if the MRCA is a visible (expanded), non-leaf, non-collapsed node
+    if(mrca&&visibleNodes.has(mrca)&&!mrca.data.leaf&&!mrca._children){ mrca.data._og_label=og; }
   }
 }
 
@@ -3077,6 +3114,9 @@ function renderTree(animate){
       return 0.8;
     })
     .on("click",(event,d)=>{
+      event.stopPropagation();
+      // compare mode intercepts ANY node click (leaf or internal) as the second target
+      if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
       if(d.data.leaf){
         const tipName=d.data.gene_id||d.data.name||"";
         if(tipName&&navigator.clipboard) navigator.clipboard.writeText(tipName).then(()=>{
@@ -3088,8 +3128,6 @@ function renderTree(animate){
         });
         return;
       }
-      event.stopPropagation();
-      if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
       if(d._children){ d.children=d._children; d._children=null; d._isOgCol=false; renderTree(true); hideTip(); }
       else if(d.children){ showCollapseChoicePopup(event,d); }
     })
@@ -3325,7 +3363,7 @@ document.getElementById("tree-count").textContent =
 document.getElementById("btn-og-labels").classList.toggle("active-btn", showOGLabels);
 
 if (hasHeatmapData || TREE_INDEX.length > 0) {
-  switchTab(hasHeatmapData ? "heatmap" : "trees");
+  switchTab("sptree");
 } else {
   document.getElementById("pane-heatmap").innerHTML =
     '<div style="padding:40px;color:#999;text-align:center">No data found.<br>'+
