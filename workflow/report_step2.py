@@ -450,6 +450,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 /* main tree panel */
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 #controls{padding:5px 10px;background:#f5f5f5;border-bottom:1px solid #ddd;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctrl-grp-label{font-size:9px;font-weight:700;color:#aaa;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;cursor:default;user-select:none}
+.ctrl-sep{width:1px;height:16px;background:#ddd;align-self:center;flex-shrink:0}
 .ctrl-btn{padding:3px 9px;border:1px solid #bbb;border-radius:3px;cursor:pointer;background:#fff;font-size:11px}
 .ctrl-btn:hover{background:#eee}
 #tree-title{font-size:11px;color:#555;margin-left:4px}
@@ -613,93 +615,110 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
       </div>
       <div id="main">
         <div id="controls">
-          <!-- group 1: tree operations -->
-          <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
-          <button class="ctrl-btn" id="btn-reroot" onclick="toggleRerootMode()" title="Click a node or leaf to reroot the tree there">Reroot…</button>
-          <button class="ctrl-btn" id="btn-reset-root" onclick="resetRoot()" title="Restore original root" style="display:none">&#x21BA; Reset root</button>
-          <button class="ctrl-btn" id="btn-collapse-ogs" onclick="toggleCollapseToOGs()">Collapse to OGs</button>
-          <button class="ctrl-btn" id="btn-highlight-ogs" onclick="toggleHighlightOGs()">Highlight OGs</button>
-          <button class="ctrl-btn" id="btn-og-labels" onclick="toggleOGLabels()">OG labels</button>
-          <button class="ctrl-btn" id="btn-possvm" onclick="togglePossvmPanel(event)" title="Interactive species-overlap orthogroup calling">POSSVM</button>
-          <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
-          <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
-          <!-- group 2: view toggles -->
-          <button class="ctrl-btn" id="btn-support" onclick="toggleSupport()">Support</button>
-          <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()">Branch lengths</button>
-          <button class="ctrl-btn" onclick="fitTree()">&#x2922; Fit</button>
-          <button class="ctrl-btn" onclick="downloadTreeSVG()" title="Download gene tree as SVG">&#11015; SVG</button>
-          <button class="ctrl-btn" onclick="downloadTreePNG()" title="Download gene tree as PNG">&#11015; PNG</button>
-          <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()">Showing: GeneRax</button>
+          <!-- ── Structure ─────────────────────────────────────────────── -->
+          <span class="ctrl-grp-label" title="Tree structure controls">Tree</span>
+          <button class="ctrl-btn" onclick="expandAll()" title="Expand all collapsed nodes">Expand all</button>
+          <button class="ctrl-btn" onclick="collapseAll()" title="Collapse all nodes to leaves">Collapse all</button>
+          <button class="ctrl-btn" id="btn-reroot" onclick="toggleRerootMode()" title="Click any node or leaf to reroot the tree there">Reroot…</button>
+          <button class="ctrl-btn" id="btn-reset-root" onclick="resetRoot()" title="Restore the original root" style="display:none">&#x21BA; Reset root</button>
+          <button class="ctrl-btn" onclick="fitTree()" title="Fit the tree to the current panel size">&#x2922; Fit</button>
+          <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()" title="Switch between available tree sources (e.g. GeneRax vs FastTree)">Showing: GeneRax</button>
           <span id="tree-title"></span>
+          <span class="ctrl-sep"></span>
+
+          <!-- ── Orthogroups ────────────────────────────────────────────── -->
+          <span class="ctrl-grp-label" title="Orthogroup display and re-annotation">OGs</span>
+          <button class="ctrl-btn" id="btn-collapse-ogs" onclick="toggleCollapseToOGs()" title="Collapse each orthogroup clade into a single labelled triangle">Collapse to OGs</button>
+          <button class="ctrl-btn" id="btn-highlight-ogs" onclick="toggleHighlightOGs()" title="Shade the background of each orthogroup clade with its colour">Highlight OGs</button>
+          <button class="ctrl-btn" id="btn-og-labels" onclick="toggleOGLabels()" title="Show OG name at the MRCA (deepest shared ancestor) of each orthogroup">OG labels</button>
+          <button class="ctrl-btn" id="btn-possvm" onclick="togglePossvmPanel(event)" title="Re-call orthogroups using the POSSVM species-overlap method — choose ingroup species, then click Run">POSSVM</button>
           <span id="n-ogs-label"></span>
-          <span style="flex:1"></span>
-          <!-- group 3: visual options -->
-          <label style="font-size:11px;color:#555">Color:
+          <span class="ctrl-sep"></span>
+
+          <!-- ── Display overlays ───────────────────────────────────────── -->
+          <span class="ctrl-grp-label" title="Labels and overlays shown on the tree">Show</span>
+          <button class="ctrl-btn" id="btn-support" onclick="toggleSupport()" title="Show bootstrap / SH-aLRT support values at internal nodes">Support</button>
+          <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()" title="Draw branches proportional to evolutionary distance instead of a cladogram">Branch lengths</button>
+          <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">
+            Tip:
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show gene identifier in tip labels"><input type="checkbox" id="chk-geneid" checked> ID</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show orthogroup name in tip labels"><input type="checkbox" id="chk-og" checked> OG</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show reference orthologue in tip labels"><input type="checkbox" id="chk-ref" checked> ref</label>
+            <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Hide tip labels for species not in the current highlight set"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
+            <button id="btn-focus-collapse-style" class="ctrl-btn active-btn" onclick="toggleFocusCollapseStyle()" title="Toggle how non-highlighted branches are collapsed: MRCA triangle or single circle node" style="padding:1px 6px;font-size:10px">&#9660; MRCA</button>
+          </span>
+          <span class="ctrl-sep"></span>
+
+          <!-- ── Style ─────────────────────────────────────────────────── -->
+          <span class="ctrl-grp-label" title="Visual appearance of the tree">Style</span>
+          <label style="font-size:11px;color:#555" title="Colour leaves by species, by orthogroup, or by a predefined clade grouping">Color:
             <select id="color-by" style="font-size:11px;padding:2px 4px;border:1px solid #bbb;border-radius:3px">
               <option value="species">by species</option>
             </select>
           </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="Font size of tip labels">
             Label:
             <input type="range" id="tip-font-slider" min="6" max="24" step="1" value="11" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="tip-font-val" style="width:20px;text-align:right">11</span>px
           </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="Thickness of tree branches">
             Lines:
             <input type="range" id="line-width-slider" min="1" max="8" step="0.5" value="1.3" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="line-width-val" style="width:20px;text-align:right">1.3</span>px
           </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="Vertical spacing multiplier — increase to spread leaves further apart">
             Height:
             <input type="range" id="tree-height-slider" min="0.5" max="5" step="0.1" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="tree-height-val" style="width:24px;text-align:right">1</span>&times;
           </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="Horizontal branch-length multiplier — increase to extend branches">
             Width:
             <input type="range" id="tree-width-slider" min="0.3" max="4" step="0.1" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="tree-width-val" style="width:24px;text-align:right">1.0</span>&times;
           </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="Opacity of clade highlight rectangles">
-            Hl&#945;:
-            <input type="range" id="clade-hl-alpha-slider" min="0.05" max="0.8" step="0.05" value="0.22" style="width:55px;cursor:pointer;accent-color:#e67e22">
-            <span id="clade-hl-alpha-val" style="width:28px;text-align:right">0.22</span>
-          </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="How far the highlight extends past the leaf nodes (px)">
-            Hl&#8594;:
-            <input type="range" id="clade-hl-extend-slider" min="0" max="300" step="10" value="20" style="width:55px;cursor:pointer;accent-color:#e67e22">
-            <span id="clade-hl-extend-val" style="width:28px;text-align:right">20</span>
-          </label>
-          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="Vertical space (as a fraction of normal row height) reserved for collapsed OG triangles">
             Collapsed:
             <input type="range" id="collapsed-frac-slider" min="0.1" max="1" step="0.05" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="collapsed-frac-val" style="width:28px;text-align:right">1.0</span>
           </label>
-          <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
-          <!-- group 4: show checkboxes -->
-          <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:6px">
-            Show:
-            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-geneid" checked> ID</label>
-            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-og" checked> OG</label>
-            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-ref" checked> ref</label>
-            <label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
-            <button id="btn-focus-collapse-style" class="ctrl-btn active-btn" onclick="toggleFocusCollapseStyle()" title="Toggle collapse style used by Focus and hide non-hl: triangle (MRCA) or circle" style="padding:1px 6px;font-size:10px">&#9660; MRCA</button>
-          </span>
-          <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
-          <!-- group 5: species + OG highlight + species tree -->
-          <div id="hl-tags"></div>
-          <input id="hl-search" list="hl-list" placeholder="Species… (Enter)">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="Opacity of clade highlight rectangles (right-click a node → Highlight to add one)">
+            Hl&#945;:
+            <input type="range" id="clade-hl-alpha-slider" min="0.05" max="0.8" step="0.05" value="0.22" style="width:55px;cursor:pointer;accent-color:#e67e22">
+            <span id="clade-hl-alpha-val" style="width:28px;text-align:right">0.22</span>
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="How far (px) the clade highlight rectangle extends past the rightmost leaf">
+            Hl&#8594;:
+            <input type="range" id="clade-hl-extend-slider" min="0" max="300" step="10" value="20" style="width:55px;cursor:pointer;accent-color:#e67e22">
+            <span id="clade-hl-extend-val" style="width:28px;text-align:right">20</span>
+          </label>
+          <span class="ctrl-sep"></span>
+
+          <!-- ── Export ─────────────────────────────────────────────────── -->
+          <span class="ctrl-grp-label" title="Download tree image or data">Export</span>
+          <button class="ctrl-btn" onclick="downloadTreeSVG()" title="Download the current tree view as an SVG file">&#11015; SVG</button>
+          <button class="ctrl-btn" onclick="downloadTreePNG()" title="Download the current tree view as a PNG image">&#11015; PNG</button>
+          <span class="ctrl-sep"></span>
+
+          <!-- ── Species highlight ──────────────────────────────────────── -->
+          <span class="ctrl-grp-label" title="Highlight specific species across the tree">Highlight</span>
+          <input id="hl-search" list="hl-list" placeholder="Species… (Enter)" title="Type a species name and press Enter to highlight it">
           <datalist id="hl-list"></datalist>
-          <button id="hl-clear" onclick="clearHighlight()" title="Clear all species highlights">&#10005;</button>
-          <button class="ctrl-btn" id="btn-mini-sp" onclick="toggleMiniSpPanel(event)" title="Show species tree — click a named node to highlight that clade">&#x1F333; Species tree</button>
-          <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips">Focus</button>
-          <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
-          <div id="og-hl-tags"></div>
+          <button id="hl-clear" onclick="clearHighlight()" title="Remove all species highlights">&#10005;</button>
+          <div id="hl-tags"></div>
+          <button class="ctrl-btn" id="btn-mini-sp" onclick="toggleMiniSpPanel(event)" title="Open a mini species tree — click a named node to highlight that entire clade at once">&#x1F333; Species tree</button>
+          <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips, keeping only the relevant subtree visible">Focus</button>
+          <span class="ctrl-sep"></span>
+
+          <!-- ── OG highlight ───────────────────────────────────────────── -->
+          <span class="ctrl-grp-label" title="Highlight specific orthogroups by name">OG hl</span>
           <div style="position:relative;display:inline-block">
-            <input id="og-hl-search" autocomplete="off" placeholder="OG name… (Enter)" style="width:140px;font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px"
+            <input id="og-hl-search" autocomplete="off" placeholder="OG name… (Enter)" title="Type an OG name and press Enter to highlight it"
+              style="width:140px;font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px"
               oninput="ogHlSearchInput(this.value)" onkeydown="ogHlSearchKey(event)">
             <div id="og-hl-dd" style="display:none;position:absolute;top:100%;left:0;z-index:520;background:#fff;border:1px solid #ccc;border-radius:0 0 4px 4px;max-height:200px;overflow-y:auto;min-width:200px;box-shadow:0 3px 8px rgba(0,0,0,.12);font-size:11px"></div>
           </div>
-          <button id="og-hl-clear" onclick="clearOgHighlight()" title="Clear OG highlights">&#10005;</button>
+          <button id="og-hl-clear" onclick="clearOgHighlight()" title="Remove all OG highlights">&#10005;</button>
+          <div id="og-hl-tags"></div>
         </div>
         <div id="tree-wrap">
           <svg id="tree-svg"></svg>
