@@ -98,6 +98,20 @@ def parse_fasta_species(path) -> dict:
     return dict(counts)
 
 
+def parse_fasta_genes(path) -> dict:
+    """Return {species: [gene_id, ...]} from FASTA headers."""
+    genes: dict = defaultdict(list)
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith(">"):
+                    gene = line[1:].strip().split()[0]
+                    genes[get_species_prefix(gene)].append(gene)
+    except (FileNotFoundError, OSError):
+        pass
+    return dict(genes)
+
+
 def build_family_records(search_dir: Path, family_info: dict) -> list:
     """Return list of family records from *.genes.list files."""
     records = []
@@ -825,6 +839,7 @@ const CLADE_DATA    = %%CLADE_DATA_JSON%%;
 const NEWICK_RAW    = %%NEWICK_RAW%%;
 const FAMILY_INFO   = %%FAMILY_INFO_JSON%%;
 const HAVE_GENERAX  = %%HAVE_GENERAX_JSON%%;
+const NO_TREE_GENES = %%NO_TREE_GENES_JSON%%;  // {hg_id: {species:[gene_ids]}} for HGs without trees
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COLOUR SYSTEM
@@ -2416,6 +2431,21 @@ function buildOGIndex(){
       (n.children||[]).forEach(walk);
     })(detail.tree);
   }
+  // Add genes from HGs that have no gene tree at all
+  const NO_ANNO="(no annotation)";
+  for(const [hgId, spGenes] of Object.entries(NO_TREE_GENES)){
+    const hgRec=HG_DATA.find(d=>d.id===hgId)||{};
+    const sc={};
+    for(const [sp,genes] of Object.entries(spGenes)){
+      sc[sp]=genes.length;
+      for(const g of genes){
+        if(!hmGeneIndex[g]) hmGeneIndex[g]=NO_ANNO+"::"+hgId;
+      }
+    }
+    const key=NO_ANNO+"::"+hgId;
+    hmOGIndex[key]={hgId, family:hgRec.family||"", cls:hgRec.class||hgRec.pref||"",
+                    total:Object.values(sc).reduce((a,b)=>a+b,0), species_counts:sc};
+  }
 }
 
 function buildHmSearchIndex(){
@@ -2862,7 +2892,9 @@ function downloadSpeciesGenes(sp, cls){
     if(getSpeciesPfx(gene)!==sp) continue;
     const r=hmOGIndex[og]||{};
     if(cls && (r.cls||"other")!==cls) continue;
-    rows.push([gene,og,r.hgId||"",r.family||"",r.cls||""].join("\t"));
+    // Strip internal "::hg_id" suffix used as a unique key for unannotated genes
+    const ogDisplay=og.includes("::")? og.split("::")[0] : og;
+    rows.push([gene,ogDisplay,r.hgId||"",r.family||"",r.cls||""].join("\t"));
   }
   if(rows.length===1){ alert("No gene data found for "+sp+(cls?" ("+cls+")":"")); return; }
   const blob=new Blob([rows.join("\n")],{type:"text/tab-separated-values"});
@@ -3950,6 +3982,16 @@ def main(argv=None):
         idx["class"] = family_info.get(fam_key, rec.get("prefix", ""))
         index_records.append(idx)
 
+    # Gene IDs for HGs that have NO gene tree (so the download can include them)
+    tree_hg_ids = {r["id"] for r in records}
+    no_tree_genes: dict = {}   # {hg_stem_id: {species: [gene_id, ...]}}
+    for r in hg_records:
+        if r["id"] not in tree_hg_ids:
+            fasta = cluster_dir / (r["id"] + ".fasta")
+            genes_by_sp = parse_fasta_genes(fasta)
+            if genes_by_sp:
+                no_tree_genes[r["id"]] = genes_by_sp
+
     # Build Families tab data
     fam_hg_counts    = defaultdict(int)
     fam_gene_counts  = defaultdict(int)
@@ -4014,7 +4056,8 @@ def main(argv=None):
             .replace("%%CLADE_DATA_JSON%%",    json.dumps(clade_groupings))
             .replace("%%NEWICK_RAW%%",         json.dumps(newick_raw))
             .replace("%%FAMILY_INFO_JSON%%",   json.dumps(family_info_records))
-            .replace("%%HAVE_GENERAX_JSON%%",  json.dumps(have_generax)))
+            .replace("%%HAVE_GENERAX_JSON%%",  json.dumps(have_generax))
+            .replace("%%NO_TREE_GENES_JSON%%", json.dumps(no_tree_genes)))
 
     Path(args.output).write_text(html, encoding="utf-8")
     print(f"Report written to {args.output}", file=sys.stderr)

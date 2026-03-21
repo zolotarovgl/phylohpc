@@ -23,6 +23,7 @@ from report_step2 import (
     load_family_info,
     build_family_records,
     build_hg_records,
+    parse_fasta_genes,
     get_species_prefix,
 )
 
@@ -255,6 +256,16 @@ def main():
     index_records = [{k: v for k, v in r.items() if k not in ("tree_dict", "ogs")}
                      for r in tree_records]
 
+    # Gene IDs for HGs without gene trees
+    tree_hg_ids = {r["id"] for r in tree_records}
+    no_tree_genes: dict = {}
+    for r in hg_records:
+        if r["id"] not in tree_hg_ids:
+            fasta = cluster_dir / (r["id"] + ".fasta")
+            genes_by_sp = parse_fasta_genes(fasta)
+            if genes_by_sp:
+                no_tree_genes[r["id"]] = genes_by_sp
+
     lazy_parts = []
     for rec in tree_records:
         detail = {"tree": rec["tree_dict"], "ogs": rec["ogs"]}
@@ -265,15 +276,46 @@ def main():
             + "</script>"
         )
 
+    # Minimal FAMILY_INFO for the Families tab (no pfam/category details in demo)
+    from collections import defaultdict as _dd
+    fam_hg_counts    = _dd(int)
+    fam_gene_counts  = _dd(int)
+    fam_species_sets = _dd(set)
+    for r in hg_records:
+        fam_hg_counts[r["family"]] += 1
+    for r in family_records:
+        fam_gene_counts[r["family"]]  = r.get("total", 0)
+        fam_species_sets[r["family"]] = set(r.get("species_counts", {}).keys())
+    fam_generax_counts = _dd(int)
+    fam_tree_hg_ids    = _dd(set)
+    for r in tree_records:
+        fam_generax_counts[r["family"]] += 1
+        fam_tree_hg_ids[r["family"]].add(r["id"])
+    family_info_records = []
+    for fam in sorted(set(fam_hg_counts) | set(fam_gene_counts)):
+        det = family_info.get(fam, {}) if isinstance(family_info, dict) else {}
+        family_info_records.append({
+            "family": fam, "pfam": [], "category": "", "cls": "",
+            "n_hgs": fam_hg_counts.get(fam, 0),
+            "total": fam_gene_counts.get(fam, 0),
+            "n_species": len(fam_species_sets.get(fam, set())),
+            "n_trees": len(fam_tree_hg_ids.get(fam, set())),
+            "n_generax": fam_generax_counts.get(fam, 0),
+        })
+
     html = (HTML_TEMPLATE
-            .replace("%%LAZY_SCRIPTS%%",    "\n".join(lazy_parts))
-            .replace("%%SPECIES_ORDER%%",   json.dumps(species_order))
-            .replace("%%TREE_DATA%%",       json.dumps(SP_TREE_DATA))
-            .replace("%%FAMILY_DATA%%",     json.dumps(family_records))
-            .replace("%%HG_DATA%%",         json.dumps(hg_records))
-            .replace("%%TREE_INDEX_JSON%%", json.dumps(index_records))
-            .replace("%%SPECIES_JSON%%",    json.dumps(all_species))
-            .replace("%%CLADE_DATA_JSON%%", json.dumps(CLADE_DATA)))
+            .replace("%%LAZY_SCRIPTS%%",       "\n".join(lazy_parts))
+            .replace("%%SPECIES_ORDER%%",      json.dumps(species_order))
+            .replace("%%TREE_DATA%%",          json.dumps(SP_TREE_DATA))
+            .replace("%%FAMILY_DATA%%",        json.dumps(family_records))
+            .replace("%%HG_DATA%%",            json.dumps(hg_records))
+            .replace("%%TREE_INDEX_JSON%%",    json.dumps(index_records))
+            .replace("%%SPECIES_JSON%%",       json.dumps(all_species))
+            .replace("%%CLADE_DATA_JSON%%",    json.dumps(CLADE_DATA))
+            .replace("%%NEWICK_RAW%%",         json.dumps(""))
+            .replace("%%FAMILY_INFO_JSON%%",   json.dumps(family_info_records))
+            .replace("%%HAVE_GENERAX_JSON%%",  json.dumps(True))
+            .replace("%%NO_TREE_GENES_JSON%%", json.dumps(no_tree_genes)))
 
     output_path.write_text(html, encoding="utf-8")
     print(f"Written: {output_path}")
