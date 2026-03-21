@@ -236,7 +236,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         <div id="controls">
           <!-- group 1: tree operations -->
           <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
-          <button class="ctrl-btn" onclick="collapseToOGs()">Collapse to OGs</button>
+          <button class="ctrl-btn" id="btn-collapse-ogs" onclick="toggleCollapseToOGs()">Collapse to OGs</button>
+          <button class="ctrl-btn" id="btn-highlight-ogs" onclick="toggleHighlightOGs()">Highlight OGs</button>
           <button class="ctrl-btn" id="btn-og-labels" onclick="toggleOGLabels()">OG labels</button>
           <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
           <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
@@ -3017,6 +3018,9 @@ function drawGeneTree(treeData){
   rootNode=d3.hierarchy(treeData,d=>d.children);
   rootNode.each(d=>{d._uid=++_uid;});
   if(useBranchLen) assignBranchLenPos(rootNode,0);
+  // reset OG collapse/highlight toggle states for the new tree
+  _ogCollapseActive=false; document.getElementById("btn-collapse-ogs").classList.remove("active-btn");
+  _ogHlActive=false;       document.getElementById("btn-highlight-ogs").classList.remove("active-btn");
   renderTree(false);
   // auto-fit after layout
   setTimeout(fitTree, 260);
@@ -3424,7 +3428,19 @@ function expandAll(){
   rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;d._isOgCol=false;}});
   renderTree(true);
 }
-function collapseToOGs(){
+let _ogCollapseActive=false;
+function toggleCollapseToOGs(){
+  if(_ogCollapseActive){ _expandAllOgCol(); return; }
+  _collapseToOGs();
+}
+function _expandAllOgCol(){
+  if(!rootNode)return;
+  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;} d._isOgCol=false; delete d.data._og_label;});
+  _ogCollapseActive=false;
+  document.getElementById("btn-collapse-ogs").classList.remove("active-btn");
+  renderTree(true); setTimeout(fitTree,260);
+}
+function _collapseToOGs(){
   if(!rootNode)return;
   // pass 1: expand all, clear flags
   rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;} d._isOgCol=false;});
@@ -3448,8 +3464,53 @@ function collapseToOGs(){
       }
     }
   }
-  renderTree(true);
-  setTimeout(fitTree, 260);
+  _ogCollapseActive=true;
+  document.getElementById("btn-collapse-ogs").classList.add("active-btn");
+  renderTree(true); setTimeout(fitTree,260);
+}
+// keep the bare name available for internal callers (e.g. re-collapse on tree load)
+function collapseToOGs(){ _collapseToOGs(); }
+
+let _ogHlActive=false;
+function toggleHighlightOGs(){
+  if(!rootNode)return;
+  if(_ogHlActive){
+    // remove OG highlights
+    cladeHighlights.forEach((rec,uid)=>{ if(rec._fromOgHl) cladeHighlights.delete(uid); });
+    _ogHlActive=false;
+    document.getElementById("btn-highlight-ogs").classList.remove("active-btn");
+    renderTree(false); return;
+  }
+  // Ensure tree is fully expanded so we can find all OG nodes
+  rootNode.each(d=>{if(d._children){d.children=d._children;d._children=null;} d._isOgCol=false;});
+  // Collect OG root nodes (same logic as _collapseToOGs pass 2a/2b)
+  const ogNodes=[];   // [{node, label}]
+  const ogs=activeOgs();
+  let found=false;
+  rootNode.each(d=>{
+    if(!d.data.leaf&&isOGNode(d)){ogNodes.push({node:d,label:d.data.name}); found=true;}
+  });
+  if(!found){
+    const ogGroups={};
+    rootNode.leaves().forEach(l=>{const og=l.data.og; if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);});
+    for(const [og,leaves] of Object.entries(ogGroups)){
+      const mrca=findMRCA(leaves);
+      if(mrca&&!mrca.data.leaf) ogNodes.push({node:mrca,label:og});
+    }
+  }
+  if(!ogNodes.length){alert("No OG nodes found."); return;}
+  // Remove any previous OG highlights, then add one per OG
+  cladeHighlights.forEach((rec,uid)=>{ if(rec._fromOgHl) cladeHighlights.delete(uid); });
+  const palette2=["#a8d8ea","#ffcef3","#d4f1c4","#ffd6a5","#e2d0f8","#c8f0de","#ffe4a8","#ffd0d0"];
+  ogNodes.forEach(({node,label},i)=>{
+    const col=palette2[i%palette2.length];
+    cladeHighlights.set(node._uid,{color:col,label,_fromOgHl:true});
+  });
+  _ogCollapseActive=false;
+  document.getElementById("btn-collapse-ogs").classList.remove("active-btn");
+  _ogHlActive=true;
+  document.getElementById("btn-highlight-ogs").classList.add("active-btn");
+  renderTree(true); setTimeout(fitTree,260);
 }
 function collapseAll(){
   if(!rootNode)return;
