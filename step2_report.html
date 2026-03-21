@@ -3210,15 +3210,20 @@ function runPossvm(){
   if(!ingroupSps.size){document.getElementById("possvm-result").textContent="Select at least one species."; return;}
   const sos=parseFloat(document.getElementById("possvm-sos").value);
 
-  // ── Pass 1: tag each node with the set of ingroup species in its subtree ──
+  // ── Pass 1: tag each node with ingroup species set AND ingroup leaf count ──
   function tagSps(node){
     const ch=node.children||node._children;
     if(!ch||!ch.length){
       const sp=node.data.species||"";
       node._pvmSps=ingroupSps.has(sp)?new Set([sp]):new Set();
+      node._pvmCnt=ingroupSps.has(sp)?1:0;
     } else {
-      node._pvmSps=new Set();
-      for(const c of ch){tagSps(c); c._pvmSps.forEach(s=>node._pvmSps.add(s));}
+      node._pvmSps=new Set(); node._pvmCnt=0;
+      for(const c of ch){
+        tagSps(c);
+        c._pvmSps.forEach(s=>node._pvmSps.add(s));
+        node._pvmCnt+=c._pvmCnt;
+      }
     }
   }
 
@@ -3227,7 +3232,7 @@ function runPossvm(){
     const ch=node.children||node._children;
     if(!ch||ch.length<2){node._pvmEvent=null;return;}
     for(const c of ch) classify(c);
-    // Node is D if ANY pair of children share at least one ingroup species at rate > sos
+    // Node is D if ANY pair of children share ingroup species at rate > sos
     let isD=false;
     outer:for(let i=0;i<ch.length&&!isD;i++){
       for(let j=i+1;j<ch.length&&!isD;j++){
@@ -3235,6 +3240,21 @@ function runPossvm(){
         if(!si.size||!sj.size) continue;
         let ovl=0; si.forEach(s=>{if(sj.has(s))ovl++;});
         if(ovl/Math.min(si.size,sj.size)>sos){isD=true;break outer;}
+      }
+    }
+    // POSSVM special case: a D-classified node where EVERY child has exactly
+    // one ingroup gene and they all come from the same single ingroup species
+    // is treated as S (not a duplication).  This prevents same-species terminal
+    // leaf pairs from being split into separate OGs.
+    if(isD){
+      const allSingleGene=ch.every(c=>c._pvmCnt===1);
+      if(allSingleGene){
+        const spSets=ch.map(c=>c._pvmSps).filter(s=>s.size>0);
+        if(spSets.length>0){
+          const refSp=[...spSets[0]][0];
+          const allSameSp=spSets.every(s=>s.size===1&&[...s][0]===refSp);
+          if(allSameSp) isD=false;
+        }
       }
     }
     node._pvmEvent=isD?"D":"S";
@@ -3286,6 +3306,9 @@ function runPossvm(){
   });
   _pvmActive=true;
   colorMode="og";
+  // Sync the colour-by dropdown so the UI reflects the active mode
+  const _cbs=document.getElementById("color-by");
+  if(_cbs) _cbs.value="og";
   document.getElementById("n-ogs-label").textContent=nOgs+" orthogroups (POSSVM)";
   document.getElementById("possvm-result").textContent="\u2714 "+nOgs+" OG"+(nOgs!==1?"s":"")+" found";
   document.getElementById("possvm-reset-btn").style.display="inline";
@@ -3663,7 +3686,8 @@ function renderTree(animate){
       const el=d3.select(this);
       el.selectAll("tspan").remove();
       const gid=d.data.gene_id||d.data.name;
-      const og=d.data.og||ogGene2Name[gid]||"";
+      // ogGene2Name takes priority so POSSVM-assigned OGs show over pipeline annotations
+      const og=ogGene2Name[gid]||d.data.og||"";
       const ref=d.data.ref||"";
       // dim if either species-hl or OG-hl is active and this tip doesn't match
       const notSpHl=hlSet!==null&&!hlSet.has(d.data.species||"");
