@@ -64,6 +64,26 @@ def load_family_info(csv_path) -> dict:
     return info
 
 
+def load_family_details(csv_path) -> dict:
+    """Return {family_name: {pfam: [str,...], category: str, cls: str}} from gene_families_searchinfo.csv."""
+    details = {}
+    try:
+        with open(csv_path) as fh:
+            for line in fh:
+                cols = line.rstrip("\n").split("\t")
+                if len(cols) >= 7:
+                    family   = cols[0].strip()
+                    pfam_raw = cols[1].strip()
+                    category = cols[5].strip() if len(cols) > 5 else ""
+                    cls      = cols[6].strip()
+                    if family:
+                        pfam_list = [p.strip() for p in pfam_raw.split(",") if p.strip()] if pfam_raw else []
+                        details[family] = {"pfam": pfam_list, "category": category, "cls": cls}
+    except (FileNotFoundError, OSError):
+        pass
+    return details
+
+
 def parse_fasta_species(path) -> dict:
     """Return {species: count} from FASTA headers."""
     counts: dict = defaultdict(int)
@@ -483,6 +503,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button class="tab-btn active" data-tab="sptree" onclick="switchTab('sptree')">&#10022; Species Tree</button>
     <button class="tab-btn" data-tab="heatmap" onclick="switchTab('heatmap')">&#9639; Counts</button>
     <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">&#11044; Gene Trees</button>
+    <button class="tab-btn" data-tab="families" onclick="switchTab('families')">&#9783; Families</button>
   </div>
 
   <!-- ── Heatmap pane ── -->
@@ -659,6 +680,31 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     </div>
   </div>
 
+  <!-- ── Families pane ── -->
+  <div class="tab-pane" id="pane-families" style="flex-direction:column;overflow:hidden">
+    <div id="fam-controls" style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:#fafafa;border-bottom:1px solid #ddd;flex-shrink:0;flex-wrap:wrap">
+      <input id="fam-search" type="text" placeholder="&#128269; Search family, PFAM domain, category&#8230;" autocomplete="off"
+        style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;width:280px"
+        oninput="filterFamilyTable(this.value)">
+      <span id="fam-count" style="font-size:11px;color:#888"></span>
+    </div>
+    <div id="fam-table-wrap" style="flex:1;overflow:auto;padding:0 12px 12px">
+      <table id="fam-table" style="border-collapse:collapse;width:100%;font-size:12px;margin-top:8px">
+        <thead>
+          <tr style="background:#f0f0f0;position:sticky;top:0;z-index:10">
+            <th class="fam-th" data-col="family"   style="text-align:left;padding:6px 8px;cursor:pointer;white-space:nowrap">Family &#8597;</th>
+            <th class="fam-th" data-col="pfam"     style="text-align:left;padding:6px 8px;cursor:pointer">PFAM Domain(s) &#8597;</th>
+            <th class="fam-th" data-col="category" style="text-align:left;padding:6px 8px;cursor:pointer;white-space:nowrap">Category &#8597;</th>
+            <th class="fam-th" data-col="n_hgs"    style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap">HGs &#8597;</th>
+            <th class="fam-th" data-col="total"    style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap">Genes &#8597;</th>
+            <th class="fam-th" data-col="n_species"style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap">Species &#8597;</th>
+          </tr>
+        </thead>
+        <tbody id="fam-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ── Species tree pane ── -->
   <div class="tab-pane active" id="pane-sptree">
     <div id="sptree-controls">
@@ -761,6 +807,7 @@ const TREE_INDEX    = %%TREE_INDEX_JSON%%;
 const ALL_SPECIES   = %%SPECIES_JSON%%;
 const CLADE_DATA    = %%CLADE_DATA_JSON%%;
 const NEWICK_RAW    = %%NEWICK_RAW%%;
+const FAMILY_INFO   = %%FAMILY_INFO_JSON%%;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COLOUR SYSTEM
@@ -913,10 +960,109 @@ function switchTab(name) {
   } else if (name==="sptree") {
     tc.style.display = "none"; pfx.style.display = "none";
     drawSpeciesTree();
+  } else if (name==="families") {
+    tc.style.display = "none"; pfx.style.display = "none";
+    hb.style.display = "none"; cr.textContent = "";
+    drawFamilyTable();
   } else {
     tc.style.display = "none"; pfx.style.display = "";
     drawHeatmap(); // drawCladogram() is called at the end of drawHeatmap()
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FAMILIES TABLE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _famSortCol = "family", _famSortAsc = true;
+let _famFilter  = "";
+let _famRendered = false;
+
+const _clsCatColors = {
+  tfs:"#3498db", chr:"#9b59b6", sig:"#e67e22", neu:"#27ae60",
+  rbp:"#e74c3c", ion:"#1abc9c", epi:"#f39c12", kin:"#2980b9"
+};
+function _clsBadge(cls){
+  const c=_clsCatColors[cls]||"#7f8c8d";
+  return `<span style="background:${c};color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;white-space:nowrap">${cls||"—"}</span>`;
+}
+
+function drawFamilyTable(){
+  const tbody = document.getElementById("fam-tbody");
+  const countEl = document.getElementById("fam-count");
+  const q = _famFilter.toLowerCase();
+
+  let rows = FAMILY_INFO.filter(d=>{
+    if(!q) return true;
+    return d.family.toLowerCase().includes(q)
+        || (d.pfam||[]).some(p=>p.toLowerCase().includes(q))
+        || (d.category||"").toLowerCase().includes(q)
+        || (d.cls||"").toLowerCase().includes(q);
+  });
+
+  // sort
+  rows = rows.slice().sort((a,b)=>{
+    let va=a[_famSortCol], vb=b[_famSortCol];
+    if(_famSortCol==="pfam"){ va=(va||[]).join(","); vb=(vb||[]).join(","); }
+    if(typeof va==="number") return _famSortAsc ? va-vb : vb-va;
+    va=String(va||"").toLowerCase(); vb=String(vb||"").toLowerCase();
+    return _famSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+  });
+
+  countEl.textContent = rows.length + " / " + FAMILY_INFO.length + " families";
+
+  tbody.innerHTML = rows.map((d,i)=>{
+    const pfamLinks = (d.pfam||[]).map(p=>
+      `<a href="https://www.ebi.ac.uk/interpro/search/text/${encodeURIComponent(p)}/"
+          target="_blank" rel="noopener"
+          style="color:#2980b9;text-decoration:none;margin-right:6px;white-space:nowrap"
+          title="Search InterPro for ${p}">${p}</a>`
+    ).join("");
+    const bg = i%2===0?"#fff":"#f9f9f9";
+    return `<tr style="background:${bg};border-bottom:1px solid #eee">
+      <td style="padding:5px 8px;font-weight:600;cursor:pointer;color:#2c3e50;white-space:nowrap"
+          onclick="famGoToFamily('${d.family.replace(/'/g,"\\'")}')"
+          title="View in Counts tab">${d.family}</td>
+      <td style="padding:5px 8px">${pfamLinks||'<span style="color:#bbb">—</span>'}</td>
+      <td style="padding:5px 8px">${_clsBadge(d.cls)}<span style="color:#888;font-size:11px;margin-left:4px">${d.category||""}</span></td>
+      <td style="padding:5px 8px;text-align:right;color:#555">${d.n_hgs||0}</td>
+      <td style="padding:5px 8px;text-align:right;color:#555">${d.total||0}</td>
+      <td style="padding:5px 8px;text-align:right;color:#555">${d.n_species||0}</td>
+    </tr>`;
+  }).join("");
+
+  // wire sort headers (only once)
+  if(!_famRendered){
+    document.querySelectorAll(".fam-th").forEach(th=>{
+      th.addEventListener("click",()=>{
+        const col=th.dataset.col;
+        if(_famSortCol===col) _famSortAsc=!_famSortAsc;
+        else { _famSortCol=col; _famSortAsc=true; }
+        drawFamilyTable();
+      });
+    });
+    _famRendered=true;
+  }
+}
+
+function filterFamilyTable(val){
+  _famFilter=val;
+  drawFamilyTable();
+}
+
+function famGoToFamily(family){
+  // Navigate to the heatmap Counts tab and drill into this family
+  switchTab("heatmap");
+  // After heatmap draws, find matching family record and navigate to HG view
+  const fRec = FAMILY_DATA.find(d=>d.family===family);
+  if(!fRec) return;
+  hmViewMode="hg"; hmActiveFamily=family; hmActiveClass=fRec.class||null;
+  hmActiveHG=null; hmActiveHGRec=null;
+  drawHeatmap();
+  const back=document.getElementById("hm-back");
+  const cr=document.getElementById("hm-breadcrumb");
+  if(back) back.style.display="inline";
+  if(cr) cr.textContent=(hmActiveClass?hmActiveClass+" › ":"")+family;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3589,6 +3735,7 @@ def main(argv=None):
 
     # Heatmap data
     family_info    = load_family_info(args.family_info)
+    family_details = load_family_details(args.family_info)
     family_records = build_family_records(search_dir, family_info)
     hg_records     = build_hg_records(cluster_dir, family_info)
 
@@ -3653,6 +3800,29 @@ def main(argv=None):
         idx["class"] = family_info.get(fam_key, rec.get("prefix", ""))
         index_records.append(idx)
 
+    # Build Families tab data
+    fam_hg_counts    = defaultdict(int)
+    fam_gene_counts  = defaultdict(int)
+    fam_species_sets = defaultdict(set)
+    for r in hg_records:
+        fam_hg_counts[r["family"]] += 1
+    for r in family_records:
+        fam_gene_counts[r["family"]]  = r.get("total", 0)
+        fam_species_sets[r["family"]] = set(r.get("species_counts", {}).keys())
+    family_info_records = []
+    all_families = sorted(set(family_details.keys()) | set(fam_hg_counts.keys()) | set(fam_gene_counts.keys()))
+    for fam in all_families:
+        det = family_details.get(fam, {})
+        family_info_records.append({
+            "family":   fam,
+            "pfam":     det.get("pfam", []),
+            "category": det.get("category", ""),
+            "cls":      det.get("cls", ""),
+            "n_hgs":    fam_hg_counts.get(fam, 0),
+            "total":    fam_gene_counts.get(fam, 0),
+            "n_species":len(fam_species_sets.get(fam, set())),
+        })
+
     # Build per-HG lazy <script> tags
     lazy_parts = []
     for rec in records:
@@ -3670,15 +3840,16 @@ def main(argv=None):
     lazy_scripts = "\n".join(lazy_parts)
 
     html = (HTML_TEMPLATE
-            .replace("%%LAZY_SCRIPTS%%",    lazy_scripts)
-            .replace("%%SPECIES_ORDER%%",   json.dumps(species_order))
-            .replace("%%TREE_DATA%%",       json.dumps(tree_dict))
-            .replace("%%FAMILY_DATA%%",     json.dumps(family_records))
-            .replace("%%HG_DATA%%",         json.dumps(hg_records))
-            .replace("%%TREE_INDEX_JSON%%", json.dumps(index_records))
-            .replace("%%SPECIES_JSON%%",    json.dumps(all_species))
-            .replace("%%CLADE_DATA_JSON%%", json.dumps(clade_groupings))
-            .replace("%%NEWICK_RAW%%",      json.dumps(newick_raw)))
+            .replace("%%LAZY_SCRIPTS%%",       lazy_scripts)
+            .replace("%%SPECIES_ORDER%%",      json.dumps(species_order))
+            .replace("%%TREE_DATA%%",          json.dumps(tree_dict))
+            .replace("%%FAMILY_DATA%%",        json.dumps(family_records))
+            .replace("%%HG_DATA%%",            json.dumps(hg_records))
+            .replace("%%TREE_INDEX_JSON%%",    json.dumps(index_records))
+            .replace("%%SPECIES_JSON%%",       json.dumps(all_species))
+            .replace("%%CLADE_DATA_JSON%%",    json.dumps(clade_groupings))
+            .replace("%%NEWICK_RAW%%",         json.dumps(newick_raw))
+            .replace("%%FAMILY_INFO_JSON%%",   json.dumps(family_info_records)))
 
     Path(args.output).write_text(html, encoding="utf-8")
     print(f"Report written to {args.output}", file=sys.stderr)
