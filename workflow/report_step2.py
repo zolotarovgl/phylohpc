@@ -771,7 +771,11 @@ const palette = [
   "#aec7e8","#ffbb78","#98df8a","#ff9896","#c5b0d5"
 ];
 const SP_COLORS = {};
-ALL_SPECIES.forEach((sp,i) => { SP_COLORS[sp] = palette[i % palette.length]; });
+(function(){
+  const n=SPECIES_ORDER.length;
+  SPECIES_ORDER.forEach((sp,i)=>{ SP_COLORS[sp]=d3.interpolateTurbo(n>1?i/(n-1):0.5); });
+  ALL_SPECIES.forEach(sp=>{ if(!SP_COLORS[sp]) SP_COLORS[sp]="#aaa"; });
+})();
 function spColor(sp) { return SP_COLORS[sp] || "#aaa"; }
 
 // ── Stable IDs for SP_TREE_DATA nodes (allows editing original by reference) ──
