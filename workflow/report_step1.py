@@ -386,7 +386,7 @@ function drawHeatmap(){
         .attr("y",ri*14 + TOP_MARGIN)
         .attr("width",16)
         .attr("height",12)
-        .attr("fill",color(z))
+        .attr("fill",count===0?"#bbb":color(z))
 
         .on("mouseover",(event)=>{
           showTip(

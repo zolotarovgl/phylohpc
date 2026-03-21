@@ -57,6 +57,8 @@ process ALN {
 
     publishDir "${params.OUTDIR}/align", mode: 'copy'
 
+    cpus 4
+
     errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
     maxRetries 10
     maxErrors -1

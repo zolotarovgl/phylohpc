@@ -210,7 +210,7 @@ def load_og_csv(csv_path: Path) -> dict:
                 parts = line.split("\t")
                 if len(parts) < 2:
                     continue
-                gene, og = parts[0], parts[1]
+                gene, og = parts[0], parts[1].replace(':', '_')
                 if og.lower() == "orthogroup":   # POSSVM catch-all; skip
                     continue
                 og_members[og].append(gene)
@@ -771,7 +771,11 @@ const palette = [
   "#aec7e8","#ffbb78","#98df8a","#ff9896","#c5b0d5"
 ];
 const SP_COLORS = {};
-ALL_SPECIES.forEach((sp,i) => { SP_COLORS[sp] = palette[i % palette.length]; });
+(function(){
+  const n=SPECIES_ORDER.length;
+  SPECIES_ORDER.forEach((sp,i)=>{ SP_COLORS[sp]=d3.interpolateTurbo(n>1?i/(n-1):0.5); });
+  ALL_SPECIES.forEach(sp=>{ if(!SP_COLORS[sp]) SP_COLORS[sp]="#aaa"; });
+})();
 function spColor(sp) { return SP_COLORS[sp] || "#aaa"; }
 
 // ── Stable IDs for SP_TREE_DATA nodes (allows editing original by reference) ──
@@ -1769,7 +1773,7 @@ function drawHeatmap() {
       const cellFill=hmColorMode==="absolute"?absColor(count):zColor(z);
       svg.append("rect").attr("class","hm-cell")
         .attr("x",cellX).attr("y",cellY).attr("width",cW-2).attr("height",cH)
-        .attr("fill",count===0&&hmColorMode==="absolute"?"#f5f5f5":cellFill).style("cursor","pointer")
+        .attr("fill",count===0?"#bbb":cellFill).style("cursor","pointer")
         .on("mouseover",ev=>{
           showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b>'+(hmColorMode==="zscore"?'<br>z: <b>'+z.toFixed(2)+'</b>':""));
         })
