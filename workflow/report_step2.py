@@ -701,6 +701,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <th class="fam-th" data-col="pfam"     style="text-align:left;padding:6px 8px;cursor:pointer">PFAM Domain(s) &#8597;</th>
             <th class="fam-th" data-col="category" style="text-align:left;padding:6px 8px;cursor:pointer;white-space:nowrap">Category &#8597;</th>
             <th class="fam-th" data-col="n_hgs"    style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap">HGs &#8597;</th>
+            <th class="fam-th" data-col="n_trees"  style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap" title="HGs with any gene tree">Trees &#8597;</th>
+            <th class="fam-th fam-th-generax" data-col="n_generax" style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap" title="HGs with a GeneRax tree">GeneRax &#8597;</th>
             <th class="fam-th" data-col="total"    style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap">Genes &#8597;</th>
             <th class="fam-th" data-col="n_species"style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap">Species &#8597;</th>
           </tr>
@@ -822,6 +824,7 @@ const ALL_SPECIES   = %%SPECIES_JSON%%;
 const CLADE_DATA    = %%CLADE_DATA_JSON%%;
 const NEWICK_RAW    = %%NEWICK_RAW%%;
 const FAMILY_INFO   = %%FAMILY_INFO_JSON%%;
+const HAVE_GENERAX  = %%HAVE_GENERAX_JSON%%;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COLOUR SYSTEM
@@ -903,12 +906,15 @@ const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085"
 function hlTagColor(gi){ const q=hlQueries[gi]; return (q&&hlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
 function ogHlTagColor(gi){ const q=ogHlQueries[gi]; return (q&&ogHlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
 
-function openColorPicker(currentCol, onPick){
+// onPick  = called live on every input event (colour-drag preview)
+// onFinal = called once on change event (picker closed); defaults to onPick
+function openColorPicker(currentCol, onPick, onFinal){
+  if(!onFinal) onFinal=onPick;
   const inp=document.createElement("input"); inp.type="color";
   inp.value=currentCol; inp.style.cssText="position:fixed;opacity:0;pointer-events:none";
   document.body.appendChild(inp);
   inp.addEventListener("input",()=>onPick(inp.value));
-  inp.addEventListener("change",()=>{ onPick(inp.value); document.body.removeChild(inp); });
+  inp.addEventListener("change",()=>{ onFinal(inp.value); document.body.removeChild(inp); });
   inp.addEventListener("blur",()=>{ if(inp.parentNode) document.body.removeChild(inp); });
   inp.click();
 }
@@ -1046,6 +1052,13 @@ function drawFamilyTable(){
           title="Search InterPro for ${p}">${p}</a>`
     ).join("");
     const bg = i%2===0?"#fff":"#f9f9f9";
+    // colour-code tree-coverage fractions
+    function treeFrac(n, tot){
+      if(!tot) return `<span style="color:#bbb">—</span>`;
+      const frac = n/tot;
+      const col = frac>=1 ? "#27ae60" : frac>0 ? "#e67e22" : "#c0392b";
+      return `<span style="color:${col};font-weight:${frac<1?"600":"normal"}">${n}</span><span style="color:#aaa">/${tot}</span>`;
+    }
     return `<tr style="background:${bg};border-bottom:1px solid #eee">
       <td style="padding:5px 8px;font-weight:600;cursor:pointer;color:#2c3e50;white-space:nowrap"
           onclick="famGoToFamily('${d.family.replace(/'/g,"\\'")}')"
@@ -1053,6 +1066,8 @@ function drawFamilyTable(){
       <td style="padding:5px 8px">${pfamLinks||'<span style="color:#bbb">—</span>'}</td>
       <td style="padding:5px 8px">${_clsBadge(d.cls)}<span style="color:#888;font-size:11px;margin-left:4px">${d.category||""}</span></td>
       <td style="padding:5px 8px;text-align:right;color:#555">${d.n_hgs||0}</td>
+      <td style="padding:5px 8px;text-align:right">${treeFrac(d.n_trees||0, d.n_hgs||0)}</td>
+      <td class="fam-td-generax" style="padding:5px 8px;text-align:right">${treeFrac(d.n_generax||0, d.n_hgs||0)}</td>
       <td style="padding:5px 8px;text-align:right;color:#555">${d.total||0}</td>
       <td style="padding:5px 8px;text-align:right;color:#555">${d.n_species||0}</td>
     </tr>`;
@@ -1060,6 +1075,10 @@ function drawFamilyTable(){
 
   // wire sort headers (only once)
   if(!_famRendered){
+    // hide GeneRax column when no GeneRax trees are available
+    if(!HAVE_GENERAX){
+      document.querySelectorAll(".fam-th-generax,.fam-td-generax").forEach(el=>el.style.display="none");
+    }
     document.querySelectorAll(".fam-th").forEach(th=>{
       th.addEventListener("click",()=>{
         const col=th.dataset.col;
@@ -1177,15 +1196,17 @@ function collectLeafGenes(children) {
   document.getElementById("ccp-highlight").addEventListener("click",()=>{
     const node=_ccpNode; if(!node) return; hide();
     const existing=cladeHighlights.get(node._uid)||{};
-    // Prompt for label first (synchronous), then open colour picker so the live
-    // colour-drag preview doesn't re-trigger the prompt on every input event.
-    const labelRaw=window.prompt("Clade label (leave blank for none):", existing.label||"");
-    if(labelRaw===null) return; // user cancelled
-    const label=labelRaw.trim();
-    openColorPicker(existing.color||"#ffe066",c=>{
-      cladeHighlights.set(node._uid,{color:c, label});
-      renderTree(false);
-    });
+    openColorPicker(
+      existing.color||"#ffe066",
+      // live: preview the colour while dragging (keep existing label)
+      c=>{ cladeHighlights.set(node._uid,{color:c, label:existing.label||""}); renderTree(false); },
+      // final: picker closed — now prompt for label once
+      c=>{
+        const labelRaw=window.prompt("Clade label (leave blank for none):", existing.label||"");
+        cladeHighlights.set(node._uid,{color:c, label:(labelRaw===null ? existing.label||"" : labelRaw.trim())});
+        renderTree(false);
+      }
+    );
   });
   window.showCollapseChoicePopup=function(event,d){
     _ccpNode=d; cancelHide();
@@ -3938,18 +3959,32 @@ def main(argv=None):
     for r in family_records:
         fam_gene_counts[r["family"]]  = r.get("total", 0)
         fam_species_sets[r["family"]] = set(r.get("species_counts", {}).keys())
+
+    # Count HGs-with-trees per family
+    fam_generax_counts = defaultdict(int)   # GeneRax trees
+    fam_tree_hg_ids    = defaultdict(set)   # union of all tree HG ids
+    for r in records:                        # GeneRax (primary) trees
+        fam_generax_counts[r["family"]] += 1
+        fam_tree_hg_ids[r["family"]].add(r["id"])
+    for r in prev_records.values():          # IQ-Tree (prev) trees
+        fam_tree_hg_ids[r["family"]].add(r["id"])
+    fam_tree_counts = {fam: len(ids) for fam, ids in fam_tree_hg_ids.items()}
+    have_generax = bool(records)             # flag exposed to JS
+
     family_info_records = []
     all_families = sorted(set(family_details.keys()) | set(fam_hg_counts.keys()) | set(fam_gene_counts.keys()))
     for fam in all_families:
         det = family_details.get(fam, {})
         family_info_records.append({
-            "family":   fam,
-            "pfam":     det.get("pfam", []),
-            "category": det.get("category", ""),
-            "cls":      det.get("cls", ""),
-            "n_hgs":    fam_hg_counts.get(fam, 0),
-            "total":    fam_gene_counts.get(fam, 0),
-            "n_species":len(fam_species_sets.get(fam, set())),
+            "family":    fam,
+            "pfam":      det.get("pfam", []),
+            "category":  det.get("category", ""),
+            "cls":       det.get("cls", ""),
+            "n_hgs":     fam_hg_counts.get(fam, 0),
+            "total":     fam_gene_counts.get(fam, 0),
+            "n_species": len(fam_species_sets.get(fam, set())),
+            "n_trees":   fam_tree_counts.get(fam, 0),
+            "n_generax": fam_generax_counts.get(fam, 0),
         })
 
     # Build per-HG lazy <script> tags
@@ -3978,7 +4013,8 @@ def main(argv=None):
             .replace("%%SPECIES_JSON%%",       json.dumps(all_species))
             .replace("%%CLADE_DATA_JSON%%",    json.dumps(clade_groupings))
             .replace("%%NEWICK_RAW%%",         json.dumps(newick_raw))
-            .replace("%%FAMILY_INFO_JSON%%",   json.dumps(family_info_records)))
+            .replace("%%FAMILY_INFO_JSON%%",   json.dumps(family_info_records))
+            .replace("%%HAVE_GENERAX_JSON%%",  json.dumps(have_generax)))
 
     Path(args.output).write_text(html, encoding="utf-8")
     print(f"Report written to {args.output}", file=sys.stderr)
