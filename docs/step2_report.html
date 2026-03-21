@@ -3123,8 +3123,8 @@ function renderTree(animate){
     hlLayer.selectAll("*").remove();
     if(cladeHighlights.size){
       const allNodes=rootNode.descendants();
-      // x2 extends 9999px past the right edge — the SVG viewport clips it naturally
-      const x2=nodeX(rootNode,mg)+iWeff+mg.right+9999;
+      // x2 stops just past the rightmost leaf nodes (20px padding); the label margin is NOT included
+      const x2=nodeX(rootNode,mg)+iWeff+20;
       cladeHighlights.forEach((rec,uid)=>{
         const hn=allNodes.find(d=>d._uid===uid);
         if(!hn) return;
