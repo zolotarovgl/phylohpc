@@ -3814,9 +3814,7 @@ function drawGeneTree(treeData){
   _ogHlActive=false;       document.getElementById("btn-highlight-ogs").classList.remove("active-btn");
   // reset reroot state
   _isRerooted=false; _origTreeDictForReroot=null;
-  document.getElementById("btn-reroot").classList.remove("active-btn");
   document.getElementById("btn-reset-root").style.display="none";
-  document.getElementById("tree-wrap").style.cursor="";
   renderTree(false);
   // auto-fit after layout
   setTimeout(fitTree, 260);
