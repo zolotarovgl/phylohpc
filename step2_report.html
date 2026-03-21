@@ -2935,9 +2935,26 @@ function annotateOGNodes(){
     for(const c of (n._children||[])) walkAll(c);
   })(rootNode);
   for(const [og,leaves] of Object.entries(ogGroups)){
-    const mrca=findMRCA(leaves);
-    // Only annotate if the MRCA is a visible (expanded), non-leaf, non-collapsed node
-    if(mrca&&visibleNodes.has(mrca)&&!mrca.data.leaf&&!mrca._children){ mrca.data._og_label=og; }
+    let node=findMRCA(leaves);
+    if(!node||node.data.leaf) continue;
+    // When POSSVM is active: OGs are defined by duplication events, so the true
+    // OG root is the topmost node whose parent is a D node (or is the tree root).
+    // Walk UP from the MRCA while the parent exists, is not a D node, and all
+    // OG-assigned ingroup leaves under the parent still belong to this same OG.
+    if(_pvmActive){
+      while(node.parent && node.parent._pvmEvent!=="D"){
+        let ok=true;
+        node.parent.each(l=>{
+          if(!l.data.leaf) return;
+          const g=l.data.gene_id||l.data.name||"";
+          const o=ogGene2Name[g]||"";
+          if(o && o!==og) ok=false;
+        });
+        if(!ok) break;
+        node=node.parent;
+      }
+    }
+    if(visibleNodes.has(node)&&!node.data.leaf&&!node._children){ node.data._og_label=og; }
   }
 }
 
