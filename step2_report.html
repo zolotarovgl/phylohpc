@@ -3128,7 +3128,8 @@ function pvmDrawCladeTree(){
         .attr("text-anchor","middle")
         .attr("font-size",9).attr("fill",allSelected?"#e67e22":"#27ae60").attr("font-style","italic")
         .style("cursor","pointer").style("font-weight",allSelected?"700":"400").text(n.name)
-        .on("click",()=>{
+        .on("click",(ev)=>{
+          ev.stopPropagation();
           pvmSelectAll(false);
           document.querySelectorAll("[data-pvm-sp]").forEach(cb=>{if(cladeSps.includes(cb.value)) cb.checked=true;});
           pvmUpdateSelCount();
