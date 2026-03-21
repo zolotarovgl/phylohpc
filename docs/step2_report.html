@@ -236,6 +236,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         <div id="controls">
           <!-- group 1: tree operations -->
           <button class="ctrl-btn" onclick="expandAll()">Expand all</button>
+          <button class="ctrl-btn" id="btn-reroot" onclick="toggleRerootMode()" title="Click a node or leaf to reroot the tree there">Reroot…</button>
+          <button class="ctrl-btn" id="btn-reset-root" onclick="resetRoot()" title="Restore original root" style="display:none">&#x21BA; Reset root</button>
           <button class="ctrl-btn" id="btn-collapse-ogs" onclick="toggleCollapseToOGs()">Collapse to OGs</button>
           <button class="ctrl-btn" id="btn-highlight-ogs" onclick="toggleHighlightOGs()">Highlight OGs</button>
           <button class="ctrl-btn" id="btn-og-labels" onclick="toggleOGLabels()">OG labels</button>
@@ -2747,8 +2749,9 @@ function toggleTreeSource(){
 }
 
 function activeOgs(){
-  return (treeSource==="original"&&currentDetail&&currentDetail.prev_ogs)
-    ? currentDetail.prev_ogs : (currentDetail?currentDetail.ogs:{});
+  if(treeSource==="original"&&currentDetail)
+    return currentDetail.prev_ogs||currentDetail.ogs||{};
+  return currentDetail?currentDetail.ogs:{};
 }
 
 const treeSvg = d3.select("#tree-svg");
@@ -3096,6 +3099,11 @@ function drawGeneTree(treeData){
   // reset OG collapse/highlight toggle states for the new tree
   _ogCollapseActive=false; document.getElementById("btn-collapse-ogs").classList.remove("active-btn");
   _ogHlActive=false;       document.getElementById("btn-highlight-ogs").classList.remove("active-btn");
+  // reset reroot state
+  _rerootMode=false; _isRerooted=false; _origTreeDictForReroot=null;
+  document.getElementById("btn-reroot").classList.remove("active-btn");
+  document.getElementById("btn-reset-root").style.display="none";
+  document.getElementById("tree-wrap").style.cursor="";
   renderTree(false);
   // auto-fit after layout
   setTimeout(fitTree, 260);
@@ -3291,6 +3299,7 @@ function renderTree(animate){
     })
     .on("click",(event,d)=>{
       event.stopPropagation();
+      if(_rerootMode){ hideTip(); rerootAtNode(d); return; }
       // compare mode intercepts any node click as the second target; same-node click is a no-op
       if(_compareNode1!==null){ if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); return; }
       if(d.data.leaf){
@@ -3343,6 +3352,7 @@ function renderTree(animate){
     .attr("stroke-width",d=>(d._children&&d._isOgCol)?treeLinkWidth/_zoomScale:null)
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
+      if(_rerootMode){ hideTip(); rerootAtNode(d); return; }
       if(_compareNode1!==null){ if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); return; }
       showTriActionPopup(event,d);
     })
@@ -3497,6 +3507,60 @@ function renderTree(animate){
   applyTipFontSize();
 }
 
+// ── reroot ──────────────────────────────────────────────────────────────────
+let _rerootMode=false;
+let _origTreeDictForReroot=null;   // saved before the first reroot
+let _isRerooted=false;
+function toggleRerootMode(){
+  _rerootMode=!_rerootMode;
+  document.getElementById("btn-reroot").classList.toggle("active-btn",_rerootMode);
+  document.getElementById("tree-wrap").style.cursor=_rerootMode?"crosshair":"";
+}
+function resetRoot(){
+  if(!_origTreeDictForReroot)return;
+  _isRerooted=false;
+  document.getElementById("btn-reset-root").style.display="none";
+  if(_rerootMode){ _rerootMode=false; document.getElementById("btn-reroot").classList.remove("active-btn"); document.getElementById("tree-wrap").style.cursor=""; }
+  drawGeneTree(_origTreeDictForReroot);
+  _origTreeDictForReroot=null;
+}
+// Convert a d3-hierarchy node (and its current children/collapsed children) back to a plain dict
+function _h2d(d){
+  const ch=d.children||d._children;
+  const obj=Object.assign({},d.data);
+  if(ch&&ch.length) obj.children=ch.map(_h2d);
+  else delete obj.children;
+  return obj;
+}
+// Build the "above" part of the tree when rerooting at `node`:
+// returns a plain dict representing node.parent with `node` removed,
+// and the ancestor chain reversed so grandparents become children.
+function _rerootAbove(node){
+  const p=node.parent;
+  if(!p) return null;
+  const siblings=(p.children||[]).filter(c=>c!==node);
+  const children=siblings.map(_h2d);
+  if(p.parent) children.push(_rerootAbove(p));
+  const obj=Object.assign({},p.data);
+  obj.children=children;
+  return obj;
+}
+function rerootAtNode(d){
+  if(!rootNode||!d.parent) return;   // can't reroot at existing root
+  // save original only on the first reroot
+  if(!_isRerooted) _origTreeDictForReroot=_h2d(rootNode);
+  // expand all collapse state so we work with the full topology
+  rootNode.each(n=>{if(n._children){n.children=n._children;n._children=null;}});
+  const above=_rerootAbove(d);
+  const newRoot={name:"",leaf:false,children:[_h2d(d)]};
+  if(above) newRoot.children.push(above);
+  _isRerooted=true;
+  _rerootMode=false;
+  document.getElementById("btn-reroot").classList.remove("active-btn");
+  document.getElementById("tree-wrap").style.cursor="";
+  document.getElementById("btn-reset-root").style.display="inline";
+  drawGeneTree(newRoot);
+}
 // ── tree controls ──
 function expandAll(){
   if(!rootNode)return;
@@ -3524,11 +3588,13 @@ function _collapseToOGs(){
   rootNode.each(d=>{
     if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;d._isOgCol=true;found=true;}
   });
-  // pass 2b: fallback – derive OGs from pipe-separated tip names (gene_id|og|ref)
+  // pass 2b: fallback – derive OGs from leaf og field or ogGene2Name map (works for
+  // original trees that lack POSSVM-annotated internals and pipe-sep leaf names)
   if(!found){
     const ogGroups={};
     rootNode.leaves().forEach(l=>{
-      const og=l.data.og;
+      const gid=l.data.gene_id||l.data.name||"";
+      const og=l.data.og||ogGene2Name[gid]||"";
       if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);
     });
     for(const [og,leaves] of Object.entries(ogGroups)){
@@ -3567,7 +3633,7 @@ function toggleHighlightOGs(){
   });
   if(!found){
     const ogGroups={};
-    rootNode.leaves().forEach(l=>{const og=l.data.og; if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);});
+    rootNode.leaves().forEach(l=>{const gid=l.data.gene_id||l.data.name||""; const og=l.data.og||ogGene2Name[gid]||""; if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);});
     for(const [og,leaves] of Object.entries(ogGroups)){
       const mrca=findMRCA(leaves);
       if(mrca&&!mrca.data.leaf) ogNodes.push({node:mrca,label:og});
