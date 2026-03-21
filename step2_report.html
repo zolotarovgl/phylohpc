@@ -135,10 +135,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 
   <!-- vertical tab strip -->
   <div id="tab-strip">
+    <button class="tab-btn" data-tab="families" onclick="switchTab('families')">&#9783; Families</button>
     <button class="tab-btn active" data-tab="sptree" onclick="switchTab('sptree')">&#10022; Species Tree</button>
     <button class="tab-btn" data-tab="heatmap" onclick="switchTab('heatmap')">&#9639; Counts</button>
     <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">&#11044; Gene Trees</button>
-    <button class="tab-btn" data-tab="families" onclick="switchTab('families')">&#9783; Families</button>
   </div>
 
   <!-- ── Heatmap pane ── -->
@@ -276,6 +276,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
             <input type="range" id="tree-width-slider" min="0.3" max="4" step="0.1" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
             <span id="tree-width-val" style="width:24px;text-align:right">1.0</span>&times;
           </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px" title="Opacity of clade highlight rectangles">
+            Hl&#945;:
+            <input type="range" id="clade-hl-alpha-slider" min="0.05" max="0.8" step="0.05" value="0.22" style="width:55px;cursor:pointer;accent-color:#e67e22">
+            <span id="clade-hl-alpha-val" style="width:28px;text-align:right">0.22</span>
+          </label>
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
             Collapsed:
             <input type="range" id="collapsed-frac-slider" min="0.1" max="1" step="0.05" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
@@ -387,6 +392,14 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button id="tap-color"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Color</button>
     <button id="tap-compare" style="padding:3px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer">&#x2316; Compare</button>
     <input id="tap-color-input" type="color" style="display:none">
+  </div>
+</div>
+<div id="clade-hl-popup" style="position:fixed;display:none;background:#fff;border:1px solid #e67e22;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:270;flex-direction:column;gap:5px">
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600">Clade highlight</div>
+  <div style="display:flex;gap:5px">
+    <button id="chl-rename" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x270F; Label</button>
+    <button id="chl-recolor" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Colour</button>
+    <button id="chl-remove" style="padding:3px 10px;font-size:11px;border:1px solid #c0392b;border-radius:4px;background:#fff0ee;color:#c0392b;cursor:pointer">&#x2715; Remove</button>
   </div>
 </div>
 <div id="clado-action-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
@@ -619,8 +632,21 @@ const _clsCatColors = {
   rbp:"#e74c3c", ion:"#1abc9c", epi:"#f39c12", kin:"#2980b9"
 };
 function _clsBadge(cls){
+  if(!cls) return '<span style="color:#bbb">—</span>';
   const c=_clsCatColors[cls]||"#7f8c8d";
-  return `<span style="background:${c};color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;white-space:nowrap">${cls||"—"}</span>`;
+  return `<span style="background:${c};color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;white-space:nowrap;cursor:pointer"
+    onclick="famGoToClass('${cls.replace(/'/g,"\\'")}')"\
+    title="Show all ${cls} families in Counts tab">${cls}</span>`;
+}
+
+function famGoToClass(cls){
+  switchTab("heatmap");
+  hmViewMode="family"; hmActiveClass=cls; hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null;
+  drawHeatmap();
+  const back=document.getElementById("hm-back");
+  const cr=document.getElementById("hm-breadcrumb");
+  if(back) back.style.display="inline";
+  if(cr) cr.textContent=cls;
 }
 
 function drawFamilyTable(){
@@ -785,8 +811,12 @@ function collectLeafGenes(children) {
   });
   document.getElementById("ccp-highlight").addEventListener("click",()=>{
     const node=_ccpNode; if(!node) return; hide();
-    const cur=cladeHighlights.get(node._uid)||"#ffe066";
-    openColorPicker(cur,c=>{ cladeHighlights.set(node._uid,c); renderTree(false); });
+    const existing=cladeHighlights.get(node._uid)||{};
+    openColorPicker(existing.color||"#ffe066",c=>{
+      const label=window.prompt("Clade label (leave blank for none):", existing.label||"");
+      cladeHighlights.set(node._uid,{color:c, label:(label||"").trim()});
+      renderTree(false);
+    });
   });
   window.showCollapseChoicePopup=function(event,d){
     _ccpNode=d; cancelHide();
@@ -796,6 +826,35 @@ function collectLeafGenes(children) {
     pop.style.left=Math.max(4,x)+"px"; pop.style.top=Math.max(4,y)+"px";
   };
   // close when clicking elsewhere
+  document.addEventListener("click",(e)=>{ if(!pop.contains(e.target)) hide(); });
+})();
+
+// ── Clade highlight right-click popup ───────────────────────────────────────
+(function(){
+  const pop=document.getElementById("clade-hl-popup");
+  let _uid=null;
+  function hide(){ pop.style.display="none"; _uid=null; }
+  window.showCladeHlPopup=function(event,uid){
+    _uid=uid;
+    pop.style.display="flex";
+    const x=Math.min(event.clientX+8, window.innerWidth-pop.offsetWidth-8);
+    const y=Math.min(event.clientY+8, window.innerHeight-pop.offsetHeight-8);
+    pop.style.left=Math.max(4,x)+"px"; pop.style.top=Math.max(4,y)+"px";
+    event.preventDefault(); event.stopPropagation();
+  };
+  document.getElementById("chl-rename").addEventListener("click",()=>{
+    const rec=cladeHighlights.get(_uid); if(!rec) return; hide();
+    const newLabel=window.prompt("Clade label:", rec.label||"");
+    if(newLabel!==null){ rec.label=newLabel.trim(); renderTree(false); }
+  });
+  document.getElementById("chl-recolor").addEventListener("click",()=>{
+    const rec=cladeHighlights.get(_uid); if(!rec) return; hide();
+    openColorPicker(rec.color||"#ffe066",c=>{ rec.color=c; renderTree(false); });
+  });
+  document.getElementById("chl-remove").addEventListener("click",()=>{
+    const uid=_uid; hide();
+    cladeHighlights.delete(uid); renderTree(false);
+  });
   document.addEventListener("click",(e)=>{ if(!pop.contains(e.target)) hide(); });
 })();
 
@@ -837,7 +896,8 @@ function collectLeafGenes(children) {
 
 // ── Gene-tree collapsed-triangle action popup ───────────────────────────────
 const nodeTriColors=new Map();    // _uid → custom fill override for gene-tree triangles
-const cladeHighlights=new Map(); // _uid → hex color for subtree background highlight
+const cladeHighlights=new Map(); // _uid → {color, label} for subtree background highlight
+let cladeHlAlpha = 0.22;         // global opacity for all clade highlight rectangles
 (function(){
   const pop=document.getElementById("tri-action-popup");
   const title=document.getElementById("tri-popup-title");
@@ -2270,6 +2330,12 @@ document.getElementById("tree-width-slider").addEventListener("input",function()
   if(rootNode) renderTree(false);
 });
 
+document.getElementById("clade-hl-alpha-slider").addEventListener("input",function(){
+  cladeHlAlpha=+this.value;
+  document.getElementById("clade-hl-alpha-val").textContent=parseFloat(this.value).toFixed(2);
+  if(rootNode) renderTree(false);
+});
+
 document.getElementById("hm-col-font-slider").addEventListener("input",function(){
   hmColFontSize=+this.value;
   document.getElementById("hm-col-font-val").textContent=this.value;
@@ -2951,36 +3017,50 @@ function renderTree(animate){
 
   // ── Clade highlight backgrounds ──
   {
-    // ensure the highlight layer is the first child of gMain so it renders behind everything
     let hlLayer=gMain.select(".clade-hl-layer");
     if(hlLayer.empty()) hlLayer=gMain.insert("g",":first-child").attr("class","clade-hl-layer");
-    hlLayer.lower(); // keep it behind all other gMain children
+    hlLayer.lower();
     hlLayer.selectAll("*").remove();
     if(cladeHighlights.size){
       const allNodes=rootNode.descendants();
-      cladeHighlights.forEach((color,uid)=>{
+      // x2 extends 9999px past the right edge — the SVG viewport clips it naturally
+      const x2=nodeX(rootNode,mg)+iWeff+mg.right+9999;
+      cladeHighlights.forEach((rec,uid)=>{
         const hn=allNodes.find(d=>d._uid===uid);
         if(!hn) return;
-        // collect all currently-visible nodes in this subtree (follows d.children, not _children)
-        const sub=hn.descendants();
+        const sub=hn.descendants(); // visible subtree only (follows d.children)
         const ys=sub.map(d=>d.x);
-        const y1=Math.min(...ys)-effRow*0.55+mg.top;
-        const y2=Math.max(...ys)+effRow*0.55+mg.top;
+        const pad=effRow*0.55;
+        const y1=Math.min(...ys)-pad+mg.top;
+        const y2=Math.max(...ys)+pad+mg.top;
         const x1=nodeX(hn,mg)-6;
-        const x2=+treeSvg.attr("width"); // stretch to full SVG width (covers tip labels)
+        const color=rec.color||"#ffe066";
+        const label=rec.label||"";
         hlLayer.append("rect")
           .attr("x",x1).attr("y",y1)
           .attr("width",Math.max(0,x2-x1)).attr("height",Math.max(0,y2-y1))
-          .attr("fill",color).attr("opacity",0.22).attr("rx",4)
+          .attr("fill",color).attr("opacity",cladeHlAlpha).attr("rx",4)
           .style("cursor","pointer")
-          .on("contextmenu",(ev)=>{
-            ev.preventDefault();
-            cladeHighlights.delete(uid); renderTree(false);
-          })
+          .on("contextmenu",(ev)=>showCladeHlPopup(ev,uid))
           .on("dblclick",(ev)=>{
             ev.stopPropagation();
-            openColorPicker(color,c=>{ cladeHighlights.set(uid,c); renderTree(false); });
+            openColorPicker(color,c=>{ rec.color=c; renderTree(false); });
           });
+        if(label){
+          const labelFontSize=Math.max(11, Math.min(22, (y2-y1)*0.38));
+          hlLayer.append("text")
+            .attr("x", x2-8)
+            .attr("y", (y1+y2)/2)
+            .attr("text-anchor","middle")
+            .attr("dominant-baseline","central")
+            .attr("transform",`rotate(-90,${x2-8},${(y1+y2)/2})`)
+            .attr("font-size", labelFontSize)
+            .attr("font-weight","700")
+            .attr("fill", color)
+            .attr("opacity", Math.min(1, cladeHlAlpha*3.5))
+            .style("pointer-events","none")
+            .text(label);
+        }
       });
     }
   }
