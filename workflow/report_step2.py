@@ -620,6 +620,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <button class="ctrl-btn" id="btn-collapse-ogs" onclick="toggleCollapseToOGs()">Collapse to OGs</button>
           <button class="ctrl-btn" id="btn-highlight-ogs" onclick="toggleHighlightOGs()">Highlight OGs</button>
           <button class="ctrl-btn" id="btn-og-labels" onclick="toggleOGLabels()">OG labels</button>
+          <button class="ctrl-btn" id="btn-possvm" onclick="togglePossvmPanel(event)" title="Interactive species-overlap orthogroup calling">POSSVM</button>
           <button class="ctrl-btn" onclick="collapseAll()">Collapse all</button>
           <span style="border-left:1px solid #ddd;margin:0 3px;height:16px;align-self:center"></span>
           <!-- group 2: view toggles -->
@@ -782,6 +783,40 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button id="tap-compare" style="padding:3px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer">&#x2316; Compare</button>
     <input id="tap-color-input" type="color" style="display:none">
   </div>
+</div>
+<!-- POSSVM interactive orthogroup calling panel -->
+<div id="possvm-panel" style="position:fixed;display:none;background:#fff;border:1px solid #27ae60;border-radius:6px;box-shadow:0 3px 14px rgba(0,0,0,.22);z-index:320;padding:10px 12px;min-width:270px;max-width:350px;font-size:11px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span style="font-weight:700;font-size:12px;color:#1a6b4a">POSSVM Orthogroup Calling</span>
+    <button onclick="document.getElementById('possvm-panel').style.display='none'" style="border:none;background:none;cursor:pointer;font-size:15px;color:#888;padding:0 2px;line-height:1">&#x2715;</button>
+  </div>
+  <!-- SOS threshold -->
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #eee">
+    <span style="color:#555;white-space:nowrap">SOS threshold:</span>
+    <input type="range" id="possvm-sos" min="0" max="1" step="0.05" value="0" style="flex:1;cursor:pointer;accent-color:#27ae60" oninput="document.getElementById('possvm-sos-val').textContent=parseFloat(this.value).toFixed(2)">
+    <span id="possvm-sos-val" style="width:30px;font-weight:600;text-align:right">0.00</span>
+    <span style="color:#bbb;cursor:help;font-size:12px" title="Species Overlap Score threshold. 0 = strict: any species overlap → duplication node. Higher values allow overlap before calling a duplication.">&#x24D8;</span>
+  </div>
+  <!-- Ingroup species -->
+  <div style="margin-bottom:6px">
+    <div style="color:#555;font-weight:600;margin-bottom:5px">Ingroup species <span id="possvm-sel-count" style="font-weight:normal;color:#888"></span></div>
+    <div style="display:flex;gap:4px;margin-bottom:5px;flex-wrap:wrap">
+      <button onclick="pvmSelectAll(true)"  style="padding:2px 7px;font-size:10px;border:1px solid #aaa;border-radius:3px;cursor:pointer;background:#f5f5f5">All</button>
+      <button onclick="pvmSelectAll(false)" style="padding:2px 7px;font-size:10px;border:1px solid #aaa;border-radius:3px;cursor:pointer;background:#f5f5f5">None</button>
+      <button id="possvm-clade-btn" onclick="pvmToggleCladeTree()" style="padding:2px 7px;font-size:10px;border:1px solid #27ae60;border-radius:3px;cursor:pointer;background:#f0fff6;color:#1a6b4a" title="Click a clade in the species tree to use as ingroup">&#x1F333; Pick clade</button>
+    </div>
+    <!-- mini clade-picker tree (shown on demand) -->
+    <div id="possvm-clade-wrap" style="display:none;border:1px solid #d5ead5;border-radius:4px;padding:4px;margin-bottom:5px;overflow:auto;background:#f6fbf6;max-height:170px"></div>
+    <!-- species checkboxes -->
+    <div id="possvm-sp-list" style="max-height:150px;overflow-y:auto;border:1px solid #e8e8e8;border-radius:3px;padding:3px 5px;background:#fafafa;line-height:1.8"></div>
+  </div>
+  <!-- Buttons row -->
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-top:6px;border-top:1px solid #eee">
+    <button onclick="pvmMidpointRoot()" style="padding:3px 10px;font-size:11px;border:1px solid #2980b9;border-radius:4px;background:#eaf4fb;color:#1a5276;cursor:pointer" title="Reroot tree at midpoint of longest leaf-to-leaf path (recommended before running POSSVM)">&#x21BB; Midpoint root</button>
+    <button onclick="runPossvm()" style="padding:4px 14px;font-size:11px;border:1px solid #27ae60;border-radius:4px;background:#e8f8f0;color:#1a6b4a;cursor:pointer;font-weight:600">&#x25BA; Run</button>
+    <button id="possvm-reset-btn" onclick="pvmReset()" style="padding:3px 9px;font-size:11px;border:1px solid #bbb;border-radius:4px;background:#fff;cursor:pointer;display:none">&#x21BA; Reset OGs</button>
+  </div>
+  <div id="possvm-result" style="margin-top:5px;color:#1a6b4a;font-size:10px;min-height:14px"></div>
 </div>
 <div id="clade-hl-popup" style="position:fixed;display:none;background:#fff;border:1px solid #e67e22;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:270;flex-direction:column;gap:5px">
   <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600">Clade highlight</div>
@@ -3348,6 +3383,302 @@ function drawMiniSpTree(){
     n.children.forEach(drawInternals);
   }
   drawInternals(tree);
+}
+
+// ── POSSVM interactive orthogroup calling ─────────────────────────────────────
+let _pvmActive=false;          // true while POSSVM OGs are displayed
+let _pvmCladeOpen=false;       // whether the clade-picker tree is visible
+
+function togglePossvmPanel(ev){
+  const panel=document.getElementById("possvm-panel");
+  if(panel.style.display==="block"){ panel.style.display="none"; return; }
+  const btn=document.getElementById("btn-possvm");
+  const r=btn.getBoundingClientRect();
+  panel.style.top=(r.bottom+6)+"px";
+  panel.style.left=Math.max(4,r.left-60)+"px";
+  panel.style.display="block";
+  pvmBuildSpList();
+}
+document.addEventListener("click",ev=>{
+  const panel=document.getElementById("possvm-panel");
+  if(panel.style.display==="block"&&!panel.contains(ev.target)&&ev.target.id!=="btn-possvm")
+    panel.style.display="none";
+});
+
+// Populate the species checkbox list from the current gene tree
+function pvmBuildSpList(){
+  const list=document.getElementById("possvm-sp-list");
+  list.innerHTML="";
+  const treeSpecies=pvmGetTreeSpecies();
+  treeSpecies.forEach(sp=>{
+    const lbl=document.createElement("label");
+    lbl.style.cssText="display:flex;align-items:center;gap:5px;padding:1px 2px;cursor:pointer";
+    const cb=document.createElement("input");
+    cb.type="checkbox"; cb.value=sp; cb.checked=true;
+    cb.setAttribute("data-pvm-sp",sp);
+    cb.addEventListener("change",pvmUpdateSelCount);
+    const dot=document.createElement("span");
+    dot.style.cssText=`display:inline-block;width:9px;height:9px;border-radius:50%;flex-shrink:0;background:${spColor(sp)}`;
+    lbl.append(cb,dot,document.createTextNode("\u00a0"+sp));
+    list.appendChild(lbl);
+  });
+  pvmUpdateSelCount();
+}
+
+// Return species in the current gene tree, in speciesOrder order
+function pvmGetTreeSpecies(){
+  if(!rootNode) return [];
+  const sps=new Set();
+  rootNode.each(d=>{if(d.data.leaf&&d.data.species) sps.add(d.data.species);});
+  const ordered=speciesOrder.filter(s=>sps.has(s));
+  sps.forEach(s=>{if(!ordered.includes(s)) ordered.push(s);});
+  return ordered;
+}
+
+function pvmSelectAll(val){
+  document.querySelectorAll("[data-pvm-sp]").forEach(cb=>cb.checked=val);
+  pvmUpdateSelCount();
+}
+
+function pvmUpdateSelCount(){
+  const n=document.querySelectorAll("[data-pvm-sp]:checked").length;
+  const tot=document.querySelectorAll("[data-pvm-sp]").length;
+  document.getElementById("possvm-sel-count").textContent="("+n+"/"+tot+")";
+}
+
+function pvmToggleCladeTree(){
+  _pvmCladeOpen=!_pvmCladeOpen;
+  document.getElementById("possvm-clade-wrap").style.display=_pvmCladeOpen?"block":"none";
+  document.getElementById("possvm-clade-btn").classList.toggle("active-btn",_pvmCladeOpen);
+  if(_pvmCladeOpen) pvmDrawCladeTree();
+}
+
+// Draw a mini species tree in the clade-picker area; clicking a named node
+// selects that clade's species as the ingroup
+function pvmDrawCladeTree(){
+  const wrap=document.getElementById("possvm-clade-wrap");
+  wrap.innerHTML="";
+  if(!SP_TREE_DATA){ wrap.innerHTML='<span style="color:#888;font-size:10px;padding:4px">No species tree loaded.</span>'; return; }
+  function flat(n){return[n].concat(n.children?n.children.flatMap(flat):[]);}
+  function clone(n){return Object.assign({},n,{children:n.children?n.children.map(clone):null});}
+  const treeSpSet=new Set(pvmGetTreeSpecies());
+  function prune(n){
+    if(!n.children) return treeSpSet.has(n.name)?n:null;
+    const k=n.children.map(prune).filter(Boolean);
+    if(!k.length) return null;
+    if(k.length===1) return k[0];
+    n.children=k; return n;
+  }
+  const tree=prune(clone(SP_TREE_DATA));
+  if(!tree){ wrap.innerHTML='<span style="color:#888;font-size:10px;padding:4px">No matching species.</span>'; return; }
+  const allN=flat(tree);
+  const leaves=allN.filter(n=>!n.children);
+  const leafH=14, lM=6, W=270;
+  leaves.forEach((l,i)=>{l._y=i*leafH+leafH/2;});
+  function assignY(n){if(n.children){n.children.forEach(assignY);n._y=(n.children[0]._y+n.children[n.children.length-1]._y)/2;}}
+  assignY(tree);
+  let maxD=0;
+  function assignD(n,d){n._d=d;maxD=Math.max(maxD,d);if(n.children)n.children.forEach(c=>assignD(c,d+1));}
+  assignD(tree,0);
+  const sx=d=>lM+(d/Math.max(1,maxD))*(W-lM-80);
+  const H=leaves.length*leafH+10;
+  const svg=d3.select(wrap).append("svg").attr("width",W).attr("height",H);
+  function drawB(n){
+    if(!n.children) return;
+    const ys=n.children.map(c=>c._y);
+    svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d)).attr("y1",d3.min(ys)).attr("y2",d3.max(ys)).attr("stroke","#ccc");
+    n.children.forEach(c=>{svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(c._d)).attr("y1",c._y).attr("y2",c._y).attr("stroke","#ccc");drawB(c);});
+  }
+  drawB(tree);
+  leaves.forEach(l=>{
+    svg.append("circle").attr("cx",sx(maxD)).attr("cy",l._y).attr("r",3).attr("fill",spColor(l.name));
+    svg.append("text").attr("x",sx(maxD)+6).attr("y",l._y).attr("dy","0.35em").attr("font-size",9).attr("fill","#333").attr("font-family","monospace").text(l.name);
+  });
+  function drawInternals(n){
+    if(!n.children) return;
+    if(n.name){
+      function sp2(nd){return nd.children?nd.children.flatMap(sp2):[nd.name];}
+      const cladeSps=sp2(n).filter(s=>treeSpSet.has(s));
+      // Highlight if currently selected
+      const checked=new Set([...document.querySelectorAll("[data-pvm-sp]:checked")].map(c=>c.value));
+      const allSelected=cladeSps.length>0&&cladeSps.every(s=>checked.has(s));
+      svg.append("text")
+        .attr("x",sx(n._d)).attr("y",n._y-5)
+        .attr("text-anchor","middle")
+        .attr("font-size",9).attr("fill",allSelected?"#e67e22":"#27ae60").attr("font-style","italic")
+        .style("cursor","pointer").style("font-weight",allSelected?"700":"400").text(n.name)
+        .on("click",()=>{
+          pvmSelectAll(false);
+          document.querySelectorAll("[data-pvm-sp]").forEach(cb=>{if(cladeSps.includes(cb.value)) cb.checked=true;});
+          pvmUpdateSelCount();
+          pvmDrawCladeTree(); // refresh colours
+        });
+    }
+    n.children.forEach(drawInternals);
+  }
+  drawInternals(tree);
+}
+
+// ── Midpoint rooting ──────────────────────────────────────────────────────────
+// Roots the current gene tree at the node closest to the midpoint of the
+// longest leaf-to-leaf path.  Uses branch lengths when available.
+function pvmMidpointRoot(){
+  if(!rootNode) return;
+  // Expand all so we see the full topology
+  rootNode.each(n=>{if(n._children){n.children=n._children;n._children=null;}});
+  // Assign cumulative root-distances
+  rootNode._rDist=0;
+  rootNode.each(n=>{
+    if(n.children) n.children.forEach(c=>{
+      c._rDist=(n._rDist||0)+(useBranchLen?(c.data.dist||0):1);
+    });
+  });
+  const leaves=rootNode.leaves();
+  if(leaves.length<2) return;
+  // Two-sweep to find diameter endpoints
+  function farthestFrom(src){
+    let best=src, bestD=-1;
+    // Build ancestor set once for src
+    const ancSrc=new Set();
+    let tmp=src; while(tmp){ancSrc.add(tmp);tmp=tmp.parent;}
+    leaves.forEach(l=>{
+      let cur=l;
+      while(cur){if(ancSrc.has(cur)){const d=(src._rDist+l._rDist-2*(cur._rDist||0));if(d>bestD){bestD=d;best=l;}break;}cur=cur.parent;}
+    });
+    return best;
+  }
+  const L1=farthestFrom(leaves[0]);
+  const L2=farthestFrom(L1);
+  // Compute actual diameter
+  const ancL1=[];
+  let cur=L1; while(cur){ancL1.push(cur);cur=cur.parent;}
+  const ancL1Set=new Set(ancL1);
+  let lcaNode=L2; while(lcaNode&&!ancL1Set.has(lcaNode)) lcaNode=lcaNode.parent;
+  if(!lcaNode) return;
+  const diam=L1._rDist+L2._rDist-2*(lcaNode._rDist||0);
+  const half=diam/2;
+  // Build the full path L1→LCA→L2 and pick node nearest to half from L1
+  const pathUp=[];
+  cur=L1; while(cur&&cur!==lcaNode){pathUp.push(cur);cur=cur.parent;} pathUp.push(lcaNode);
+  const pathDown=[];
+  cur=L2; while(cur&&cur!==lcaNode){pathDown.unshift(cur);cur=cur.parent;}
+  const fullPath=[...pathUp,...pathDown];
+  // For each node on the path, compute d(L1, node)
+  function distL1(node){
+    // find lca(L1, node)
+    const anc=new Set(); let c=L1; while(c){anc.add(c);c=c.parent;}
+    c=node; while(c){if(anc.has(c)) return L1._rDist+node._rDist-2*(c._rDist||0); c=c.parent;}
+    return 0;
+  }
+  let bestNode=null, bestDiff=Infinity;
+  fullPath.forEach(n=>{
+    if(n===rootNode) return; // skip existing root
+    const d=distL1(n);
+    const diff=Math.abs(d-half);
+    if(diff<bestDiff){bestDiff=diff;bestNode=n;}
+  });
+  if(bestNode&&bestNode.parent) rerootAtNode(bestNode);
+  document.getElementById("possvm-result").textContent="Midpoint root applied.";
+}
+
+// ── POSSVM species-overlap OG assignment ──────────────────────────────────────
+function runPossvm(){
+  if(!rootNode){document.getElementById("possvm-result").textContent="No tree loaded."; return;}
+  const ingroupSps=new Set([...document.querySelectorAll("[data-pvm-sp]:checked")].map(cb=>cb.value));
+  if(!ingroupSps.size){document.getElementById("possvm-result").textContent="Select at least one species."; return;}
+  const sos=parseFloat(document.getElementById("possvm-sos").value);
+
+  // ── Pass 1: tag each node with the set of ingroup species in its subtree ──
+  function tagSps(node){
+    const ch=node.children||node._children;
+    if(!ch||!ch.length){
+      const sp=node.data.species||"";
+      node._pvmSps=ingroupSps.has(sp)?new Set([sp]):new Set();
+    } else {
+      node._pvmSps=new Set();
+      for(const c of ch){tagSps(c); c._pvmSps.forEach(s=>node._pvmSps.add(s));}
+    }
+  }
+
+  // ── Pass 2: classify each internal node as D (duplication) or S (speciation) ──
+  function classify(node){
+    const ch=node.children||node._children;
+    if(!ch||ch.length<2){node._pvmEvent=null;return;}
+    for(const c of ch) classify(c);
+    // Node is D if ANY pair of children share at least one ingroup species at rate > sos
+    let isD=false;
+    outer:for(let i=0;i<ch.length&&!isD;i++){
+      for(let j=i+1;j<ch.length&&!isD;j++){
+        const si=ch[i]._pvmSps, sj=ch[j]._pvmSps;
+        if(!si.size||!sj.size) continue;
+        let ovl=0; si.forEach(s=>{if(sj.has(s))ovl++;});
+        if(ovl/Math.min(si.size,sj.size)>sos){isD=true;break outer;}
+      }
+    }
+    node._pvmEvent=isD?"D":"S";
+  }
+
+  // ── Pass 3: assign OG IDs top-down ──────────────────────────────────────────
+  // Each duplication node starts fresh OGs for each child.
+  // Speciation nodes pass through the current OG.
+  // Outgroup leaves (not in ingroupSps) get no OG.
+  let ogCounter=0;
+  const newOgs={};
+  function assign(node,ogId){
+    const ch=node.children||node._children;
+    if(!ch||!ch.length){
+      const sp=node.data.species||"";
+      if(ingroupSps.has(sp)&&ogId){
+        if(!newOgs[ogId]) newOgs[ogId]=[];
+        newOgs[ogId].push(node.data.gene_id||node.data.name);
+      }
+      return;
+    }
+    if(node._pvmEvent==="D"){
+      for(const c of ch){
+        if(c._pvmSps.size>0) assign(c,"OG_"+String(++ogCounter).padStart(4,"0"));
+        else assign(c,null);
+      }
+    } else {
+      let cur=ogId;
+      if(!cur&&node._pvmSps.size>0) cur="OG_"+String(++ogCounter).padStart(4,"0");
+      for(const c of ch) assign(c,cur);
+    }
+  }
+
+  tagSps(rootNode);
+  classify(rootNode);
+  // Root is treated as S unless it's a D node itself
+  let rootOg=null;
+  if(rootNode._pvmEvent!=="D"&&rootNode._pvmSps.size>0)
+    rootOg="OG_"+String(++ogCounter).padStart(4,"0");
+  assign(rootNode,rootOg);
+
+  const nOgs=Object.keys(newOgs).length;
+  // ── Apply to OG colour maps ──────────────────────────────────────────────────
+  ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
+  Object.keys(newOgs).sort().forEach((og,i)=>{
+    const col=palette[i%palette.length];
+    ogName2Color[og]=col;
+    for(const gid of newOgs[og]){ogLeaf2Color[gid]=col;ogGene2Name[gid]=og;}
+  });
+  _pvmActive=true;
+  colorMode="og";
+  document.getElementById("n-ogs-label").textContent=nOgs+" orthogroups (POSSVM)";
+  document.getElementById("possvm-result").textContent="\u2714 "+nOgs+" OG"+(nOgs!==1?"s":"")+" found";
+  document.getElementById("possvm-reset-btn").style.display="inline";
+  renderTree(false);
+}
+
+function pvmReset(){
+  _pvmActive=false;
+  colorMode="og";
+  rebuildOgColors();
+  const n=Object.keys(activeOgs()).length;
+  document.getElementById("n-ogs-label").textContent=n+" orthogroups";
+  document.getElementById("possvm-reset-btn").style.display="none";
+  document.getElementById("possvm-result").textContent="";
+  renderTree(false);
 }
 
 function toggleLengths(){
