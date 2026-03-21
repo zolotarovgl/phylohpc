@@ -3189,17 +3189,16 @@ function renderTree(animate){
           .attr("width",Math.max(0,x2-x1)).attr("height",Math.max(0,y2-y1))
           .attr("fill",color).attr("opacity",cladeHlAlpha).attr("rx",4)
           .style("cursor","pointer")
-          .on("contextmenu",(ev)=>showCladeHlPopup(ev,uid))
-          .on("dblclick",(ev)=>{
-            ev.stopPropagation();
-            openColorPicker(color,c=>{ rec.color=c; renderTree(false); });
-          });
+          .on("click",(ev)=>{ ev.stopPropagation(); showCladeHlPopup(ev,uid); })
+          .on("contextmenu",(ev)=>showCladeHlPopup(ev,uid));
         if(label){
           const labelFontSize=Math.max(10, Math.min(16, (y2-y1)*0.32));
+          // Place label right-aligned at the SVG right edge so it always clears tip labels
+          const svgRightEdge=mg.left+iWeff+mg.right;
           hlLayer.append("text")
-            .attr("x", x2+6)
+            .attr("x", svgRightEdge-6)
             .attr("y", (y1+y2)/2)
-            .attr("text-anchor","start")
+            .attr("text-anchor","end")
             .attr("dominant-baseline","central")
             .attr("font-size", labelFontSize)
             .attr("font-weight","600")
@@ -3523,42 +3522,75 @@ function resetRoot(){
   drawGeneTree(_origTreeDictForReroot);
   _origTreeDictForReroot=null;
 }
-// Convert a d3-hierarchy node (and its current children/collapsed children) back to a plain dict
+
+// Convert a d3-hierarchy node to a plain dict.
+// Explicitly strips d.data.children (original JSON) before setting from d3 hierarchy,
+// avoiding stale branches being copied through Object.assign.
 function _h2d(d){
   const ch=d.children||d._children;
   const obj=Object.assign({},d.data);
+  delete obj.children;            // remove original JSON children – we'll set from d3
   if(ch&&ch.length) obj.children=ch.map(_h2d);
-  else delete obj.children;
   return obj;
 }
-// Build the "above" part of the tree when rerooting at `node`:
-// returns a plain dict representing node.parent with `node` removed,
-// and the ancestor chain reversed so grandparents become children.
-function _rerootAbove(node){
-  const p=node.parent;
-  if(!p) return null;
-  const siblings=(p.children||[]).filter(c=>c!==node);
-  const children=siblings.map(_h2d);
-  if(p.parent) children.push(_rerootAbove(p));
-  const obj=Object.assign({},p.data);
-  obj.children=children;
-  return obj;
+
+// Deep-copy a plain JSON-serialisable dict (avoids shared-reference mutations).
+function _deepCopyDict(o){ return JSON.parse(JSON.stringify(o)); }
+
+// Reroot a plain tree dict so that the node at `path` (array of child indices from root)
+// becomes one of the two children of a new synthetic root.
+// Algorithm: walk down path collecting (nodeData, siblings) at each level, then reverse.
+function _rerootDictAt(root, path){
+  if(!path.length) return _deepCopyDict(root);
+  // Walk down, saving node data (without children) and sibling subtrees at each level
+  const chain=[];
+  let cur=root;
+  for(let i=0;i<path.length;i++){
+    const idx=path[i];
+    if(!cur.children||idx>=cur.children.length) return _deepCopyDict(root); // safety
+    const siblings=cur.children.filter((_,j)=>j!==idx).map(_deepCopyDict);
+    const nodeData=Object.assign({},cur); delete nodeData.children;
+    chain.push({nodeData,siblings});
+    cur=cur.children[idx];
+  }
+  const targetDict=_deepCopyDict(cur);
+  // Reverse: start from innermost (target's parent) and work outward
+  let above=null;
+  for(let i=chain.length-1;i>=0;i--){
+    const {nodeData,siblings}=chain[i];
+    const children=[...siblings];
+    if(above!==null) children.push(above);
+    above=Object.assign({},nodeData);
+    if(children.length) above.children=children; else delete above.children;
+  }
+  const newRoot={name:"",leaf:false,children:[targetDict]};
+  if(above) newRoot.children.push(above);
+  return newRoot;
 }
+
 function rerootAtNode(d){
   if(!rootNode||!d.parent) return;   // can't reroot at existing root
-  // save original only on the first reroot
-  if(!_isRerooted) _origTreeDictForReroot=_h2d(rootNode);
-  // expand all collapse state so we work with the full topology
+  // Expand all collapsed nodes so the full topology is available
   rootNode.each(n=>{if(n._children){n.children=n._children;n._children=null;}});
-  const above=_rerootAbove(d);
-  const newRoot={name:"",leaf:false,children:[_h2d(d)]};
-  if(above) newRoot.children.push(above);
+  // Save original tree only on the first reroot (after expanding)
+  if(!_isRerooted) _origTreeDictForReroot=_h2d(rootNode);
+  // Build path (array of child indices) from root down to d
+  const path=[];
+  let cur=d;
+  while(cur.parent){
+    const idx=(cur.parent.children||[]).indexOf(cur);
+    if(idx<0){ console.warn("reroot: node not found in parent.children"); return; }
+    path.unshift(idx);
+    cur=cur.parent;
+  }
+  const currentDict=_h2d(rootNode);
+  const newRootDict=_rerootDictAt(currentDict,path);
   _isRerooted=true;
   _rerootMode=false;
   document.getElementById("btn-reroot").classList.remove("active-btn");
   document.getElementById("tree-wrap").style.cursor="";
   document.getElementById("btn-reset-root").style.display="inline";
-  drawGeneTree(newRoot);
+  drawGeneTree(newRootDict);
 }
 // ── tree controls ──
 function expandAll(){
