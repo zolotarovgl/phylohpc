@@ -2476,7 +2476,7 @@ function rebuildHlSet(){
     if(hlSet) hmFocusGids=null; // user's new highlight overrides heatmap-navigation focus
   }
   renderHlTags();
-  document.getElementById("btn-focus-hl").style.display=hlSet?"inline":"none";
+  document.getElementById("btn-focus-hl").style.display=(hlSet||ogHlSet)?"inline":"none";
   if(currentIndex!==null) renderTree();
 }
 
@@ -2537,6 +2537,7 @@ function rebuildOgHlSet(){
     if(ogHlSet) hmFocusGids=null; // user's new highlight overrides heatmap-navigation focus
   }
   renderOgHlTags();
+  document.getElementById("btn-focus-hl").style.display=(ogHlSet||hlSet)?"inline":"none";
   if(currentIndex!==null) renderTree();
 }
 
