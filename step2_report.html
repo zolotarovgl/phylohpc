@@ -457,9 +457,10 @@ const HG_DATA       = [];
 const TREE_INDEX    = [];
 const ALL_SPECIES   = [];
 const CLADE_DATA    = [{"name": "Root", "groups": {"Mmus": "Bilateria", "Hsap": "Bilateria", "Drer": "Bilateria", "Xentro": "Bilateria", "Dmel": "Bilateria", "Aedaeg": "Bilateria", "Cele": "Bilateria", "Nvec": "Cnidaria_like", "Mlei": "Cnidaria_like", "Aque": "Invertebrata", "Spur": "Invertebrata", "Cgig": "Invertebrata"}}, {"name": "Bilateria", "groups": {"Mmus": "Vertebrata", "Hsap": "Vertebrata", "Drer": "Vertebrata", "Xentro": "Vertebrata", "Dmel": "Ecdysozoa", "Aedaeg": "Ecdysozoa", "Cele": "Ecdysozoa"}}, {"name": "Vertebrata", "groups": {"Mmus": "Mammalia", "Hsap": "Mammalia", "Drer": "Actinopterygii", "Xentro": "Actinopterygii"}}];
-const NEWICK_RAW    = %%NEWICK_RAW%%;
-const FAMILY_INFO   = %%FAMILY_INFO_JSON%%;
-const HAVE_GENERAX  = %%HAVE_GENERAX_JSON%%;
+const NEWICK_RAW    = "";
+const FAMILY_INFO   = [];
+const HAVE_GENERAX  = true;
+const NO_TREE_GENES = {};  // {hg_id: {species:[gene_ids]}} for HGs without trees
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COLOUR SYSTEM
@@ -2051,6 +2052,21 @@ function buildOGIndex(){
       (n.children||[]).forEach(walk);
     })(detail.tree);
   }
+  // Add genes from HGs that have no gene tree at all
+  const NO_ANNO="(no annotation)";
+  for(const [hgId, spGenes] of Object.entries(NO_TREE_GENES)){
+    const hgRec=HG_DATA.find(d=>d.id===hgId)||{};
+    const sc={};
+    for(const [sp,genes] of Object.entries(spGenes)){
+      sc[sp]=genes.length;
+      for(const g of genes){
+        if(!hmGeneIndex[g]) hmGeneIndex[g]=NO_ANNO+"::"+hgId;
+      }
+    }
+    const key=NO_ANNO+"::"+hgId;
+    hmOGIndex[key]={hgId, family:hgRec.family||"", cls:hgRec.class||hgRec.pref||"",
+                    total:Object.values(sc).reduce((a,b)=>a+b,0), species_counts:sc};
+  }
 }
 
 function buildHmSearchIndex(){
@@ -2497,7 +2513,9 @@ function downloadSpeciesGenes(sp, cls){
     if(getSpeciesPfx(gene)!==sp) continue;
     const r=hmOGIndex[og]||{};
     if(cls && (r.cls||"other")!==cls) continue;
-    rows.push([gene,og,r.hgId||"",r.family||"",r.cls||""].join("\t"));
+    // Strip internal "::hg_id" suffix used as a unique key for unannotated genes
+    const ogDisplay=og.includes("::")? og.split("::")[0] : og;
+    rows.push([gene,ogDisplay,r.hgId||"",r.family||"",r.cls||""].join("\t"));
   }
   if(rows.length===1){ alert("No gene data found for "+sp+(cls?" ("+cls+")":"")); return; }
   const blob=new Blob([rows.join("\n")],{type:"text/tab-separated-values"});
