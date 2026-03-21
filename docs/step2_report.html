@@ -3195,17 +3195,16 @@ function renderTree(animate){
             openColorPicker(color,c=>{ rec.color=c; renderTree(false); });
           });
         if(label){
-          const labelFontSize=Math.max(11, Math.min(22, (y2-y1)*0.38));
+          const labelFontSize=Math.max(10, Math.min(16, (y2-y1)*0.32));
           hlLayer.append("text")
-            .attr("x", x2-8)
+            .attr("x", x2+6)
             .attr("y", (y1+y2)/2)
-            .attr("text-anchor","middle")
+            .attr("text-anchor","start")
             .attr("dominant-baseline","central")
-            .attr("transform",`rotate(-90,${x2-8},${(y1+y2)/2})`)
             .attr("font-size", labelFontSize)
-            .attr("font-weight","700")
-            .attr("fill", color)
-            .attr("opacity", Math.min(1, cladeHlAlpha*3.5))
+            .attr("font-weight","600")
+            .attr("fill", "#111")
+            .attr("opacity", 1)
             .style("pointer-events","none")
             .text(label);
         }
