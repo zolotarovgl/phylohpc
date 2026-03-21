@@ -737,10 +737,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 <div id="tooltip"></div>
 <div id="collapse-choice-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:250;display:none;gap:6px;flex-direction:column">
   <div style="font-size:10px;color:#888;margin-bottom:2px">Collapse as:</div>
-  <div style="display:flex;gap:6px">
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
     <button id="ccp-triangle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a filled triangle (proportional size)">&#x25BD; Triangle</button>
     <button id="ccp-circle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a circle with leaf count">&#x25EF; Circle</button>
     <button id="ccp-compare" style="padding:4px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer" title="Compare species coverage with another node">&#x2316; Compare</button>
+    <button id="ccp-highlight" style="padding:4px 10px;font-size:11px;border:1px solid #e67e22;border-radius:4px;background:#fff8f0;color:#c0622a;cursor:pointer" title="Highlight subtree background with a colour">&#x25A0; Highlight</button>
   </div>
 </div>
 <div id="tri-action-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
@@ -1147,6 +1148,11 @@ function collectLeafGenes(children) {
     const node=_ccpNode; if(!node) return; hide();
     enterCompareMode(node);
   });
+  document.getElementById("ccp-highlight").addEventListener("click",()=>{
+    const node=_ccpNode; if(!node) return; hide();
+    const cur=cladeHighlights.get(node._uid)||"#ffe066";
+    openColorPicker(cur,c=>{ cladeHighlights.set(node._uid,c); renderTree(false); });
+  });
   window.showCollapseChoicePopup=function(event,d){
     _ccpNode=d; cancelHide();
     pop.style.display="flex";
@@ -1195,7 +1201,8 @@ function collectLeafGenes(children) {
 })();
 
 // ── Gene-tree collapsed-triangle action popup ───────────────────────────────
-const nodeTriColors=new Map(); // _uid → custom fill override for gene-tree triangles
+const nodeTriColors=new Map();    // _uid → custom fill override for gene-tree triangles
+const cladeHighlights=new Map(); // _uid → hex color for subtree background highlight
 (function(){
   const pop=document.getElementById("tri-action-popup");
   const title=document.getElementById("tri-popup-title");
@@ -2843,6 +2850,7 @@ function selectTree(rec){
   document.getElementById("og-hl-search").value="";
   renderOgHlTags();
   cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
+  cladeHighlights.clear();
   colorMode="og";
   hmFocusGids=null;
 
@@ -3305,6 +3313,42 @@ function renderTree(animate){
   }
 
   const dur=animate?240:0;
+
+  // ── Clade highlight backgrounds ──
+  {
+    // ensure the highlight layer is the first child of gMain so it renders behind everything
+    let hlLayer=gMain.select(".clade-hl-layer");
+    if(hlLayer.empty()) hlLayer=gMain.insert("g",":first-child").attr("class","clade-hl-layer");
+    hlLayer.lower(); // keep it behind all other gMain children
+    hlLayer.selectAll("*").remove();
+    if(cladeHighlights.size){
+      const allNodes=rootNode.descendants();
+      cladeHighlights.forEach((color,uid)=>{
+        const hn=allNodes.find(d=>d._uid===uid);
+        if(!hn) return;
+        // collect all currently-visible nodes in this subtree (follows d.children, not _children)
+        const sub=hn.descendants();
+        const ys=sub.map(d=>d.x);
+        const y1=Math.min(...ys)-effRow*0.55+mg.top;
+        const y2=Math.max(...ys)+effRow*0.55+mg.top;
+        const x1=nodeX(hn,mg)-6;
+        const x2=+treeSvg.attr("width"); // stretch to full SVG width (covers tip labels)
+        hlLayer.append("rect")
+          .attr("x",x1).attr("y",y1)
+          .attr("width",Math.max(0,x2-x1)).attr("height",Math.max(0,y2-y1))
+          .attr("fill",color).attr("opacity",0.22).attr("rx",4)
+          .style("cursor","pointer")
+          .on("contextmenu",(ev)=>{
+            ev.preventDefault();
+            cladeHighlights.delete(uid); renderTree(false);
+          })
+          .on("dblclick",(ev)=>{
+            ev.stopPropagation();
+            openColorPicker(color,c=>{ cladeHighlights.set(uid,c); renderTree(false); });
+          });
+      });
+    }
+  }
 
   // ── Links ──
   gMain.selectAll(".link")
