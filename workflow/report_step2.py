@@ -1177,9 +1177,13 @@ function collectLeafGenes(children) {
   document.getElementById("ccp-highlight").addEventListener("click",()=>{
     const node=_ccpNode; if(!node) return; hide();
     const existing=cladeHighlights.get(node._uid)||{};
+    // Prompt for label first (synchronous), then open colour picker so the live
+    // colour-drag preview doesn't re-trigger the prompt on every input event.
+    const labelRaw=window.prompt("Clade label (leave blank for none):", existing.label||"");
+    if(labelRaw===null) return; // user cancelled
+    const label=labelRaw.trim();
     openColorPicker(existing.color||"#ffe066",c=>{
-      const label=window.prompt("Clade label (leave blank for none):", existing.label||"");
-      cladeHighlights.set(node._uid,{color:c, label:(label||"").trim()});
+      cladeHighlights.set(node._uid,{color:c, label});
       renderTree(false);
     });
   });
