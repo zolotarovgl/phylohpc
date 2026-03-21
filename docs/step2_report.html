@@ -1055,7 +1055,7 @@ function drawSpeciesTree() {
   const W = Math.max(Math.floor((wrap.clientWidth || 900) * spTreeWidthPct / 100), 300);
   const treeW = W - leftM - rightM;
   const inPhylo = new Set(ALL_SPECIES);
-  const tipColor = n => inPhylo.has(n.name) ? "#111" : "#bbb";
+  const tipColor = n => inPhylo.has(n.name) ? spColor(n.name) : "#bbb";
 
   // ── helpers ──────────────────────────────────────────────────────────
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
@@ -1224,14 +1224,27 @@ function drawSpeciesTree() {
     if(n._isCol) return;
     if(!n.children){
       const tc=tipColor(n);
-      svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",4)
-        .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.5);
-      svg.append("text").attr("x",sx(n._d)+8).attr("y",n._y).attr("dy","0.35em")
-        .attr("font-size",12).attr("fill",tc).attr("font-family","monospace").text(n.name)
+      const inData=inPhylo.has(n.name);
+      svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
+        .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.8)
+        .style("cursor",inData?"pointer":"default")
+        .on("mouseover",(ev)=>{ if(inData) showTip(ev,'<div style="font-size:10px;color:#aaa">click to change color</div>'); })
+        .on("mousemove",moveTip).on("mouseout",hideTip)
+        .on("click",(ev)=>{
+          if(!inData) return;
+          ev.stopPropagation();
+          openColorPicker(spColor(n.name),c=>{
+            SP_COLORS[n.name]=c;
+            drawSpeciesTree();
+            if(rootNode) renderTree(false);
+          });
+        });
+      svg.append("text").attr("x",sx(n._d)+10).attr("y",n._y).attr("dy","0.35em")
+        .attr("font-size",12).attr("fill",inData?"#222":"#bbb").attr("font-family","monospace").text(n.name)
         .style("cursor","pointer")
         .on("mouseover",(ev)=>{
           const m=spMeta[n.name]||{genes:0,families:0,hgs:0};
-          showTip(ev,'<div class="tt-name">'+n.name+'</div>'
+          showTip(ev,'<div class="tt-name" style="color:'+tc+'">'+n.name+'</div>'
             +'<div class="tt-row"><span>Annotated genes</span><strong>'+m.genes+'</strong></div>'
             +'<div class="tt-row"><span>Families</span><strong>'+m.families+'</strong></div>'
             +'<div class="tt-row"><span>Homology groups</span><strong>'+m.hgs+'</strong></div>'
@@ -1503,7 +1516,7 @@ function drawHeatmap() {
       const cellFill=hmColorMode==="absolute"?absColor(count):zColor(z);
       svg.append("rect").attr("class","hm-cell")
         .attr("x",cellX).attr("y",cellY).attr("width",cW-2).attr("height",cH)
-        .attr("fill",count===0?"#bbb":cellFill).style("cursor","pointer")
+        .attr("fill",count===0?"#fff":cellFill).style("cursor","pointer")
         .on("mouseover",ev=>{
           showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b>'+(hmColorMode==="zscore"?'<br>z: <b>'+z.toFixed(2)+'</b>':""));
         })
@@ -2962,8 +2975,8 @@ function renderTree(animate){
     })
     .on("click",(event,d)=>{
       event.stopPropagation();
-      // compare mode intercepts ANY node click (leaf or internal) as the second target
-      if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
+      // compare mode intercepts any node click as the second target; same-node click is a no-op
+      if(_compareNode1!==null){ if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); return; }
       if(d.data.leaf){
         const tipName=d.data.gene_id||d.data.name||"";
         if(tipName&&navigator.clipboard) navigator.clipboard.writeText(tipName).then(()=>{
@@ -3014,7 +3027,7 @@ function renderTree(animate){
     .attr("stroke-width",d=>(d._children&&d._isOgCol)?treeLinkWidth/_zoomScale:null)
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
-      if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
+      if(_compareNode1!==null){ if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); return; }
       showTriActionPopup(event,d);
     })
     .on("mouseover",(ev,d)=>{
@@ -3047,7 +3060,7 @@ function renderTree(animate){
     .style("cursor",()=>_compareNode1?"crosshair":"default")
     .on("click",(event,d)=>{
       // In compare mode, leaf labels also act as a click target for the second node
-      if(_compareNode1!==null&&_compareNode1!==d){ event.stopPropagation(); runSpeciesComparison(d); hideTip(); }
+      if(_compareNode1!==null){ event.stopPropagation(); if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); }
     })
     .attr("display",d=>{
       if(!d.data.leaf) return "none";
@@ -3119,7 +3132,7 @@ function renderTree(animate){
     .attr("display",d=>(!d.data.leaf&&(d._isOgCol||(showOGLabels&&!d._children&&(isOGNode(d)||d.data._og_label))))?null:"none")
     .on("click",(event,d)=>{
       event.stopPropagation();
-      if(_compareNode1!==null&&_compareNode1!==d){ runSpeciesComparison(d); hideTip(); return; }
+      if(_compareNode1!==null){ if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); return; }
       // Triangle popup for collapsed OG; for expanded OG/annotated nodes toggle OG highlight
       if(d._children&&d._isOgCol) showTriActionPopup(event,d);
       else if(!d._children&&(isOGNode(d)||d.data._og_label)){
