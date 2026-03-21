@@ -240,8 +240,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <span class="ctrl-grp-label" title="Tree structure controls">Tree</span>
           <button class="ctrl-btn" onclick="expandAll()" title="Expand all collapsed nodes">Expand all</button>
           <button class="ctrl-btn" onclick="collapseAll()" title="Collapse all nodes to leaves">Collapse all</button>
-          <button class="ctrl-btn" id="btn-reroot" onclick="toggleRerootMode()" title="Click any node or leaf to reroot the tree there">Reroot…</button>
-          <button class="ctrl-btn" id="btn-reset-root" onclick="resetRoot()" title="Restore the original root" style="display:none">&#x21BA; Reset root</button>
+          <button class="ctrl-btn" id="btn-reset-root" onclick="resetRoot()" title="Restore the original root (undo all rerooting)" style="display:none">&#x21BA; Reset root</button>
           <button class="ctrl-btn" onclick="fitTree()" title="Fit the tree to the current panel size">&#x2922; Fit</button>
           <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()" title="Switch between available tree sources (e.g. GeneRax vs FastTree)">Showing: GeneRax</button>
           <span id="tree-title"></span>
@@ -406,10 +405,11 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 </div>
 <div id="tooltip"></div>
 <div id="collapse-choice-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:250;display:none;gap:6px;flex-direction:column">
-  <div style="font-size:10px;color:#888;margin-bottom:2px">Collapse as:</div>
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="ccp-title">Node options</div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
     <button id="ccp-triangle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a filled triangle (proportional size)">&#x25BD; Triangle</button>
     <button id="ccp-circle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a circle with leaf count">&#x25EF; Circle</button>
+    <button id="ccp-reroot" style="padding:4px 10px;font-size:11px;border:1px solid #27ae60;border-radius:4px;background:#f0fff4;color:#1a7a42;cursor:pointer" title="Reroot the tree at this node (the selected node becomes one child of the new root)">&#x21C5; Reroot here</button>
     <button id="ccp-compare" style="padding:4px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer" title="Compare species coverage with another node">&#x2316; Compare</button>
     <button id="ccp-highlight" style="padding:4px 10px;font-size:11px;border:1px solid #e67e22;border-radius:4px;background:#fff8f0;color:#c0622a;cursor:pointer" title="Highlight subtree background with a colour">&#x25A0; Highlight</button>
   </div>
@@ -962,6 +962,10 @@ function collectLeafGenes(children) {
     node._children=node.children; node.children=null;
     node._isOgCol=false; renderTree(true);
   });
+  document.getElementById("ccp-reroot").addEventListener("click",()=>{
+    const node=_ccpNode; if(!node) return; hide();
+    rerootAtNode(node);
+  });
   document.getElementById("ccp-compare").addEventListener("click",()=>{
     const node=_ccpNode; if(!node) return; hide();
     enterCompareMode(node);
@@ -983,6 +987,8 @@ function collectLeafGenes(children) {
   });
   window.showCollapseChoicePopup=function(event,d){
     _ccpNode=d; cancelHide();
+    const titleEl=document.getElementById("ccp-title");
+    if(titleEl) titleEl.textContent=(d.data.name||"internal node")+" ("+(d.leaves().length)+" leaves)";
     pop.style.display="flex";
     const x=Math.min(event.clientX+8, window.innerWidth-pop.offsetWidth-8);
     const y=Math.min(event.clientY+8, window.innerHeight-pop.offsetHeight-8);
@@ -2824,7 +2830,7 @@ function applyTipFontSize(){
   const colR2=Math.max(10,fs*0.9), leafR2=fs*0.36, colCx2=-(colR2-leafR2);
   gMain.selectAll(".count-label").attr("font-size",fs).attr("x",d=>d&&d._children&&!d._isOgCol?colCx2:null);
   gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",colR2).attr("cx",colCx2);
-  gMain.selectAll("circle").filter(d=>d&&!d._children).attr("r",d=>d.data&&d.data.leaf?fs*0.36:isOGNode(d)?fs*0.5:fs*0.26);
+  gMain.selectAll("circle").filter(d=>d&&!d._children).attr("r",d=>d.data&&d.data.leaf?fs*0.36:(_pvmActive&&d._pvmEvent==="D")||isOGNode(d)||d.data._og_label?fs*0.55:fs*0.26);
   gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
 }
 
@@ -2991,7 +2997,12 @@ function annotateOGNodes(){
   const ogGroups={};
   (function walkAll(n){
     if(n.data.leaf){
-      const og=n.data.og||ogGene2Name[n.data.gene_id||n.data.name]||"";
+      const gid=n.data.gene_id||n.data.name||"";
+      // When POSSVM is active: only use POSSVM-assigned OGs (ingroup only).
+      // This prevents outgroup pipeline OGs from generating labels that clutter the view.
+      const og=_pvmActive
+        ? (ogGene2Name[gid]||"")
+        : (n.data.og||ogGene2Name[gid]||"");
       if(og)(ogGroups[og]=ogGroups[og]||[]).push(n);
       return;
     }
@@ -3102,6 +3113,8 @@ function drawMiniSpTree(){
 
 // ── POSSVM interactive orthogroup calling ─────────────────────────────────────
 let _pvmActive=false;          // true while POSSVM OGs are displayed
+let _pvmIngroupSps=null;       // Set of ingroup species used in last POSSVM run
+const _pvmOgHlPalette=["#a8d8ea","#ffcef3","#d4f1c4","#ffd6a5","#e2d0f8","#c8f0de","#ffe4a8","#ffd0d0","#b3e5d4","#fce4b4"];
 let _pvmCladeOpen=false;       // whether the clade-picker tree is visible
 
 function togglePossvmPanel(ev){
@@ -3399,10 +3412,32 @@ function runPossvm(){
     for(const gid of newOgs[og]){ogLeaf2Color[gid]=col;ogGene2Name[gid]=og;}
   });
   _pvmActive=true;
+  _pvmIngroupSps=ingroupSps;
   colorMode="og";
   // Sync the colour-by dropdown so the UI reflects the active mode
   const _cbs=document.getElementById("color-by");
   if(_cbs) _cbs.value="og";
+
+  // ── Auto-highlight each POSSVM OG clade ──────────────────────────────────────
+  // Remove any previous OG-shading highlights, then re-add one per POSSVM OG.
+  cladeHighlights.forEach((rec,uid)=>{ if(rec._fromOgHl) cladeHighlights.delete(uid); });
+  // Fully expand the tree first so MRCA lookup works on all leaves.
+  rootNode.each(n=>{if(n._children){n.children=n._children;n._children=null;n._isOgCol=false;}});
+  rootNode.each(n=>{n._uid=n._uid||0;}); // ensure _uid is set (set during renderTree; defensive)
+  Object.keys(newOgs).sort().forEach((og,i)=>{
+    const leaves=newOgs[og].map(gid=>{
+      let found=null;
+      rootNode.each(n=>{if(n.data.leaf&&(n.data.gene_id||n.data.name)===gid) found=n;});
+      return found;
+    }).filter(Boolean);
+    if(!leaves.length) return;
+    const mrca=findMRCA(leaves);
+    if(!mrca) return;
+    cladeHighlights.set(mrca._uid,{color:_pvmOgHlPalette[i%_pvmOgHlPalette.length],label:og,_fromOgHl:true});
+  });
+  _ogHlActive=true;
+  document.getElementById("btn-highlight-ogs").classList.add("active-btn");
+
   document.getElementById("n-ogs-label").textContent=nOgs+" orthogroups (POSSVM)";
   document.getElementById("possvm-result").textContent="\u2714 "+nOgs+" OG"+(nOgs!==1?"s":"")+" found";
   document.getElementById("possvm-reset-btn").style.display="inline";
@@ -3410,7 +3445,7 @@ function runPossvm(){
 }
 
 function pvmReset(){
-  _pvmActive=false;
+  _pvmActive=false; _pvmIngroupSps=null;
   colorMode="og";
   rebuildOgColors();
   const n=Object.keys(activeOgs()).length;
@@ -3474,7 +3509,7 @@ function drawGeneTree(treeData){
   _ogCollapseActive=false; document.getElementById("btn-collapse-ogs").classList.remove("active-btn");
   _ogHlActive=false;       document.getElementById("btn-highlight-ogs").classList.remove("active-btn");
   // reset reroot state
-  _rerootMode=false; _isRerooted=false; _origTreeDictForReroot=null;
+  _isRerooted=false; _origTreeDictForReroot=null;
   document.getElementById("btn-reroot").classList.remove("active-btn");
   document.getElementById("btn-reset-root").style.display="none";
   document.getElementById("tree-wrap").style.cursor="";
@@ -3635,6 +3670,7 @@ function renderTree(animate){
     .attr("cx",0)   // reset any offset from manual-collapse state
     .attr("r",d=>{
       if(d.data.leaf) return tipFontSVG()*0.36;
+      if(_pvmActive&&d._pvmEvent==="D") return tipFontSVG()*0.55;
       const isOGlbl=showOGLabels&&(isOGNode(d)||d.data._og_label);
       if(isOGlbl) return tipFontSVG()*0.55;
       if(isOGNode(d)) return tipFontSVG()*0.5;
@@ -3643,7 +3679,7 @@ function renderTree(animate){
     .attr("fill",d=>{
       if(d.data.leaf){
         const gid2=d.data.gene_id||d.data.name;
-        const og2=d.data.og||ogGene2Name[gid2]||"";
+        const og2=ogGene2Name[gid2]||d.data.og||"";
         if(ogHlSet!==null){
           if(!ogHlSet.has(og2)) return "#e8e8e8";
           const gi=ogHlGroupIndex.get(og2)??0;
@@ -3653,25 +3689,27 @@ function renderTree(animate){
         const c=leafColor(d.data.species||"");
         return hlSet&&!hlSet.has(d.data.species||"")?"#e8e8e8":c;
       }
+      if(_pvmActive&&d._pvmEvent==="D") return "#111";
       if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return "#222";
       if(isOGNode(d))return "#e74c3c";
       return "#ccc";
     })
     .attr("stroke",d=>{
       if(d.data.leaf) return "none";
+      if(_pvmActive&&d._pvmEvent==="D") return "#000";
       if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return "#000";
       if(isOGNode(d)) return "#b03a2e";
       return "#aaa";
     })
     .attr("stroke-width",d=>{
       if(d.data.leaf) return null;
+      if(_pvmActive&&d._pvmEvent==="D") return 2;
       if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return 2;
       if(isOGNode(d)) return 1.8;
       return 0.8;
     })
     .on("click",(event,d)=>{
       event.stopPropagation();
-      if(_rerootMode){ hideTip(); rerootAtNode(d); return; }
       // compare mode intercepts any node click as the second target; same-node click is a no-op
       if(_compareNode1!==null){ if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); return; }
       if(d.data.leaf){
@@ -3689,7 +3727,10 @@ function renderTree(animate){
       else if(d.children){ showCollapseChoicePopup(event,d); }
     })
     .on("mouseover",(event,d)=>{
-      if(!d.data.leaf&&d.children) showTip(event,'<b>'+(d.data.name||"internal")+'</b><div style="font-size:9px;color:#aaa;margin-top:3px">click to choose collapse style</div>');
+      if(!d.data.leaf&&d.children){
+        const evLabel=_pvmActive&&d._pvmEvent?'<span style="font-size:9px;margin-left:4px;padding:1px 4px;border-radius:3px;background:'+(d._pvmEvent==='D'?'#111':'#2ecc71')+';color:#fff">'+d._pvmEvent+'</span>':'';
+        showTip(event,'<b>'+(d.data.name||"internal")+'</b>'+evLabel+'<div style="font-size:9px;color:#aaa;margin-top:3px">click to choose collapse / reroot style</div>');
+      }
       else showTip(event,d);
     })
     .on("mousemove",moveTip).on("mouseout",hideTip);
@@ -3724,7 +3765,6 @@ function renderTree(animate){
     .attr("stroke-width",d=>(d._children&&d._isOgCol)?treeLinkWidth/_zoomScale:null)
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
-      if(_rerootMode){ hideTip(); rerootAtNode(d); return; }
       if(_compareNode1!==null){ if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); return; }
       showTriActionPopup(event,d);
     })
@@ -3881,19 +3921,12 @@ function renderTree(animate){
 }
 
 // ── reroot ──────────────────────────────────────────────────────────────────
-let _rerootMode=false;
 let _origTreeDictForReroot=null;   // saved before the first reroot
 let _isRerooted=false;
-function toggleRerootMode(){
-  _rerootMode=!_rerootMode;
-  document.getElementById("btn-reroot").classList.toggle("active-btn",_rerootMode);
-  document.getElementById("tree-wrap").style.cursor=_rerootMode?"crosshair":"";
-}
 function resetRoot(){
   if(!_origTreeDictForReroot)return;
   _isRerooted=false;
   document.getElementById("btn-reset-root").style.display="none";
-  if(_rerootMode){ _rerootMode=false; document.getElementById("btn-reroot").classList.remove("active-btn"); document.getElementById("tree-wrap").style.cursor=""; }
   drawGeneTree(_origTreeDictForReroot);
   _origTreeDictForReroot=null;
 }
@@ -3961,10 +3994,15 @@ function rerootAtNode(d){
   const currentDict=_h2d(rootNode);
   const newRootDict=_rerootDictAt(currentDict,path);
   _isRerooted=true;
-  _rerootMode=false;
-  document.getElementById("btn-reroot").classList.remove("active-btn");
-  document.getElementById("tree-wrap").style.cursor="";
   document.getElementById("btn-reset-root").style.display="inline";
+  // Clear POSSVM state — it's invalidated when topology changes (re-run after rerooting)
+  if(_pvmActive){
+    _pvmActive=false; _pvmIngroupSps=null;
+    cladeHighlights.forEach((rec,uid)=>{ if(rec._fromOgHl) cladeHighlights.delete(uid); });
+    if(_ogHlActive){ _ogHlActive=false; document.getElementById("btn-highlight-ogs").classList.remove("active-btn"); }
+    document.getElementById("possvm-reset-btn").style.display="none";
+    document.getElementById("possvm-result").textContent="";
+  }
   drawGeneTree(newRootDict);
 }
 // ── tree controls ──
