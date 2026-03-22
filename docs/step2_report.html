@@ -3366,21 +3366,9 @@ function runPossvm(){
         if(ovl/Math.min(si.size,sj.size)>sos){isD=true;break outer;}
       }
     }
-    // POSSVM special case: a D-classified node where EVERY child has exactly
-    // one ingroup gene and they all come from the same single ingroup species
-    // is treated as S (not a duplication).  This prevents same-species terminal
-    // leaf pairs from being split into separate OGs.
-    if(isD){
-      const allSingleGene=ch.every(c=>c._pvmCnt===1);
-      if(allSingleGene){
-        const spSets=ch.map(c=>c._pvmSps).filter(s=>s.size>0);
-        if(spSets.length>0){
-          const refSp=[...spSets[0]][0];
-          const allSameSp=spSets.every(s=>s.size===1&&[...s][0]===refSp);
-          if(allSameSp) isD=false;
-        }
-      }
-    }
+    // POSSVM: if all ingroup leaves under this node come from a single species,
+    // species overlap is trivially 100% and cannot diagnose a meaningful duplication.
+    if(isD && node._pvmSps.size===1) isD=false;
     node._pvmEvent=isD?"D":"S";
   }
 
