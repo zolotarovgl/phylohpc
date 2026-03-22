@@ -284,7 +284,7 @@ def load_possvm_trees(possvm_dir: Path, source: str = "generax") -> tuple[list, 
             prefix, family, hg = stem, "", stem
 
         try:
-            t = Tree(str(nwk), format=0)
+            t = Tree(str(nwk), format=1)
         except Exception as exc:
             print(f"WARN: cannot parse {nwk.name}: {exc}", file=sys.stderr)
             continue
@@ -4500,157 +4500,228 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def main(argv=None):
-    args = parse_args(argv)
-
-    possvm_dir  = Path(args.possvm_dir)
-    search_dir  = Path(args.search_dir)
-    cluster_dir = Path(args.cluster_dir)
-
-    # Heatmap data
-    family_info    = load_family_info(args.family_info)
-    family_details = load_family_details(args.family_info)
-    family_records = build_family_records(search_dir, family_info)
-    hg_records     = build_hg_records(cluster_dir, family_info)
-
-    # Species tree (for ordering + cladogram)
+def _load_species_tree_bundle(species_tree_path):
     species_order: list = []
     tree_dict: dict = {}
-    newick_raw: str = ""
-    if args.species_tree and Path(args.species_tree).exists():
-        species_order, tree_dict = load_tree_data(args.species_tree)
-        newick_raw = Path(args.species_tree).read_text().strip()
+    newick_raw = ""
+    clade_groupings: list = []
+    if species_tree_path and Path(species_tree_path).exists():
+        species_order, tree_dict = load_tree_data(species_tree_path)
+        newick_raw = Path(species_tree_path).read_text().strip()
+        clade_groupings = parse_clade_groupings(Path(species_tree_path))
+        print(f"Extracted {len(clade_groupings)} clade groupings.", file=sys.stderr)
+    return species_order, tree_dict, newick_raw, clade_groupings
 
-    # Gene tree data (POSSVM)
+
+def _load_tree_records(possvm_dir: Path, possvm_prev_dir):
     if not possvm_dir.exists():
         print(f"WARN: {possvm_dir} does not exist – no gene trees.", file=sys.stderr)
-    records, all_species = load_possvm_trees(possvm_dir, source="generax") if possvm_dir.exists() else ([], [])
+
+    records, all_species = (
+        load_possvm_trees(possvm_dir, source="generax") if possvm_dir.exists() else ([], [])
+    )
     print(f"Loaded {len(records)} gene trees, {len(all_species)} species.", file=sys.stderr)
 
-    # Prev trees (IQ-TREE2 original, pre-GeneRax) — optional
+    generax_ids = {r["id"] for r in records}
     prev_records: dict = {}
-    if args.possvm_prev_dir:
-        prev_dir = Path(args.possvm_prev_dir)
+    if possvm_prev_dir:
+        prev_dir = Path(possvm_prev_dir)
         if prev_dir.is_dir():
             prev_list, prev_sp = load_possvm_trees(prev_dir, source="prev")
             prev_records = {r["id"]: r for r in prev_list}
             all_species = sorted(set(all_species) | set(prev_sp))
-            # Include HGs that have a prev tree but no GeneRax output
-            generax_ids = {r["id"] for r in records}
-            for r in prev_list:
-                if r["id"] not in generax_ids:
-                    records.append(r)
-            print(f"Loaded {len(prev_records)} prev gene trees (original IQ-TREE2).",
-                  file=sys.stderr)
-    # Filter all data to families present in genefam.csv (when provided)
-    if family_info:
-        before = len(records), len(family_records), len(hg_records)
-        records        = [r for r in records        if r["prefix"] in family_info or r["family"] in family_info]
-        family_records = [r for r in family_records if r["family"]  in family_info]
-        hg_records     = [r for r in hg_records     if r["family"]  in family_info]
-        print(
-            f"Filtered to genefam families: "
-            f"{before[0]}→{len(records)} trees, "
-            f"{before[1]}→{len(family_records)} families, "
-            f"{before[2]}→{len(hg_records)} HGs.",
-            file=sys.stderr,
-        )
-    print(f"Loaded {len(family_records)} families, {len(hg_records)} HGs for heatmap.",
-          file=sys.stderr)
+            records.extend(r for r in prev_list if r["id"] not in generax_ids)
+            print(
+                f"Loaded {len(prev_records)} prev gene trees (original IQ-TREE2).",
+                file=sys.stderr,
+            )
 
-    # Clade groupings
-    clade_groupings: list = []
-    if args.species_tree and Path(args.species_tree).exists():
-        clade_groupings = parse_clade_groupings(Path(args.species_tree))
-        print(f"Extracted {len(clade_groupings)} clade groupings.", file=sys.stderr)
+    return records, all_species, prev_records
 
-    # Build lightweight index (no tree/ogs dicts)
+
+def _keep_record_for_family_info(rec: dict, family_info: dict) -> bool:
+    return rec["prefix"] in family_info or rec["family"] in family_info
+
+
+def _filter_report_inputs(records, prev_records, family_records, hg_records, family_info):
+    if not family_info:
+        return records, prev_records, family_records, hg_records
+
+    before = len(records), len(family_records), len(hg_records)
+    records = [r for r in records if _keep_record_for_family_info(r, family_info)]
+    prev_records = {
+        rec_id: rec
+        for rec_id, rec in prev_records.items()
+        if _keep_record_for_family_info(rec, family_info)
+    }
+    family_records = [r for r in family_records if r["family"] in family_info]
+    hg_records = [r for r in hg_records if r["family"] in family_info]
+    print(
+        f"Filtered to genefam families: "
+        f"{before[0]}→{len(records)} trees, "
+        f"{before[1]}→{len(family_records)} families, "
+        f"{before[2]}→{len(hg_records)} HGs.",
+        file=sys.stderr,
+    )
+    return records, prev_records, family_records, hg_records
+
+
+def _build_index_records(records, prev_records, family_info):
     index_records = []
     for rec in records:
         idx = {k: v for k, v in rec.items() if k not in ("tree_dict", "ogs")}
         idx["has_prev"] = rec["id"] in prev_records
-        idx["source"]   = rec.get("source", "generax")
+        idx["source"] = rec.get("source", "generax")
         fam_key = rec["family"] if rec["family"] in family_info else rec["prefix"]
         idx["class"] = family_info.get(fam_key, rec.get("prefix", ""))
         index_records.append(idx)
+    return index_records
 
-    # Gene IDs for HGs that have NO gene tree (so the download can include them)
-    tree_hg_ids = {r["id"] for r in records}
-    no_tree_genes: dict = {}   # {hg_stem_id: {species: [gene_id, ...]}}
-    for r in hg_records:
-        if r["id"] not in tree_hg_ids:
-            fasta = cluster_dir / (r["id"] + ".fasta")
-            genes_by_sp = parse_fasta_genes(fasta)
-            if genes_by_sp:
-                no_tree_genes[r["id"]] = genes_by_sp
 
-    # Build Families tab data
-    fam_hg_counts    = defaultdict(int)
-    fam_gene_counts  = defaultdict(int)
+def _build_no_tree_genes(hg_records, tree_hg_ids, cluster_dir: Path) -> dict:
+    no_tree_genes: dict = {}
+    for rec in hg_records:
+        if rec["id"] in tree_hg_ids:
+            continue
+        fasta = cluster_dir / (rec["id"] + ".fasta")
+        genes_by_sp = parse_fasta_genes(fasta)
+        if genes_by_sp:
+            no_tree_genes[rec["id"]] = genes_by_sp
+    return no_tree_genes
+
+
+def _build_family_info_records(
+    family_details: dict,
+    family_records: list,
+    hg_records: list,
+    records: list,
+    prev_records: dict,
+):
+    fam_hg_counts = defaultdict(int)
+    fam_gene_counts = defaultdict(int)
     fam_species_sets = defaultdict(set)
-    for r in hg_records:
-        fam_hg_counts[r["family"]] += 1
-    for r in family_records:
-        fam_gene_counts[r["family"]]  = r.get("total", 0)
-        fam_species_sets[r["family"]] = set(r.get("species_counts", {}).keys())
+    for rec in hg_records:
+        fam_hg_counts[rec["family"]] += 1
+    for rec in family_records:
+        fam_gene_counts[rec["family"]] = rec.get("total", 0)
+        fam_species_sets[rec["family"]] = set(rec.get("species_counts", {}).keys())
 
-    # Count HGs-with-trees per family
-    fam_generax_counts = defaultdict(int)   # GeneRax trees
-    fam_tree_hg_ids    = defaultdict(set)   # union of all tree HG ids
-    for r in records:                        # GeneRax (primary) trees
-        fam_generax_counts[r["family"]] += 1
-        fam_tree_hg_ids[r["family"]].add(r["id"])
-    for r in prev_records.values():          # IQ-Tree (prev) trees
-        fam_tree_hg_ids[r["family"]].add(r["id"])
-    fam_tree_counts = {fam: len(ids) for fam, ids in fam_tree_hg_ids.items()}
-    have_generax = bool(records)             # flag exposed to JS
+    fam_generax_counts = defaultdict(int)
+    fam_tree_hg_ids = defaultdict(set)
+    for rec in records:
+        fam_tree_hg_ids[rec["family"]].add(rec["id"])
+        if rec.get("source") == "generax":
+            fam_generax_counts[rec["family"]] += 1
+    for rec in prev_records.values():
+        fam_tree_hg_ids[rec["family"]].add(rec["id"])
 
     family_info_records = []
-    all_families = sorted(set(family_details.keys()) | set(fam_hg_counts.keys()) | set(fam_gene_counts.keys()))
+    all_families = sorted(
+        set(family_details.keys()) | set(fam_hg_counts.keys()) | set(fam_gene_counts.keys())
+    )
     for fam in all_families:
         det = family_details.get(fam, {})
         family_info_records.append({
-            "family":    fam,
-            "pfam":      det.get("pfam", []),
-            "category":  det.get("category", ""),
-            "cls":       det.get("cls", ""),
-            "n_hgs":     fam_hg_counts.get(fam, 0),
-            "total":     fam_gene_counts.get(fam, 0),
+            "family": fam,
+            "pfam": det.get("pfam", []),
+            "category": det.get("category", ""),
+            "cls": det.get("cls", ""),
+            "n_hgs": fam_hg_counts.get(fam, 0),
+            "total": fam_gene_counts.get(fam, 0),
             "n_species": len(fam_species_sets.get(fam, set())),
-            "n_trees":   fam_tree_counts.get(fam, 0),
+            "n_trees": len(fam_tree_hg_ids.get(fam, set())),
             "n_generax": fam_generax_counts.get(fam, 0),
         })
 
-    # Build per-HG lazy <script> tags
+    have_generax = any(rec.get("source") == "generax" for rec in records)
+    return family_info_records, have_generax
+
+
+def _build_lazy_scripts(records, prev_records):
     lazy_parts = []
     for rec in records:
         detail = {"tree": rec["tree_dict"], "ogs": rec["ogs"]}
         prev = prev_records.get(rec["id"])
         if prev:
             detail["prev_tree"] = prev["tree_dict"]
-            detail["prev_ogs"]  = prev["ogs"]
+            detail["prev_ogs"] = prev["ogs"]
         tag_id = _html.escape(rec["id"], quote=True)
         lazy_parts.append(
             f'<script type="application/json" id="treedata-{tag_id}">'
             + json.dumps(detail, separators=(",", ":"))
             + "</script>"
         )
-    lazy_scripts = "\n".join(lazy_parts)
+    return "\n".join(lazy_parts)
 
-    html = (HTML_TEMPLATE
-            .replace("%%LAZY_SCRIPTS%%",       lazy_scripts)
-            .replace("%%SPECIES_ORDER%%",      json.dumps(species_order))
-            .replace("%%TREE_DATA%%",          json.dumps(tree_dict))
-            .replace("%%FAMILY_DATA%%",        json.dumps(family_records))
-            .replace("%%HG_DATA%%",            json.dumps(hg_records))
-            .replace("%%TREE_INDEX_JSON%%",    json.dumps(index_records))
-            .replace("%%SPECIES_JSON%%",       json.dumps(all_species))
-            .replace("%%CLADE_DATA_JSON%%",    json.dumps(clade_groupings))
-            .replace("%%NEWICK_RAW%%",         json.dumps(newick_raw))
-            .replace("%%FAMILY_INFO_JSON%%",   json.dumps(family_info_records))
-            .replace("%%HAVE_GENERAX_JSON%%",  json.dumps(have_generax))
-            .replace("%%NO_TREE_GENES_JSON%%", json.dumps(no_tree_genes)))
 
+def build_report_context(args) -> dict:
+    possvm_dir = Path(args.possvm_dir)
+    search_dir = Path(args.search_dir)
+    cluster_dir = Path(args.cluster_dir)
+
+    family_info = load_family_info(args.family_info)
+    family_details = load_family_details(args.family_info)
+    family_records = build_family_records(search_dir, family_info)
+    hg_records = build_hg_records(cluster_dir, family_info)
+
+    species_order, tree_dict, newick_raw, clade_groupings = _load_species_tree_bundle(
+        args.species_tree
+    )
+
+    records, all_species, prev_records = _load_tree_records(possvm_dir, args.possvm_prev_dir)
+    records, prev_records, family_records, hg_records = _filter_report_inputs(
+        records, prev_records, family_records, hg_records, family_info
+    )
+    print(
+        f"Loaded {len(family_records)} families, {len(hg_records)} HGs for heatmap.",
+        file=sys.stderr,
+    )
+
+    index_records = _build_index_records(records, prev_records, family_info)
+    tree_hg_ids = {rec["id"] for rec in records}
+    no_tree_genes = _build_no_tree_genes(hg_records, tree_hg_ids, cluster_dir)
+    family_info_records, have_generax = _build_family_info_records(
+        family_details, family_records, hg_records, records, prev_records
+    )
+
+    return {
+        "species_order": species_order,
+        "tree_dict": tree_dict,
+        "family_records": family_records,
+        "hg_records": hg_records,
+        "index_records": index_records,
+        "all_species": all_species,
+        "clade_groupings": clade_groupings,
+        "newick_raw": newick_raw,
+        "family_info_records": family_info_records,
+        "have_generax": have_generax,
+        "no_tree_genes": no_tree_genes,
+        "records": records,
+        "prev_records": prev_records,
+    }
+
+
+def render_report_html(context: dict) -> str:
+    return (
+        HTML_TEMPLATE
+        .replace("%%LAZY_SCRIPTS%%", _build_lazy_scripts(context["records"], context["prev_records"]))
+        .replace("%%SPECIES_ORDER%%", json.dumps(context["species_order"]))
+        .replace("%%TREE_DATA%%", json.dumps(context["tree_dict"]))
+        .replace("%%FAMILY_DATA%%", json.dumps(context["family_records"]))
+        .replace("%%HG_DATA%%", json.dumps(context["hg_records"]))
+        .replace("%%TREE_INDEX_JSON%%", json.dumps(context["index_records"]))
+        .replace("%%SPECIES_JSON%%", json.dumps(context["all_species"]))
+        .replace("%%CLADE_DATA_JSON%%", json.dumps(context["clade_groupings"]))
+        .replace("%%NEWICK_RAW%%", json.dumps(context["newick_raw"]))
+        .replace("%%FAMILY_INFO_JSON%%", json.dumps(context["family_info_records"]))
+        .replace("%%HAVE_GENERAX_JSON%%", json.dumps(context["have_generax"]))
+        .replace("%%NO_TREE_GENES_JSON%%", json.dumps(context["no_tree_genes"]))
+    )
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    html = render_report_html(build_report_context(args))
     Path(args.output).write_text(html, encoding="utf-8")
     print(f"Report written to {args.output}", file=sys.stderr)
 

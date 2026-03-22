@@ -36,14 +36,36 @@ Multi-species proteomes
 
 ## Requirements
 
-**Environment:** all dependencies are defined in `workflow/environment.yaml`.
+**Environment:** `workflow/environment.yaml` is the original Linux/HPC export.
+For local macOS work on Apple Silicon, use the Rosetta/x86_64 environment in
+`workflow/environment.macos-x86_64.yaml`.
 
 ```bash
 mamba env create -f workflow/environment.yaml
 mamba activate phylo
 ```
 
-Key tools: HMMER, MAFFT, IQ-TREE2, FastTree, MCL, GeneRax, POSSVM, PastML, ete3, Python 3.9.
+On Apple Silicon Macs:
+
+```bash
+conda create -n phylo-macos
+conda activate phylo-macos
+conda config --env --set subdir osx-64
+mamba env update -n phylo-macos -f workflow/environment.macos-x86_64.yaml
+```
+
+If `mamba` is not installed, use:
+
+```bash
+conda env update -n phylo-macos -f workflow/environment.macos-x86_64.yaml
+```
+
+The Nextflow config sets `PYTHONNOUSERSITE=1` for local and slurm runs so
+user-level `~/.local` Python packages do not override the environment.
+The macOS environment uses Python 3.10 because the current `clipkit` build
+requires it for the alignment trimming step in `step2.nf`.
+
+Key tools: HMMER, MAFFT, IQ-TREE2, FastTree, MCL, GeneRax, POSSVM, PastML, ete3, Python 3.10.
 
 **On the CRG HPC**, load the required modules before running any pipeline:
 ```bash
@@ -81,6 +103,7 @@ Here, use the database from Xavi.
 
 ```bash
 bash workflow/prepare_fasta.sh species_list data/input.fasta
+bash workflow/prepare_fasta.sh species_list data/input.fasta /path/to/proteome_db
 ```
 
 Or concatenate custom proteomes into `data/input.fasta` directly.

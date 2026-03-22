@@ -1,12 +1,23 @@
 nextflow.enable.dsl=2
 params.ids           = "${projectDir}/ids.txt"
 params.resources_tsv = "${projectDir}/resources.tsv"
-params.run_generax   = params.run_generax ?: false
-params.OUTDIR        = "${projectDir}/results"
+params.run_generax   = params.containsKey('run_generax') ? params.run_generax : false
+params.OUTDIR        = params.containsKey('OUTDIR')
+    ? params.OUTDIR
+    : (params.containsKey('outdir') ? params.outdir : "${projectDir}/results")
 //params.MAFFT_OPT = "--maxiterate 1000 --localpair"
 
 
 params.tag_prefix = ''
+
+def countFastaSeqs(path) {
+    def n = 0
+    path.eachLine { line ->
+        if( line.startsWith('>') )
+            n++
+    }
+    return n
+}
 
 def res = [:]
 
@@ -50,7 +61,25 @@ if( params.resources_tsv && file(params.resources_tsv).exists() ) {
         res[rid] = m
     }
 }
-Channel.fromPath(params.ids).splitText().map { it.trim() }.filter { it }.map { id -> tuple(id, file("${projectDir}/results/clusters/${id}.fasta")) }.set { hg_fastas }
+
+if( params.ids && file(params.ids).exists() ) {
+    Channel
+        .fromPath(params.ids)
+        .splitText()
+        .map { it.trim() }
+        .filter { it }
+        .map { id -> tuple(id, file("${params.OUTDIR}/clusters/${id}.fasta")) }
+        .filter { id, fasta -> countFastaSeqs(fasta) >= 2 }
+        .set { hg_fastas }
+}
+else {
+    Channel
+        .fromPath("${params.OUTDIR}/clusters/*.fasta")
+        .map { fasta -> tuple(fasta.baseName, fasta) }
+        .filter { id, fasta -> countFastaSeqs(fasta) >= 2 }
+        .set { hg_fastas }
+}
+
 process ALN {
 
     tag "${id}"
@@ -77,13 +106,23 @@ process ALN {
         ln -s ${existing} ${id}.aln.fasta
         """
     }
-    else {
-        """
-        python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
-        python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
-        mv ${id}.aln.fasta_tmp ${id}.aln.fasta
-        """
-    }
+	    else {
+	        """
+	        export PYTHONNOUSERSITE=1
+	        NSEQ=\$(grep -c '^>' ${fasta} || true)
+	        if [[ "\$NSEQ" -lt 2 ]]; then
+	            echo "Alignment input for ${id} contains fewer than 2 sequences; cannot build a trimmed alignment." >&2
+	            exit 1
+	        fi
+	        if ! clipkit --help >/dev/null 2>&1; then
+	            echo "clipkit is required for Step 2 trimming but is not runnable in the current environment." >&2
+	            exit 1
+	        fi
+	        python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
+	        python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
+	        mv ${id}.aln.fasta_tmp ${id}.aln.fasta
+	        """
+	    }
 }
 process PHY {
 
@@ -138,11 +177,12 @@ process PHY {
             --iqtree2_model ${params.IQTREE2_MODEL}
         """
     }
-    else {
-        """
-        python ${projectDir}/phylogeny/main.py phylogeny \
-            -f ${aln} \
-            --outprefix ${id} \
+	    else {
+	        """
+	        export PYTHONNOUSERSITE=1
+	        python ${projectDir}/phylogeny/main.py phylogeny \
+	            -f ${aln} \
+	            --outprefix ${id} \
             -c ${task.cpus} \
             --method ${params.TREE_METHOD} \
             --iqtree2_model ${params.IQTREE2_MODEL}
@@ -182,11 +222,12 @@ process PVM {
 		      path("${id}.*.ortholog_groups.csv"),
 		      path("${id}.*.pairs_orthologs.csv")
 
-	script:
-	"""
-	python ${projectDir}/phylogeny/main.py possvm \
-	    -t ${tree} \
-	    --refsps ${params.REFSPECIES} \
+		script:
+		"""
+		export PYTHONNOUSERSITE=1
+		python ${projectDir}/phylogeny/main.py possvm \
+		    -t ${tree} \
+		    --refsps ${params.REFSPECIES} \
 	    -r ${refnames_file} \
 	    -o ${id}.
 	"""
@@ -209,11 +250,12 @@ process PVM_PREV {
 	      path("${id}.*.ortholog_groups.csv"),
 	      path("${id}.*.pairs_orthologs.csv")
 
-	script:
-	"""
-	python ${projectDir}/phylogeny/main.py possvm \
-	    -t ${tree} \
-	    --refsps ${params.REFSPECIES} \
+		script:
+		"""
+		export PYTHONNOUSERSITE=1
+		python ${projectDir}/phylogeny/main.py possvm \
+		    -t ${tree} \
+		    --refsps ${params.REFSPECIES} \
 	    -r ${refnames_file} \
 	    -o ${id}.
 	"""
@@ -236,11 +278,12 @@ process REPORT {
     output:
     path("report_step2.html")
 
-    script:
-    """
-    python ${projectDir}/workflow/report_step2.py \
-        --possvm_dir      ${params.OUTDIR}/possvm \
-        --possvm_prev_dir ${params.OUTDIR}/possvm_prev \
+	    script:
+	    """
+	    export PYTHONNOUSERSITE=1
+	    python ${projectDir}/workflow/report_step2.py \
+	        --possvm_dir      ${params.OUTDIR}/possvm \
+	        --possvm_prev_dir ${params.OUTDIR}/possvm_prev \
         --search_dir      ${params.OUTDIR}/search \
         --cluster_dir     ${params.OUTDIR}/clusters \
         --family_info     ${projectDir}/data/gene_families_searchinfo.csv \
@@ -317,9 +360,10 @@ process GR_watcher {
     }
     else {
         """
-        set -euo pipefail
+	        set -euo pipefail
+	        export PYTHONNOUSERSITE=1
 
-        export OMP_NUM_THREADS=${task.cpus}
+	        export OMP_NUM_THREADS=${task.cpus}
         export OPENBLAS_NUM_THREADS=${task.cpus}
         export MKL_NUM_THREADS=${task.cpus}
         export NUMEXPR_NUM_THREADS=${task.cpus}
