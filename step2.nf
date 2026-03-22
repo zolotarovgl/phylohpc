@@ -1,6 +1,16 @@
 nextflow.enable.dsl=2
 params.ids           = "${projectDir}/ids.txt"
 params.resources_tsv = "${projectDir}/resources.tsv"
+params.family_info   = params.containsKey('family_info')
+    ? params.family_info
+    : (params.containsKey('genefam_info')
+        ? params.genefam_info
+        : (file("${projectDir}/genefam.csv").exists()
+            ? "${projectDir}/genefam.csv"
+            : "${projectDir}/data/gene_families_searchinfo.csv"))
+params.species_tree  = params.containsKey('species_tree')
+    ? params.species_tree
+    : "${projectDir}/data/species_tree.full.newick"
 params.run_generax   = params.containsKey('run_generax') ? params.run_generax : false
 params.OUTDIR        = params.containsKey('OUTDIR')
     ? params.OUTDIR
@@ -284,11 +294,11 @@ process REPORT {
 	    python ${projectDir}/workflow/report_step2.py \
 	        --possvm_dir      ${params.OUTDIR}/possvm \
 	        --possvm_prev_dir ${params.OUTDIR}/possvm_prev \
-        --search_dir      ${params.OUTDIR}/search \
-        --cluster_dir     ${params.OUTDIR}/clusters \
-        --family_info     ${projectDir}/data/gene_families_searchinfo.csv \
-        --species_tree    ${projectDir}/data/species_tree.full.newick \
-        --output report_step2.html
+	        --search_dir      ${params.OUTDIR}/search \
+	        --cluster_dir     ${params.OUTDIR}/clusters \
+	        --family_info     ${params.family_info} \
+	        --species_tree    ${params.species_tree} \
+	        --output          report_step2.html
     """
 }
 
