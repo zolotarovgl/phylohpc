@@ -257,8 +257,10 @@ def main() -> None:
                 node_rows.append(dict(og=og, node=node_id, P_present=round(float(p1), 4)))
 
     # ── Write outputs ─────────────────────────────────────────────────────────
-    pd.DataFrame(results).to_csv(args.output, sep="\t", index=False)
-    pd.DataFrame(node_rows).to_csv(args.node_probs, sep="\t", index=False)
+    results_cols  = ["og", "n_present", "n_total", "P_at_root", "support"]
+    node_cols     = ["og", "node", "P_present"]
+    pd.DataFrame(results,  columns=results_cols).to_csv(args.output,     sep="\t", index=False)
+    pd.DataFrame(node_rows, columns=node_cols).to_csv(args.node_probs, sep="\t", index=False)
 
     print(f"Written: {args.output}", file=sys.stderr)
     print(f"Written: {args.node_probs}", file=sys.stderr)
