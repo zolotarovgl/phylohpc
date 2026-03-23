@@ -292,11 +292,12 @@ Determines which orthogroups were likely present in the last common ancestor (LC
 ### Run
 
 ```bash
+cat ids.txt | grep -E 'Fork|RFX' > ancestry_ids.txt
 # Single clade
 nextflow run step4.ancestry.nf \
     -profile local,fast \
     --node_names Bilateria \
-    --ids ids.txt
+    --ids ancestry_ids.txt
 
 # Multiple clades in one run
 nextflow run step4.ancestry.nf \
@@ -338,18 +339,6 @@ nextflow run step4.ancestry.nf \
 | `n_total` | Total in-clade species with data |
 | `P_at_root` | Marginal posterior probability of presence at the LCA |
 | `support` | Classification: `present` (≥0.9), `likely_present` (≥0.5), `likely_absent` (≥0.1), `absent` |
-
-### Interactive visualisation
-
-The pipeline automatically generates `{node}.html` — a self-contained D3.js visualisation. Open it in any browser, no server required.
-
-**Features:**
-- Collapsible horizontal dendrogram — click any internal node to fold/unfold its subtree
-- Nodes coloured on a diverging **red → white → blue** scale by `P(present)` for the selected OG
-- Leaf nodes coloured by observed presence/absence (red = absent, blue = present)
-- Left sidebar: OGs grouped by gene-family class and HG, searchable, with `n/total`, `P_at_root`, and colour-coded support badges
-- Hover tooltip: node name, probability, clade size
-- Zoom and pan
 
 The visualisation can also be generated independently from existing outputs:
 
