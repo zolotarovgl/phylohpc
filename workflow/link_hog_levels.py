@@ -6,8 +6,13 @@ For each pair of adjacent taxonomic levels (ordered broad→narrow via --levels)
 shared genes between the POSSVM outputs at adjacent levels determine the
 parent→child OG relationships.
 
-Input CSV filename convention: {level}.{hg}.ortholog_groups.csv
-POSSVM CSV columns (no header): gene_id  og_name  ref_og  ref_gene_name
+IMPORTANT: POSSVM assigns OGs to every sequence in the gene tree regardless of
+the --outgroup flag (which only controls rooting).  The --in_species files must
+be provided so that out-of-clade sequences are excluded before building links.
+
+Input CSV filename convention:    {level}.{hg}.ortholog_groups.csv
+In-species file name convention:  {level}.in_species.txt
+POSSVM CSV columns (no header):   gene_id  og_name  ref_og  ref_gene_name
 
 Outputs:
   {hg}.og_links.tsv  — parent_level, parent_og, child_level, child_og, n_genes
@@ -47,7 +52,7 @@ def parse_possvm_csv(path: Path) -> dict[str, str]:
     return mapping
 
 
-def extract_level(csv_path: str, hg: str) -> str:
+def extract_level_from_csv(csv_path: str, hg: str) -> str:
     """
     Extract the clade level name from a POSSVM CSV filename.
     Filename format: {level}.{hg}.ortholog_groups.csv
@@ -64,6 +69,27 @@ def extract_level(csv_path: str, hg: str) -> str:
     return stem
 
 
+def load_in_species(paths: list[str]) -> dict[str, set[str]]:
+    """
+    Parse a list of {level}.in_species.txt files.
+    Returns {level: set_of_species_prefixes}.
+    """
+    result: dict[str, set[str]] = {}
+    for path in paths:
+        name = Path(path).name
+        if not name.endswith(".in_species.txt"):
+            continue
+        level = name[: -len(".in_species.txt")]
+        species: set[str] = set()
+        with open(path) as fh:
+            for line in fh:
+                s = line.strip()
+                if s:
+                    species.add(s)
+        result[level] = species
+    return result
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -76,6 +102,10 @@ def main() -> None:
                         help="Ordered clade names, comma-separated (broad→narrow)")
     parser.add_argument("--csvs",         nargs="+", required=True,
                         help="POSSVM ortholog_groups CSV files for this HG")
+    parser.add_argument("--in_species",  nargs="+", default=[],
+                        help="{level}.in_species.txt files; used to discard "
+                             "out-of-clade sequences that POSSVM classifies "
+                             "regardless of --outgroup")
     parser.add_argument("--output_links", required=True,
                         help="Output edges TSV: parent_og → child_og")
     parser.add_argument("--output_stats", required=True,
@@ -84,10 +114,24 @@ def main() -> None:
 
     ordered_levels = [lv.strip() for lv in args.levels.split(",") if lv.strip()]
 
+    # In-species sets per level (may be empty if files not provided)
+    in_species_map = load_in_species(args.in_species) if args.in_species else {}
+    if in_species_map:
+        print(
+            f"  In-species loaded for levels: {sorted(in_species_map)}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "  WARNING: No --in_species files provided; out-of-clade sequences "
+            "will NOT be filtered from POSSVM output.",
+            file=sys.stderr,
+        )
+
     # ── Load each CSV and map it to its clade level ────────────────────────────
     level_data: dict[str, dict[str, str]] = {}   # level → {gene: og}
     for csv_path in args.csvs:
-        level = extract_level(csv_path, args.hg)
+        level = extract_level_from_csv(csv_path, args.hg)
         if level not in ordered_levels:
             print(
                 f"  WARNING: Level '{level}' inferred from '{Path(csv_path).name}' "
@@ -95,7 +139,21 @@ def main() -> None:
                 file=sys.stderr,
             )
             continue
-        gene_og = parse_possvm_csv(Path(csv_path))
+        raw = parse_possvm_csv(Path(csv_path))
+        # Filter to in-clade species only
+        in_sps = in_species_map.get(level)
+        if in_sps:
+            gene_og = {g: og for g, og in raw.items()
+                       if get_species_prefix(g) in in_sps}
+            n_dropped = len(raw) - len(gene_og)
+            if n_dropped:
+                print(
+                    f"  Level '{level}': dropped {n_dropped} out-of-clade genes "
+                    f"(kept {len(gene_og)})",
+                    file=sys.stderr,
+                )
+        else:
+            gene_og = raw
         if gene_og:
             level_data[level] = gene_og
         else:

@@ -103,6 +103,11 @@ process PVM_CLADE {
 // parent→child OG relationship table based on shared gene membership.
 // A Metazoa OG splitting into 4 Vertebrata OGs (WGD) will appear as
 // one parent row with four children.
+//
+// NOTE: POSSVM classifies every sequence in the gene tree regardless of the
+// --outgroup flag (outgroup only controls rooting).  The in_species files are
+// therefore passed explicitly so link_hog_levels.py can drop out-of-clade
+// sequences before computing cross-level gene overlaps.
 
 process LINK_HOGS {
 
@@ -111,7 +116,7 @@ process LINK_HOGS {
     publishDir "${params.OUTDIR}/ancestry/hog_links", mode: 'copy'
 
     input:
-    tuple val(id), val(nodes), path(csvs)
+    tuple val(id), val(nodes), path(csvs), path(in_species_files)
     val(levels_str)
 
     output:
@@ -120,9 +125,10 @@ process LINK_HOGS {
     script:
     """
     python ${projectDir}/workflow/link_hog_levels.py \
-        --hg     '${id}' \
-        --levels '${levels_str}' \
-        --csvs   ${csvs} \
+        --hg         '${id}' \
+        --levels     '${levels_str}' \
+        --csvs       ${csvs} \
+        --in_species ${in_species_files} \
         --output_links ${id}.og_links.tsv \
         --output_stats ${id}.og_stats.tsv
     """
@@ -178,11 +184,17 @@ workflow {
     pvm_out = pvm_input | PVM_CLADE
     // pvm_out: (node, id, og_csv)
 
-    // Step 3: group all clade-level results for the same HG and link OGs
+    // Step 3: group all clade-level results for the same HG and link OGs.
+    // Attach the per-clade in_species file so out-of-clade sequences
+    // (which POSSVM classifies regardless of --outgroup) are filtered out.
+    node_insp = clade_info.map { node, in_sp, ign_sp, pruned -> tuple(node, in_sp) }
+
     link_in = pvm_out
-        .map   { node, id, csv -> tuple(id, node, csv) }
+        .combine(node_insp, by: 0)
+        // (node, id, csv, in_sp)
+        .map   { node, id, csv, in_sp -> tuple(id, node, csv, in_sp) }
         .groupTuple(by: 0)
-    // link_in: (id, [node1, node2, ...], [csv1, csv2, ...])
+    // link_in: (id, [nodes], [csvs], [in_species_files])
 
     link_out = LINK_HOGS(link_in, levels_val)
     // link_out: (links_tsv, stats_tsv)
