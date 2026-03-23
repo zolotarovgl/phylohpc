@@ -11,6 +11,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "workflow"))
 import report_step2 as r2
 
 
+def write_family_info(tmp_path, *families):
+    path = tmp_path / "family_info.tsv"
+    lines = [
+        f"{family}\tPF00001\t-\t-\t-\tcategory\t{family}_class\n"
+        for family in families
+    ]
+    path.write_text("".join(lines))
+    return path
+
+
 # ── get_species_prefix ────────────────────────────────────────────────────────
 
 def test_prefix_underscore():
@@ -52,7 +62,7 @@ def test_load_og_csv_skips_comments(tmp_path):
 def test_gene_tree_to_dict_leaf():
     pytest.importorskip("ete3")
     from ete3 import Tree
-    t = Tree("(Mmus_g1:0.1);")
+    t = Tree("(Mmus_g1:0.1);", format=1)
     d = r2.gene_tree_to_dict(t.get_leaves()[0])
     assert d["leaf"] is True
     assert d["name"] == "Mmus_g1"
@@ -61,7 +71,7 @@ def test_gene_tree_to_dict_leaf():
 def test_gene_tree_to_dict_internal_og():
     pytest.importorskip("ete3")
     from ete3 import Tree
-    t = Tree("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);")
+    t = Tree("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);", format=1)
     d = r2.gene_tree_to_dict(t)
     og_node = d["children"][0]
     assert og_node["name"] == "OG_0001"
@@ -163,9 +173,14 @@ def test_html_output_structure(tmp_path):
     pytest.importorskip("ete3")
     nwk = tmp_path / "Pre.TF.HG00001.treefile.ortholog_groups.newick"
     nwk.write_text("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);")
+    family_info = write_family_info(tmp_path, "TF")
 
     out = tmp_path / "report.html"
-    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    r2.main([
+        "--possvm_dir", str(tmp_path),
+        "--family_info", str(family_info),
+        "--output", str(out),
+    ])
     html = out.read_text()
 
     assert "Step 2 Report" in html
@@ -194,9 +209,14 @@ def test_html_family_grouping(tmp_path):
     (tmp_path / "Pre.RBP.HG00002.treefile.ortholog_groups.newick").write_text(
         "((Mmus_g2:0.1,Hsap_g2:0.1)OG_0002:0.2);"
     )
+    family_info = write_family_info(tmp_path, "TF", "RBP")
 
     out = tmp_path / "report.html"
-    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    r2.main([
+        "--possvm_dir", str(tmp_path),
+        "--family_info", str(family_info),
+        "--output", str(out),
+    ])
     html = out.read_text()
 
     start = html.index("const TREE_INDEX")
@@ -214,9 +234,14 @@ def test_lazy_script_tags(tmp_path):
         (tmp_path / f"Pre.{fam}.{hg}.treefile.ortholog_groups.newick").write_text(
             "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
         )
+    family_info = write_family_info(tmp_path, "TF", "RBP")
 
     out = tmp_path / "report.html"
-    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    r2.main([
+        "--possvm_dir", str(tmp_path),
+        "--family_info", str(family_info),
+        "--output", str(out),
+    ])
     html = out.read_text()
 
     assert html.count('id="treedata-') == 2
@@ -245,12 +270,14 @@ def test_heatmap_data_in_html(tmp_path):
     (possvm / "Pre.Wnt.HG001.treefile.ortholog_groups.newick").write_text(
         "((Mmus_g1:0.1,Hsap_g2:0.1)OG_X:0.2);"
     )
+    family_info = write_family_info(tmp_path, "Wnt")
 
     out = tmp_path / "report.html"
     r2.main([
         "--possvm_dir", str(possvm),
         "--search_dir", str(search),
         "--cluster_dir", str(cluster),
+        "--family_info", str(family_info),
         "--output", str(out),
     ])
     html = out.read_text()
@@ -271,9 +298,14 @@ def test_clade_data_empty_when_no_tree(tmp_path):
     pytest.importorskip("ete3")
     nwk = tmp_path / "Pre.TF.HG00001.treefile.ortholog_groups.newick"
     nwk.write_text("((Mmus_g1:0.1,Hsap_g1:0.1)OG_0001:0.2);")
+    family_info = write_family_info(tmp_path, "TF")
 
     out = tmp_path / "report.html"
-    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    r2.main([
+        "--possvm_dir", str(tmp_path),
+        "--family_info", str(family_info),
+        "--output", str(out),
+    ])
     html = out.read_text()
 
     start = html.index("const CLADE_DATA")
@@ -295,9 +327,10 @@ def test_prev_tree_in_lazy_data(tmp_path):
         (d / "Pre.TF.HG001.treefile.ortholog_groups.newick").write_text(
             "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
         )
+    family_info = write_family_info(tmp_path, "TF")
     out = tmp_path / "report.html"
     r2.main(["--possvm_dir", str(possvm), "--possvm_prev_dir", str(prev),
-             "--output", str(out)])
+             "--family_info", str(family_info), "--output", str(out)])
     html = out.read_text()
 
     # Parse the single treedata- script tag
@@ -317,9 +350,10 @@ def test_has_prev_in_index(tmp_path):
         (d / "Pre.TF.HG001.treefile.ortholog_groups.newick").write_text(
             "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
         )
+    family_info = write_family_info(tmp_path, "TF")
     out = tmp_path / "report.html"
     r2.main(["--possvm_dir", str(possvm), "--possvm_prev_dir", str(prev),
-             "--output", str(out)])
+             "--family_info", str(family_info), "--output", str(out)])
     html = out.read_text()
 
     start = html.index("const TREE_INDEX")
@@ -335,8 +369,13 @@ def test_has_prev_false_without_prev_dir(tmp_path):
     (tmp_path / "Pre.TF.HG001.treefile.ortholog_groups.newick").write_text(
         "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
     )
+    family_info = write_family_info(tmp_path, "TF")
     out = tmp_path / "report.html"
-    r2.main(["--possvm_dir", str(tmp_path), "--output", str(out)])
+    r2.main([
+        "--possvm_dir", str(tmp_path),
+        "--family_info", str(family_info),
+        "--output", str(out),
+    ])
     html = out.read_text()
 
     start = html.index("const TREE_INDEX")
@@ -344,3 +383,40 @@ def test_has_prev_false_without_prev_dir(tmp_path):
     json_start = chunk.index("[")
     parsed = json.loads(chunk[json_start: chunk.index(";", json_start)])
     assert parsed[0]["has_prev"] is False
+
+
+def test_prev_only_report_marks_no_generax(tmp_path):
+    """Prev-only HGs should not enable GeneRax-specific UI state or counts."""
+    pytest.importorskip("ete3")
+    prev = tmp_path / "prev"
+    prev.mkdir()
+    (prev / "Pre.TF.HG001.treefile.ortholog_groups.newick").write_text(
+        "((Mmus_g1:0.1,Hsap_g1:0.1)OG_X:0.2);"
+    )
+    family_info_path = write_family_info(tmp_path, "TF")
+
+    out = tmp_path / "report.html"
+    r2.main([
+        "--possvm_dir", str(tmp_path / "missing-possvm"),
+        "--possvm_prev_dir", str(prev),
+        "--family_info", str(family_info_path),
+        "--output", str(out),
+    ])
+    html = out.read_text()
+
+    start = html.index("const HAVE_GENERAX")
+    chunk = html[start: start + 100]
+    assert "false" in chunk.lower()
+
+    start = html.index("const TREE_INDEX")
+    chunk = html[start: start + 3000]
+    json_start = chunk.index("[")
+    tree_index = json.loads(chunk[json_start: chunk.index(";", json_start)])
+    assert tree_index[0]["source"] == "prev"
+
+    start = html.index("const FAMILY_INFO")
+    chunk = html[start: start + 3000]
+    json_start = chunk.index("[")
+    family_info = json.loads(chunk[json_start: chunk.index(";", json_start)])
+    assert family_info[0]["n_trees"] == 1
+    assert family_info[0]["n_generax"] == 0

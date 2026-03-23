@@ -1,0 +1,37 @@
+name: phylo-macos
+channels:
+  - conda-forge
+  - bioconda
+  - etetoolkit
+  - nodefaults
+dependencies:
+  - python=3.10
+  - biopython=1.81
+  - ete3=3.1.2
+  - numpy=1.24.*
+  - scipy=1.10.*
+  - pandas=1.5.*
+  - networkx
+  - pyyaml
+  - lxml
+  - requests
+  - packaging
+  - pytest
+  - pytest-cov
+  - hmmer
+  - mafft
+  - iqtree
+  - fasttree
+  - mcl
+  - diamond
+  - mmseqs2
+  - samtools
+  - bedtools
+  - clipkit
+  - taxonkit
+  - pastml
+  - simple_slurm
+  - toml
+  - tqdm
+  - gawk
+  - wget

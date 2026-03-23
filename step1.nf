@@ -33,10 +33,10 @@ workflow {
             tuple(pref, family)
         }
 
-	genefam_ch = Channel.value( file(params.genefam_info) )
-	infasta_ch = Channel.value( file(params.infasta) )
+    def genefam_ch = Channel.value(file(params.genefam_info))
+    def infasta_ch = Channel.value(file(params.infasta))
 
-	def search = SEARCH(families_ch, genefam_ch, infasta_ch)
+    def search = SEARCH(families_ch, genefam_ch, infasta_ch)
 
     def nonempty = search.main
         .filter { pref, family, fasta -> fasta && fasta.size() > 0 }
@@ -78,6 +78,7 @@ process SEARCH {
   script:
   """
 	set -e
+	export PYTHONNOUSERSITE=1
 	echo "Running hmmsearch for ${family}"
 
 	python ${projectDir}/phylogeny/main.py hmmsearch \
@@ -117,6 +118,7 @@ process CLUSTER {
 	script:
 	"""
 	echo "Clustering: ${domains_fasta}"
+	export PYTHONNOUSERSITE=1
 
 	python ${projectDir}/phylogeny/main.py cluster \
 		-f ${domains_fasta} \
@@ -124,6 +126,12 @@ process CLUSTER {
 		-c ${task.cpus} \
 		-m ${params.max_n} \
 		-i ${params.s2_inflation}
+
+	samtools faidx ${domains_fasta}
+	while read -r ID; do
+		[ -n "\$ID" ] || continue
+		xargs samtools faidx ${domains_fasta} < <(awk -v ID="\$ID" '\$1==ID { print \$2 }' ${pref}.${family}_cluster.tsv) > ${pref}.${family}.\${ID}.fasta
+	done < <(cut -f 1 ${pref}.${family}_cluster.tsv | sort -u)
 
 	# Guarantee structural outputs
 	touch ${pref}.${family}_cluster.tsv
