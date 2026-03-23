@@ -210,11 +210,13 @@ def build_family_records(search_dir: Path, family_info: dict) -> list:
         for g in genes:
             sp_counts[get_species_prefix(g)] += 1
         cls = family_info.get(family, pref)
+        annotated = family in family_info
         records.append({
             "id": f"{pref}.{family}",
             "family": family,
             "pref": pref,
             "class": cls,
+            "annotated": annotated,
             "species_counts": dict(sp_counts),
             "total": len(genes),
         })
@@ -236,12 +238,14 @@ def build_hg_records(cluster_dir: Path, family_info: dict) -> list:
         if not sp_counts:
             continue
         cls = family_info.get(family, pref)
+        annotated = family in family_info
         records.append({
             "id": stem,
             "family": family,
             "pref": pref,
             "hg": hg_id,
             "class": cls,
+            "annotated": annotated,
             "species_counts": sp_counts,
             "total": sum(sp_counts.values()),
         })
@@ -764,6 +768,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
               <div class="ctrl-panel-body">
                 <button class="ctrl-btn" id="btn-og-labels" onclick="toggleOGLabels()" title="Show OG name at the MRCA (deepest shared ancestor) of each orthogroup">OG labels</button>
                 <button class="ctrl-btn" id="btn-support" onclick="toggleSupport()" title="Show bootstrap / SH-aLRT support values at internal nodes">Support</button>
+                <button class="ctrl-btn" id="btn-ds-nodes" onclick="toggleDSNodes()" title="Show duplication (D) and speciation (S) node types — requires POSSVM to be run first">D/S nodes</button>
                 <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()" title="Draw branches proportional to evolutionary distance instead of a cladogram">Branch lengths</button>
                 <span class="ctrl-field">
                   Tip:
@@ -1125,6 +1130,7 @@ let showGeneId    = true;        // tip label parts
 let showOGName    = true;
 let showRefOrtho  = true;
 let showSupport        = false;   // show internal node support values
+let showDSNodes        = false;   // show D/S event type at every internal node (POSSVM)
 let hideNonHl          = false;   // hide non-highlighted tip labels when hlSet active
 let focusCollapseAsTri = true;    // true=triangle (MRCA), false=circle for focus/hide-nonhl collapses
 let hmFocusGids        = null;    // Set<gene_id> when navigating from heatmap cell; null otherwise
@@ -1562,6 +1568,7 @@ function collectLeafGenes(children) {
   });
   document.getElementById("ccp-reroot").addEventListener("click",()=>{
     const node=_ccpNode; if(!node) return; hide();
+    _userRerooted=true;
     rerootAtNode(node);
   });
   document.getElementById("ccp-compare").addEventListener("click",()=>{
@@ -2177,7 +2184,7 @@ function drawHeatmap() {
   if (hmViewMode==="class") {
     // aggregate FAMILY_DATA by class
     const map={};
-    FAMILY_DATA.filter(d=>prefix==="all"||d.pref===prefix).forEach(d=>{
+    FAMILY_DATA.filter(d=>d.annotated&&(prefix==="all"||d.pref===prefix)).forEach(d=>{
       const cls=d.class||d.pref||"other";
       if(!map[cls]) map[cls]={id:cls,class:cls,species_counts:{}};
       for(const [sp,n] of Object.entries(d.species_counts))
@@ -3683,6 +3690,12 @@ function toggleSupport(){
   if(rootNode) renderTree(false);
 }
 
+function toggleDSNodes(){
+  showDSNodes=!showDSNodes;
+  document.getElementById("btn-ds-nodes").classList.toggle("active-btn", showDSNodes);
+  if(rootNode) renderTree(false);
+}
+
 // ── Mini species tree floating panel ──────────────────────────────────────────
 function toggleMiniSpPanel(ev){
   const panel=document.getElementById("mini-sp-panel");
@@ -3774,6 +3787,8 @@ function drawMiniSpTree(){
 let _pvmActive=false;          // true while POSSVM OGs are displayed
 let _pvmIngroupSps=null;       // Set of ingroup species used in last POSSVM run
 let _pvmOgs=null;              // interactive POSSVM OGs for the current tree
+let _pvmMidpointApplied=false; // midpoint root was applied for current tree
+let _userRerooted=false;       // user explicitly rerooted via the clade popup
 const _pvmOgHlPalette=["#a8d8ea","#ffcef3","#d4f1c4","#ffd6a5","#e2d0f8","#c8f0de","#ffe4a8","#ffd0d0","#b3e5d4","#fce4b4"];
 let _pvmCladeOpen=false;       // whether the clade-picker tree is visible
 let _pvmHogCladeOpen=false;    // whether the hOG clade-picker tree is visible
@@ -4138,6 +4153,7 @@ function pvmMidpointRoot(){
     });
   }
   if(bestNode&&bestNode.parent) rerootAtNode(bestNode, bestSplit);
+  _pvmMidpointApplied=true;
   document.getElementById("possvm-result").textContent="Midpoint root applied.";
 }
 
@@ -4294,6 +4310,9 @@ function runPossvm(){
   if(!rootNode){document.getElementById("possvm-result").textContent="No tree loaded."; return;}
   const ingroupSps=new Set([...document.querySelectorAll("[data-pvm-sp]:checked")].map(cb=>cb.value));
   if(!ingroupSps.size){document.getElementById("possvm-result").textContent="Select at least one species."; return;}
+  // Auto-apply midpoint root if neither the user nor pvmMidpointRoot has rerooted this tree.
+  // POSSVM D/S classification is root-dependent; midpoint root gives the most neutral starting point.
+  if(!_pvmMidpointApplied&&!_userRerooted) pvmMidpointRoot();
   const sos=parseFloat(document.getElementById("possvm-sos").value);
   const result=computePossvmAssignments(rootNode, ingroupSps, sos);
   applyPossvmRun(result.ogs, ingroupSps);
@@ -4657,6 +4676,7 @@ function pvmReset(){
   cladeHighlights.forEach((rec,uid)=>{ if(rec._fromOgHl) cladeHighlights.delete(uid); });
   _ogHlActive=false;
   document.getElementById("btn-highlight-ogs").classList.remove("active-btn");
+  if(showDSNodes){ showDSNodes=false; document.getElementById("btn-ds-nodes").classList.remove("active-btn"); }
   colorMode="og";
   rebuildOgColors();
   const n=Object.keys(activeOgs()).length;
@@ -4724,6 +4744,7 @@ function drawGeneTree(treeData, opts){
     document.getElementById("btn-reset-root").style.display="inline";
   } else {
     _isRerooted=false; _origTreeDictForReroot=null;
+    _pvmMidpointApplied=false; _userRerooted=false;
     document.getElementById("btn-reset-root").style.display="none";
   }
   renderTree(false);
@@ -4903,6 +4924,7 @@ function renderTree(animate){
     .attr("cx",0)   // reset any offset from manual-collapse state
     .attr("r",d=>{
       if(d.data.leaf) return tipFontSVG()*0.36;
+      if(showDSNodes&&_pvmActive&&d._pvmEvent) return tipFontSVG()*0.55;
       if(_pvmActive&&d._pvmEvent==="D") return tipFontSVG()*0.55;
       const isOGlbl=showOGLabels&&(isOGNode(d)||d.data._og_label);
       if(isOGlbl) return tipFontSVG()*0.55;
@@ -4922,6 +4944,8 @@ function renderTree(animate){
         const c=leafColor(d.data.species||"");
         return hlSet&&!hlSet.has(d.data.species||"")?"#e8e8e8":c;
       }
+      if(showDSNodes&&_pvmActive&&d._pvmEvent==="D") return "#e67e22";
+      if(showDSNodes&&_pvmActive&&d._pvmEvent==="S") return "#27ae60";
       if(_pvmActive&&d._pvmEvent==="D") return "#111";
       if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return "#222";
       if(isOGNode(d))return "#e74c3c";
@@ -4929,6 +4953,8 @@ function renderTree(animate){
     })
     .attr("stroke",d=>{
       if(d.data.leaf) return "none";
+      if(showDSNodes&&_pvmActive&&d._pvmEvent==="D") return "#c0392b";
+      if(showDSNodes&&_pvmActive&&d._pvmEvent==="S") return "#1e8449";
       if(_pvmActive&&d._pvmEvent==="D") return "#000";
       if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return "#000";
       if(isOGNode(d)) return "#b03a2e";
@@ -4936,6 +4962,7 @@ function renderTree(animate){
     })
     .attr("stroke-width",d=>{
       if(d.data.leaf) return null;
+      if(showDSNodes&&_pvmActive&&d._pvmEvent) return 1.5;
       if(_pvmActive&&d._pvmEvent==="D") return 2;
       if(showOGLabels&&(isOGNode(d)||d.data._og_label)) return 2;
       if(isOGNode(d)) return 1.8;
