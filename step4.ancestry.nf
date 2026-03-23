@@ -133,7 +133,8 @@ process ANCESTRAL_RECON {
     output:
     tuple val(node),
           path("${node}.ancestral_states.tsv"),
-          path("${node}.node_probs.tsv")
+          path("${node}.node_probs.tsv"),
+          path(pruned_tree)
 
     script:
     """
@@ -215,12 +216,12 @@ workflow {
 
     asr_out = asr_input | ANCESTRAL_RECON
 
-    // Step 5
+    // Step 5 — pruned_tree flows through from ANCESTRAL_RECON output
     viz_input = asr_out
         .join(pam_out)
-        .join(
-            clade_info.map { node, in_sp, ign_sp, pruned -> tuple(node, pruned) }
-        )
+        .map { node, states, node_probs, pruned_tree, pam ->
+            tuple(node, states, node_probs, pam, pruned_tree)
+        }
 
     viz_input | VISUALIZE
 }
