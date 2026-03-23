@@ -173,32 +173,67 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    # ── Separate constant OGs (all-0 or all-1) from variable ones ────────────
+    # PastML's F81 model requires ≥2 distinct states per column; constant
+    # columns cause a matrix-shape crash.  Handle them trivially.
+    n_species   = pam.shape[0]
+    const_ones  = [og for og in pam.columns if int(pam[og].sum()) == n_species]
+    const_zeros = [og for og in pam.columns if int(pam[og].sum()) == 0]
+    variable_ogs = [og for og in pam.columns
+                    if og not in const_ones and og not in const_zeros]
+
+    if const_ones or const_zeros:
+        print(
+            f"  Skipping PastML for {len(const_ones)} all-present and "
+            f"{len(const_zeros)} all-absent OGs (trivial states).",
+            file=sys.stderr,
+        )
+
     # ── Prepare PastML input ──────────────────────────────────────────────────
     # Rename OG columns to safe aliases (og0, og1, …) to avoid issues with
     # dots/special characters in OG names being mangled in output filenames.
-    og_list   = pam.columns.tolist()
-    col_alias = {og: f"og{i}" for i, og in enumerate(og_list)}
+    col_alias = {og: f"og{i}" for i, og in enumerate(variable_ogs)}
     alias_og  = {v: k for k, v in col_alias.items()}
 
     work_dir  = Path("pastml_work")
     work_dir.mkdir(exist_ok=True)
 
-    pastml_data = pam.rename(columns=col_alias).astype(str)
-    pastml_data.index.name = "node"
-    data_path = work_dir / "input.tsv"
-    pastml_data.to_csv(data_path, sep="\t")
+    # ── Run PastML (only for variable OGs) ───────────────────────────────────
+    if variable_ogs:
+        pastml_data = pam[variable_ogs].rename(columns=col_alias).astype(str)
+        pastml_data.index.name = "node"
+        data_path = work_dir / "input.tsv"
+        pastml_data.to_csv(data_path, sep="\t")
 
-    # ── Run PastML ────────────────────────────────────────────────────────────
-    try:
-        run_pastml(args.tree, str(data_path), work_dir)
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        sys.exit(1)
+        try:
+            run_pastml(args.tree, str(data_path), work_dir)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
 
     # ── Parse outputs ─────────────────────────────────────────────────────────
     results   = []
     node_rows = []
 
+    # Trivially all-present OGs
+    for og in const_ones:
+        results.append(dict(
+            og=og, n_present=n_species, n_total=n_species,
+            P_at_root=1.0, support=classify_support(1.0),
+        ))
+        for node_id in list(internal_nodes) + ([root_name] if root_name else []):
+            node_rows.append(dict(og=og, node=node_id, P_present=1.0))
+
+    # Trivially all-absent OGs
+    for og in const_zeros:
+        results.append(dict(
+            og=og, n_present=0, n_total=n_species,
+            P_at_root=0.0, support=classify_support(0.0),
+        ))
+        for node_id in list(internal_nodes) + ([root_name] if root_name else []):
+            node_rows.append(dict(og=og, node=node_id, P_present=0.0))
+
+    # Variable OGs — parse PastML marginal probability files
     for alias, og in alias_og.items():
         n_present = int(pam[og].sum())
         n_total   = int(pam[og].notna().sum())
