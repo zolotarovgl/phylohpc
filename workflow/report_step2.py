@@ -1152,6 +1152,7 @@ const spMeta = (()=>{
 })();
 let spTreeWidthPct = 50;         // % of pane width used by species tree SVG
 let spPruneToData  = false;      // when true, drawSpeciesTree hides species absent from gene-tree data
+let SP_TREE_PRUNED = null;       // pruned tree used for the current display (set by drawSpeciesTree)
 const hlTagColors = ["#e74c3c","#3498db","#27ae60","#f39c12","#8e44ad","#16a085","#e67e22","#c0392b"];
 function hlTagColor(gi){ const q=hlQueries[gi]; return (q&&hlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
 function ogHlTagColor(gi){ const q=ogHlQueries[gi]; return (q&&ogHlQueryColors[q])||hlTagColors[gi%hlTagColors.length]; }
@@ -1964,6 +1965,7 @@ function drawSpeciesTree() {
   function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
 
   const tree = prune(clone(SP_TREE_DATA));
+  SP_TREE_PRUNED = tree;
   if(!tree){ wrap.innerHTML='<p style="padding:20px;color:#888">Species tree is empty.</p>'; return; }
 
   // ── assign stable IDs and depths ──────────────────────────────────────
@@ -2104,13 +2106,6 @@ function drawSpeciesTree() {
     n.children.forEach(drawInternals);
   }
   drawInternals(tree);
-
-  // ── tip legend (black = in gene trees, grey = absent) ─────────────────
-  const legX=W-rightM+8, legY=topM;
-  svg.append("circle").attr("cx",legX).attr("cy",legY).attr("r",4).attr("fill","#111");
-  svg.append("text").attr("x",legX+8).attr("y",legY).attr("dy","0.35em").attr("font-size",10).attr("fill","#444").text("in gene trees");
-  svg.append("circle").attr("cx",legX).attr("cy",legY+16).attr("r",4).attr("fill","#bbb");
-  svg.append("text").attr("x",legX+8).attr("y",legY+16).attr("dy","0.35em").attr("font-size",10).attr("fill","#888").text("absent");
 
   // ── leaf tips ─────────────────────────────────────────────────────────
   function drawLeaves(n){
@@ -3252,8 +3247,9 @@ function downloadTreePNG(){
 
 function downloadNewick(){
   if(!SP_TREE_DATA||!SP_TREE_DATA.children){ alert("No species tree loaded."); return; }
-  // Regenerate Newick from (possibly edited) SP_TREE_DATA so label edits are preserved
-  const nwk=treeToNewick(SP_TREE_DATA)+";";
+  // Use pruned tree when prune-to-data is active, otherwise full tree
+  const root = (spPruneToData && SP_TREE_PRUNED) ? SP_TREE_PRUNED : SP_TREE_DATA;
+  const nwk=treeToNewick(root)+";";
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([nwk],{type:"text/plain"}));
   a.download="species_tree.nwk";
