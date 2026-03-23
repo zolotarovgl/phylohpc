@@ -26,6 +26,7 @@ import json
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -151,6 +152,33 @@ def load_domain_hits(search_dir: Path) -> dict:
     for gene_id, gene_hits in hits.items():
         gene_hits.sort(key=lambda rec: (rec["start"], rec["end"], rec["name"]))
     return dict(hits)
+
+
+def load_reference_names(refnames_path: Optional[str], refsps: Optional[str] = None) -> dict:
+    """Return {gene_id: reference_name} from a POSSVM refnames table."""
+    if not refnames_path:
+        return {}
+    path = Path(refnames_path)
+    if not path.exists():
+        return {}
+    ref_species = {s.strip() for s in refsps.split(",") if s.strip()} if refsps else None
+    ref_map: dict = {}
+    try:
+        with open(path) as fh:
+            for line in fh:
+                cols = line.rstrip("\n").split("\t")
+                if len(cols) < 2:
+                    continue
+                gene_id = cols[0].strip()
+                ref_name = cols[1].strip()
+                if not gene_id or not ref_name:
+                    continue
+                if ref_species and get_species_prefix(gene_id) not in ref_species:
+                    continue
+                ref_map[gene_id] = ref_name
+    except OSError:
+        return {}
+    return ref_map
 
 
 def build_family_records(search_dir: Path, family_info: dict) -> list:
@@ -941,6 +969,37 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button id="possvm-reset-btn" onclick="pvmReset()" style="padding:3px 9px;font-size:11px;border:1px solid #bbb;border-radius:4px;background:#fff;cursor:pointer;display:none">&#x21BA; Reset OGs</button>
   </div>
   <div id="possvm-result" style="margin-top:5px;color:#1a6b4a;font-size:10px;min-height:14px"></div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid #eee">
+    <details id="hog-details">
+      <summary style="color:#555;font-weight:600;cursor:pointer;user-select:none">Hierarchical orthogroups</summary>
+      <div style="margin-top:8px">
+        <div style="font-size:10px;color:#7b8a93;line-height:1.45;margin-bottom:6px">
+          Pick named species-tree clades and run POSSVM on each nested ingroup. The resulting hOG map shows how OGs split or merge across clade levels.
+        </div>
+        <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <input id="hog-node-search" list="hog-node-list" placeholder="Species-tree node…" style="flex:1;min-width:140px;font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px">
+          <datalist id="hog-node-list"></datalist>
+          <button onclick="addHogNodeFromInput()" style="padding:3px 8px;font-size:10px;border:1px solid #aaa;border-radius:3px;background:#f5f5f5;cursor:pointer">Add</button>
+          <button id="hog-clade-btn" onclick="pvmToggleHogTree()" style="padding:3px 8px;font-size:10px;border:1px solid #2980b9;border-radius:3px;background:#edf6fd;color:#1a5276;cursor:pointer" title="Pick named clades from the species tree">&#x1F333; Pick from tree</button>
+          <button onclick="clearHogNodes()" style="padding:3px 8px;font-size:10px;border:1px solid #aaa;border-radius:3px;background:#f5f5f5;cursor:pointer">Clear</button>
+          <button onclick="runHierPossvm()" style="padding:3px 8px;font-size:10px;border:1px solid #2980b9;border-radius:3px;background:#edf6fd;color:#1a5276;cursor:pointer">Run hOGs</button>
+        </div>
+        <div id="hog-clade-wrap" style="display:none;border:1px solid #d7e7f5;border-radius:4px;padding:4px;margin-bottom:6px;overflow:auto;background:#f7fbff;max-height:170px"></div>
+        <div id="hog-node-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
+        <div id="hog-result" style="color:#1a5276;font-size:10px;min-height:14px"></div>
+      </div>
+    </details>
+  </div>
+</div>
+<div id="hog-map-panel" style="position:fixed;display:none;top:72px;right:18px;width:min(760px,calc(100vw - 80px));height:min(460px,calc(100vh - 110px));background:#fff;border:1px solid #cfd8de;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);z-index:330;overflow:hidden">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid #e8edf1;background:#f7fafc">
+    <div>
+      <div style="font-weight:700;font-size:12px;color:#314553">Hierarchical orthogroups</div>
+      <div id="hog-map-subtitle" style="font-size:10px;color:#7c8b95;margin-top:2px"></div>
+    </div>
+    <button onclick="closeHogMapPanel()" style="border:none;background:none;cursor:pointer;font-size:16px;color:#8896a0;line-height:1">&times;</button>
+  </div>
+  <div id="hog-map-wrap" style="width:100%;height:calc(100% - 52px);overflow:auto;background:#fff"></div>
 </div>
 <div id="clade-hl-popup" style="position:fixed;display:none;background:#fff;border:1px solid #e67e22;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:270;flex-direction:column;gap:5px">
   <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600">Clade highlight</div>
@@ -1009,6 +1068,7 @@ const HAVE_GENERAX  = %%HAVE_GENERAX_JSON%%;
 const NO_TREE_GENES = %%NO_TREE_GENES_JSON%%;  // {hg_id: {species:[gene_ids]}} for HGs without trees
 const DOMAIN_DATA   = %%DOMAIN_DATA_JSON%%;    // {gene_id: [{name,start,end}, ...]}
 const GENE_META     = %%GENE_META_JSON%%;      // {gene_id: {length, og_support, ref_ortholog, ref_support}}
+const REFNAME_MAP   = %%REFNAME_MAP_JSON%%;    // {gene_id: reference_name}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COLOUR SYSTEM
@@ -1105,7 +1165,7 @@ function isLeafLabelVisible(d){
     if(hmFocusGids!==null){
       if(!hmFocusGids.has(gid)) return false;
     } else {
-      const og=d.data.og||ogGene2Name[gid]||"";
+      const og=leafOgName(d);
       if(hlSet!==null&&!hlSet.has(d.data.species||"")) return false;
       if(ogHlSet!==null&&!ogHlSet.has(og)) return false;
     }
@@ -1116,7 +1176,7 @@ function isLeafLabelVisible(d){
 function leafLabelText(d){
   if(!isLeafLabelVisible(d)) return "";
   const gid=d.data.gene_id||d.data.name||"";
-  const og=ogGene2Name[gid]||d.data.og||"";
+  const og=leafOgName(d);
   const ref=d.data.ref||"";
   const parts=[];
   if(showGeneId&&gid) parts.push(gid);
@@ -1151,6 +1211,12 @@ function ogHighlightSubtitle(node){
   return spMRCAName(nodeSpeciesSet(node)) || "";
 }
 
+function leafOgName(d){
+  const gid=d&&d.data ? (d.data.gene_id||d.data.name||"") : "";
+  if(_pvmActive) return ogGene2Name[gid]||"";
+  return ogGene2Name[gid]||((d&&d.data&&d.data.og)||"");
+}
+
 // onPick  = called live on every input event (colour-drag preview)
 // onFinal = called once on change event (picker closed); defaults to onPick
 function openColorPicker(currentCol, onPick, onFinal){
@@ -1180,6 +1246,38 @@ function ogLeafColor(geneId, species) {
     return gi !== undefined ? hlTagColor(gi) : (ogLeaf2Color[geneId] || "#ccc");
   }
   return ogLeaf2Color[geneId] || "#ccc";
+}
+
+function ogBaseColor(ogName, fallbackIndex){
+  if(ogName && ogName2Color[ogName]) return ogName2Color[ogName];
+  if(Number.isFinite(fallbackIndex)) return palette[fallbackIndex % palette.length];
+  return "#4a7aad";
+}
+
+function naturalSortStrings(arr){
+  return [...arr].sort((a,b)=>a.localeCompare(b, undefined, {numeric:true, sensitivity:"base"}));
+}
+
+function hogLabelFromGenes(baseOg, genes){
+  const direct=naturalSortStrings([...new Set(genes.map(gid=>REFNAME_MAP[gid]).filter(Boolean))]);
+  if(direct.length) return `${baseOg}:${direct.join("/")}`;
+  const inferred=naturalSortStrings([...new Set(
+    genes
+      .map(gid=>((GENE_META[gid]||{}).ref_ortholog||"").trim())
+      .filter(name=>name && name!=="NA")
+  )]);
+  if(inferred.length) return `${baseOg}:like:${inferred.join("/")}`;
+  return baseOg;
+}
+
+function hogReferenceSummary(genes){
+  const direct=naturalSortStrings([...new Set(genes.map(gid=>REFNAME_MAP[gid]).filter(Boolean))]);
+  const inferred=naturalSortStrings([...new Set(
+    genes
+      .map(gid=>((GENE_META[gid]||{}).ref_ortholog||"").trim())
+      .filter(name=>name && name!=="NA")
+  )]);
+  return {direct, inferred};
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1372,10 +1470,14 @@ function showTip(event, d) {
       const sp = d.data.species || "?";
       const meta = GENE_META[gid] || {};
       html += '<div class="tt-row"><span>Species</span><strong style="color:'+spColor(sp)+'">'+sp+'</strong></div>';
+      if (REFNAME_MAP[gid]) {
+        html += '<div class="tt-row"><span>Reference gene</span><strong style="color:#8e44ad">'+REFNAME_MAP[gid]+'</strong></div>';
+      }
       if (currentDetail) {
         for (const [og,genes] of Object.entries(activeOgs())) {
           if (genes.includes(gid)) {
-            html += '<div class="tt-row"><span>OG</span><strong>'+og+'</strong></div>'; break;
+            const ogCol=ogBaseColor(og);
+            html += '<div class="tt-row"><span>OG</span><strong style="color:'+ogCol+'">'+og+'</strong></div>'; break;
           }
         }
       }
@@ -3246,8 +3348,13 @@ function selectTree(rec){
   ogHlSet=null; ogHlQueries=[]; ogHlGroupIndex=new Map(); ogHlQueryColors={};
   document.getElementById("og-hl-search").value="";
   renderOgHlTags();
+  _pvmActive=false; _pvmIngroupSps=null; _pvmOgs=null;
   cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   cladeHighlights.clear();
+  _pvmHogModel=null; closeHogMapPanel();
+  document.getElementById("possvm-reset-btn").style.display="none";
+  document.getElementById("possvm-result").textContent="";
+  document.getElementById("hog-result").textContent="";
   colorMode="og";
   hmFocusGids=null;
 
@@ -3292,6 +3399,10 @@ function rebuildOgColors(){
 function toggleTreeSource(){
   if(!currentDetail||!currentDetail.prev_tree) return;
   const toggle=document.getElementById("tree-toggle");
+  _pvmActive=false; _pvmIngroupSps=null; _pvmOgs=null;
+  _pvmHogModel=null; closeHogMapPanel();
+  document.getElementById("possvm-reset-btn").style.display="none";
+  document.getElementById("possvm-result").textContent="";
   if(treeSource==="generax"){
     treeSource="original";
     toggle.textContent="Showing: Original (bootstrap)";
@@ -3306,6 +3417,7 @@ function toggleTreeSource(){
 }
 
 function activeOgs(){
+  if(_pvmActive&&_pvmOgs) return _pvmOgs;
   if(treeSource==="original"&&currentDetail)
     return currentDetail.prev_ogs||currentDetail.ogs||{};
   return currentDetail?currentDetail.ogs:{};
@@ -3661,8 +3773,12 @@ function drawMiniSpTree(){
 // ── POSSVM interactive orthogroup calling ─────────────────────────────────────
 let _pvmActive=false;          // true while POSSVM OGs are displayed
 let _pvmIngroupSps=null;       // Set of ingroup species used in last POSSVM run
+let _pvmOgs=null;              // interactive POSSVM OGs for the current tree
 const _pvmOgHlPalette=["#a8d8ea","#ffcef3","#d4f1c4","#ffd6a5","#e2d0f8","#c8f0de","#ffe4a8","#ffd0d0","#b3e5d4","#fce4b4"];
 let _pvmCladeOpen=false;       // whether the clade-picker tree is visible
+let _pvmHogCladeOpen=false;    // whether the hOG clade-picker tree is visible
+let _pvmHogNodes=[];           // selected named species-tree clades for hierarchical OGs
+let _pvmHogModel=null;         // rendered hOG metro-map model
 
 function togglePossvmPanel(ev){
   const panel=document.getElementById("possvm-panel");
@@ -3673,6 +3789,8 @@ function togglePossvmPanel(ev){
   panel.style.left=Math.max(4,r.left-60)+"px";
   panel.style.display="block";
   pvmBuildSpList();
+  pvmBuildHogNodeList();
+  renderHogNodeTags();
 }
 document.addEventListener("click",ev=>{
   const panel=document.getElementById("possvm-panel");
@@ -3698,6 +3816,84 @@ function pvmBuildSpList(){
     list.appendChild(lbl);
   });
   pvmUpdateSelCount();
+}
+
+function getCurrentSpeciesSet(){
+  return new Set(pvmGetTreeSpecies());
+}
+
+function getNamedSpeciesTreeClades(){
+  const currentSpecies=getCurrentSpeciesSet();
+  const out=[];
+  (function walk(node, depth){
+    if(!node) return [];
+    if(!node.children||!node.children.length){
+      const keep=currentSpecies.has(node.name);
+      return keep ? [node.name] : [];
+    }
+    let leaves=[];
+    for(const child of node.children) leaves=leaves.concat(walk(child, depth+1));
+    if(node.name && leaves.length){
+      out.push({name:node.name, depth, species:[...new Set(leaves)]});
+    }
+    return leaves;
+  })(SP_TREE_DATA, 0);
+  out.sort((a,b)=>a.depth-b.depth || a.name.localeCompare(b.name));
+  return out;
+}
+
+function pvmBuildHogNodeList(){
+  const dl=document.getElementById("hog-node-list");
+  if(!dl) return;
+  dl.innerHTML=getNamedSpeciesTreeClades()
+    .map(rec=>`<option value="${rec.name.replace(/"/g,"&quot;")}"></option>`)
+    .join("");
+}
+
+function renderHogNodeTags(){
+  const wrap=document.getElementById("hog-node-tags");
+  if(!wrap) return;
+  wrap.innerHTML=_pvmHogNodes.map(name=>
+    `<span class="hl-tag" style="background:#4a90d9">${name}<span class="hl-tag-x" onclick="removeHogNode('${name.replace(/'/g,"\\'")}')">&times;</span></span>`
+  ).join("");
+}
+
+function addHogNode(name){
+  const q=(name||"").trim();
+  if(!q) return;
+  const avail=getNamedSpeciesTreeClades();
+  const match=avail.find(rec=>rec.name===q);
+  if(!match){
+    document.getElementById("hog-result").textContent=`Unknown clade: ${q}`;
+    return;
+  }
+  if(!_pvmHogNodes.includes(match.name)) _pvmHogNodes.push(match.name);
+  renderHogNodeTags();
+  document.getElementById("hog-result").textContent=`${_pvmHogNodes.length} clade${_pvmHogNodes.length!==1?"s":""} selected`;
+  if(_pvmHogCladeOpen) pvmDrawHogCladeTree();
+}
+
+function addHogNodeFromInput(){
+  const inp=document.getElementById("hog-node-search");
+  addHogNode(inp.value);
+  inp.value="";
+}
+
+function removeHogNode(name){
+  _pvmHogNodes=_pvmHogNodes.filter(n=>n!==name);
+  renderHogNodeTags();
+  document.getElementById("hog-result").textContent=_pvmHogNodes.length
+    ? `${_pvmHogNodes.length} clade${_pvmHogNodes.length!==1?"s":""} selected`
+    : "";
+  if(_pvmHogCladeOpen) pvmDrawHogCladeTree();
+}
+
+function clearHogNodes(){
+  _pvmHogNodes=[];
+  renderHogNodeTags();
+  const res=document.getElementById("hog-result");
+  if(res) res.textContent="";
+  if(_pvmHogCladeOpen) pvmDrawHogCladeTree();
 }
 
 // Return species in the current gene tree, in speciesOrder order
@@ -3726,6 +3922,13 @@ function pvmToggleCladeTree(){
   document.getElementById("possvm-clade-wrap").style.display=_pvmCladeOpen?"block":"none";
   document.getElementById("possvm-clade-btn").classList.toggle("active-btn",_pvmCladeOpen);
   if(_pvmCladeOpen) pvmDrawCladeTree();
+}
+
+function pvmToggleHogTree(){
+  _pvmHogCladeOpen=!_pvmHogCladeOpen;
+  document.getElementById("hog-clade-wrap").style.display=_pvmHogCladeOpen?"block":"none";
+  document.getElementById("hog-clade-btn").classList.toggle("active-btn",_pvmHogCladeOpen);
+  if(_pvmHogCladeOpen) pvmDrawHogCladeTree();
 }
 
 // Draw a mini species tree in the clade-picker area; clicking a named node
@@ -3788,6 +3991,67 @@ function pvmDrawCladeTree(){
           document.querySelectorAll("[data-pvm-sp]").forEach(cb=>{if(cladeSps.includes(cb.value)) cb.checked=true;});
           pvmUpdateSelCount();
           pvmDrawCladeTree(); // refresh colours
+        });
+    }
+    n.children.forEach(drawInternals);
+  }
+  drawInternals(tree);
+}
+
+function pvmDrawHogCladeTree(){
+  const wrap=document.getElementById("hog-clade-wrap");
+  wrap.innerHTML="";
+  if(!SP_TREE_DATA){ wrap.innerHTML='<span style="color:#888;font-size:10px;padding:4px">No species tree loaded.</span>'; return; }
+  function flat(n){return[n].concat(n.children?n.children.flatMap(flat):[]);}
+  function clone(n){return Object.assign({},n,{children:n.children?n.children.map(clone):null});}
+  const treeSpSet=new Set(pvmGetTreeSpecies());
+  function prune(n){
+    if(!n.children) return treeSpSet.has(n.name)?n:null;
+    const k=n.children.map(prune).filter(Boolean);
+    if(!k.length) return null;
+    if(k.length===1) return k[0];
+    n.children=k; return n;
+  }
+  const tree=prune(clone(SP_TREE_DATA));
+  if(!tree){ wrap.innerHTML='<span style="color:#888;font-size:10px;padding:4px">No matching species.</span>'; return; }
+  const allN=flat(tree);
+  const leaves=allN.filter(n=>!n.children);
+  const leafH=14, lM=6, W=270;
+  leaves.forEach((l,i)=>{l._y=i*leafH+leafH/2;});
+  function assignY(n){if(n.children){n.children.forEach(assignY);n._y=(n.children[0]._y+n.children[n.children.length-1]._y)/2;}}
+  assignY(tree);
+  let maxD=0;
+  function assignD(n,d){n._d=d;maxD=Math.max(maxD,d);if(n.children)n.children.forEach(c=>assignD(c,d+1));}
+  assignD(tree,0);
+  const sx=d=>lM+(d/Math.max(1,maxD))*(W-lM-80);
+  const H=leaves.length*leafH+10;
+  const svg=d3.select(wrap).append("svg").attr("width",W).attr("height",H);
+  function drawB(n){
+    if(!n.children) return;
+    const ys=n.children.map(c=>c._y);
+    svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d)).attr("y1",d3.min(ys)).attr("y2",d3.max(ys)).attr("stroke","#ccc");
+    n.children.forEach(c=>{svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(c._d)).attr("y1",c._y).attr("y2",c._y).attr("stroke","#ccc");drawB(c);});
+  }
+  drawB(tree);
+  leaves.forEach(l=>{
+    svg.append("circle").attr("cx",sx(maxD)).attr("cy",l._y).attr("r",3).attr("fill",spColor(l.name));
+    svg.append("text").attr("x",sx(maxD)+6).attr("y",l._y).attr("dy","0.35em").attr("font-size",9).attr("fill","#333").attr("font-family","monospace").text(l.name);
+  });
+  function drawInternals(n){
+    if(!n.children) return;
+    if(n.name){
+      function sp2(nd){return nd.children?nd.children.flatMap(sp2):[nd.name];}
+      const cladeSps=sp2(n).filter(s=>treeSpSet.has(s));
+      const isSelected=_pvmHogNodes.includes(n.name);
+      svg.append("text")
+        .attr("x",sx(n._d)).attr("y",n._y-5)
+        .attr("text-anchor","middle")
+        .attr("font-size",9).attr("fill",isSelected?"#e67e22":"#2980b9").attr("font-style","italic")
+        .style("cursor","pointer").style("font-weight",isSelected?"700":"400").text(n.name)
+        .on("click",(ev)=>{
+          ev.stopPropagation();
+          if(cladeSps.length) addHogNode(n.name);
+          pvmDrawHogCladeTree();
         });
     }
     n.children.forEach(drawInternals);
@@ -3878,13 +4142,41 @@ function pvmMidpointRoot(){
 }
 
 // ── POSSVM species-overlap OG assignment ──────────────────────────────────────
-function runPossvm(){
-  if(!rootNode){document.getElementById("possvm-result").textContent="No tree loaded."; return;}
-  const ingroupSps=new Set([...document.querySelectorAll("[data-pvm-sp]:checked")].map(cb=>cb.value));
-  if(!ingroupSps.size){document.getElementById("possvm-result").textContent="Select at least one species."; return;}
-  const sos=parseFloat(document.getElementById("possvm-sos").value);
+function cloneCurrentTreeForPvm(){
+  return d3.hierarchy(_h2d(rootNode), d=>d.children||null);
+}
 
-  // ── Pass 1: tag each node with ingroup species set AND ingroup leaf count ──
+function getCurrentGeneSpeciesMap(){
+  const m=new Map();
+  if(!rootNode) return m;
+  rootNode.leaves().forEach(l=>{
+    const gid=l.data.gene_id||l.data.name||"";
+    if(gid) m.set(gid, l.data.species||"");
+  });
+  return m;
+}
+
+function pruneTreeToGeneSet(node, geneSet){
+  if(!node) return null;
+  const ch=node.children||node._children||null;
+  if(!ch||!ch.length){
+    const gid=node.data ? (node.data.gene_id||node.data.name||"") : "";
+    return geneSet.has(gid) ? node : null;
+  }
+  const kept=ch.map(c=>pruneTreeToGeneSet(c, geneSet)).filter(Boolean);
+  if(!kept.length) return null;
+  node.children=kept;
+  delete node._children;
+  kept.forEach(k=>{ k.parent=node; });
+  if(kept.length===1){
+    const child=kept[0];
+    child.parent=node.parent||null;
+    return child;
+  }
+  return node;
+}
+
+function computePossvmAssignments(treeRoot, ingroupSps, sos){
   function tagSps(node){
     const ch=node.children||node._children;
     if(!ch||!ch.length){
@@ -3901,12 +4193,10 @@ function runPossvm(){
     }
   }
 
-  // ── Pass 2: classify each internal node as D (duplication) or S (speciation) ──
   function classify(node){
     const ch=node.children||node._children;
     if(!ch||ch.length<2){node._pvmEvent=null;return;}
     for(const c of ch) classify(c);
-    // Node is D if ANY pair of children share ingroup species at rate > sos
     let isD=false;
     outer:for(let i=0;i<ch.length&&!isD;i++){
       for(let j=i+1;j<ch.length&&!isD;j++){
@@ -3916,16 +4206,10 @@ function runPossvm(){
         if(ovl/Math.min(si.size,sj.size)>sos){isD=true;break outer;}
       }
     }
-    // POSSVM: if all ingroup leaves under this node come from a single species,
-    // species overlap is trivially 100% and cannot diagnose a meaningful duplication.
     if(isD && node._pvmSps.size===1) isD=false;
     node._pvmEvent=isD?"D":"S";
   }
 
-  // ── Pass 3: assign OG IDs top-down ──────────────────────────────────────────
-  // Each duplication node starts fresh OGs for each child.
-  // Speciation nodes pass through the current OG.
-  // Outgroup leaves (not in ingroupSps) get no OG.
   let ogCounter=0;
   const newOgs={};
   function assign(node,ogId){
@@ -3950,16 +4234,17 @@ function runPossvm(){
     }
   }
 
-  tagSps(rootNode);
-  classify(rootNode);
-  // Root is treated as S unless it's a D node itself
+  tagSps(treeRoot);
+  classify(treeRoot);
   let rootOg=null;
-  if(rootNode._pvmEvent!=="D"&&rootNode._pvmSps.size>0)
+  if(treeRoot._pvmEvent!=="D"&&treeRoot._pvmSps.size>0)
     rootOg="OG_"+String(++ogCounter).padStart(4,"0");
-  assign(rootNode,rootOg);
+  assign(treeRoot,rootOg);
+  return {ogs:newOgs, root:treeRoot};
+}
 
+function applyPossvmRun(newOgs, ingroupSps){
   const nOgs=Object.keys(newOgs).length;
-  // ── Apply to OG colour maps ──────────────────────────────────────────────────
   ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   Object.keys(newOgs).sort().forEach((og,i)=>{
     const col=palette[i%palette.length];
@@ -3968,6 +4253,7 @@ function runPossvm(){
   });
   _pvmActive=true;
   _pvmIngroupSps=ingroupSps;
+  _pvmOgs=newOgs;
   colorMode="og";
   // Sync the colour-by dropdown so the UI reflects the active mode
   const _cbs=document.getElementById("color-by");
@@ -3986,10 +4272,10 @@ function runPossvm(){
       return found;
     }).filter(Boolean);
     if(!leaves.length) return;
-    const mrca=findMRCA(leaves);
+    const mrca=findExactOgRoot(leaves);
     if(!mrca) return;
     cladeHighlights.set(mrca._uid,{
-      color:_pvmOgHlPalette[i%_pvmOgHlPalette.length],
+      color:ogBaseColor(og, i),
       label:og,
       subtitle:ogHighlightSubtitle(mrca),
       _fromOgHl:true
@@ -4004,8 +4290,373 @@ function runPossvm(){
   renderTree(false);
 }
 
+function runPossvm(){
+  if(!rootNode){document.getElementById("possvm-result").textContent="No tree loaded."; return;}
+  const ingroupSps=new Set([...document.querySelectorAll("[data-pvm-sp]:checked")].map(cb=>cb.value));
+  if(!ingroupSps.size){document.getElementById("possvm-result").textContent="Select at least one species."; return;}
+  const sos=parseFloat(document.getElementById("possvm-sos").value);
+  const result=computePossvmAssignments(rootNode, ingroupSps, sos);
+  applyPossvmRun(result.ogs, ingroupSps);
+}
+
+function buildHierPossvmModel(levelNames, sos){
+  const clades=getNamedSpeciesTreeClades();
+  const byName=new Map(clades.map(rec=>[rec.name, rec]));
+  const gene2sp=getCurrentGeneSpeciesMap();
+  const seen=new Set();
+  const selected=levelNames.map(name=>byName.get(name)).filter(Boolean).filter(rec=>{
+    const key=rec.species.slice().sort().join("|");
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  selected.sort((a,b)=>b.species.length-a.species.length || a.depth-b.depth || a.name.localeCompare(b.name));
+  for(let i=1;i<selected.length;i++){
+    const prev=new Set(selected[i-1].species);
+    const cur=selected[i].species;
+    if(!cur.every(sp=>prev.has(sp))){
+      throw new Error(`Selected hOG clades are not nested: ${selected[i-1].name} -> ${selected[i].name}`);
+    }
+  }
+
+  const levels=[];
+  const links=[];
+  if(!selected.length) return {levels, links, sos};
+
+  const rootRec=selected[0];
+  const rootResult=computePossvmAssignments(cloneCurrentTreeForPvm(), new Set(rootRec.species), sos);
+  const rootOgs=Object.entries(rootResult.ogs).map(([og, genes])=>{
+    const species=[...new Set(genes.map(gid=>gene2sp.get(gid)).filter(Boolean))].sort((a,b)=>speciesOrder.indexOf(a)-speciesOrder.indexOf(b));
+    const rawId=og;
+    return {
+      id:`${rootRec.name}::${og}`,
+      og:hogLabelFromGenes(rawId, genes),
+      raw_id:rawId,
+      clade:rootRec.name,
+      depth:rootRec.depth,
+      size:genes.length,
+      genes:[...genes],
+      species,
+      subtitle:spMRCAName(new Set(species)) || rootRec.name,
+      parent_id:null,
+    };
+  }).sort((a,b)=>b.size-a.size || a.og.localeCompare(b.og));
+  levels.push({
+    name:rootRec.name,
+    depth:rootRec.depth,
+    species:[...rootRec.species],
+    species_count:rootRec.species.length,
+    ogs:rootOgs,
+  });
+
+  for(let li=1; li<selected.length; li++){
+    const rec=selected[li];
+    const recSpecies=new Set(rec.species);
+    const prevLevel=levels[li-1];
+    const nextOgs=[];
+    prevLevel.ogs.forEach(parentOg=>{
+      const keepGenes=parentOg.genes.filter(gid=>recSpecies.has(gene2sp.get(gid)));
+      if(!keepGenes.length) return;
+      if(keepGenes.length===1){
+        const gid=keepGenes[0];
+        const species=[gene2sp.get(gid)].filter(Boolean);
+        nextOgs.push({
+          id:`${rec.name}::${parentOg.id}::1`,
+          og:parentOg.og,
+          clade:rec.name,
+          depth:rec.depth,
+          size:1,
+          genes:[gid],
+          species,
+          subtitle:spMRCAName(new Set(species)) || rec.name,
+          parent_id:parentOg.id,
+        });
+        links.push({
+          source:parentOg.id,
+          target:`${rec.name}::${parentOg.id}::1`,
+          source_level:li-1,
+          target_level:li,
+          source_og:parentOg.og,
+          target_og:parentOg.og,
+          weight:1,
+          genes:[gid],
+        });
+        return;
+      }
+      const pruned=pruneTreeToGeneSet(cloneCurrentTreeForPvm(), new Set(keepGenes));
+      if(!pruned) return;
+      const result=computePossvmAssignments(pruned, recSpecies, sos);
+      const entries=Object.entries(result.ogs).map(([og, genes])=>[og, genes.filter(gid=>keepGenes.includes(gid))]).filter(([, genes])=>genes.length);
+      entries.sort((a,b)=>b[1].length-a[1].length || a[0].localeCompare(b[0]));
+      entries.forEach(([og, genes], idx)=>{
+        const species=[...new Set(genes.map(gid=>gene2sp.get(gid)).filter(Boolean))].sort((a,b)=>speciesOrder.indexOf(a)-speciesOrder.indexOf(b));
+        const rawId=entries.length===1 ? parentOg.raw_id : `${parentOg.raw_id}.${idx+1}`;
+        const label=hogLabelFromGenes(rawId, genes);
+        const childId=`${rec.name}::${parentOg.id}::${idx+1}`;
+        nextOgs.push({
+          id:childId,
+          og:label,
+          raw_id:rawId,
+          raw_og:og,
+          clade:rec.name,
+          depth:rec.depth,
+          size:genes.length,
+          genes:[...genes],
+          species,
+          subtitle:spMRCAName(new Set(species)) || rec.name,
+          parent_id:parentOg.id,
+        });
+        links.push({
+          source:parentOg.id,
+          target:childId,
+          source_level:li-1,
+          target_level:li,
+          source_og:parentOg.og,
+          target_og:label,
+          weight:genes.length,
+          genes:[...genes],
+        });
+      });
+    });
+    levels.push({
+      name:rec.name,
+      depth:rec.depth,
+      species:[...rec.species],
+      species_count:rec.species.length,
+      ogs:nextOgs.sort((a,b)=>b.size-a.size || a.og.localeCompare(b.og)),
+    });
+  }
+  return {levels, links, sos};
+}
+
+function closeHogMapPanel(){
+  const panel=document.getElementById("hog-map-panel");
+  if(panel) panel.style.display="none";
+}
+
+function renderHogMap(model){
+  const wrap=document.getElementById("hog-map-wrap");
+  const subtitle=document.getElementById("hog-map-subtitle");
+  wrap.innerHTML="";
+  if(!model||!model.levels.length){
+    wrap.innerHTML='<div style="padding:18px;color:#7c8b95;font-size:12px">No hOG data to display.</div>';
+    subtitle.textContent="";
+    return;
+  }
+  const colGap=210, rowGap=54, pad={top:48,left:42,right:240,bottom:30};
+  const maxRows=Math.max(...model.levels.map(l=>Math.max(1,l.ogs.length)));
+  const width=pad.left+pad.right+Math.max(1, model.levels.length-1)*colGap+120;
+  const height=pad.top+pad.bottom+Math.max(1,maxRows-1)*rowGap+70;
+  const linkMap=new Map();
+  model.links.forEach(link=>{
+    const key=`${link.source_level}:${link.target_level}:${link.target}`;
+    if(!linkMap.has(key)) linkMap.set(key, []);
+    linkMap.get(key).push(link);
+  });
+  model.levels.forEach((level, li)=>{
+    if(li===0){
+      level.ogs.forEach((og, idx)=>{ og._order=idx; });
+      return;
+    }
+    const keyed=level.ogs.map((og, idx)=>{
+      const inbound=linkMap.get(`${li-1}:${li}:${og.id}`)||[];
+      if(!inbound.length) return {og, idx, bary:idx+0.5};
+      const total=inbound.reduce((acc, link)=>acc+link.weight, 0) || 1;
+      const bary=inbound.reduce((acc, link)=>{
+        const prev=model.levels[li-1].ogs.find(p=>p.id===link.source);
+        return acc + ((prev?prev._order:0) * link.weight);
+      }, 0) / total;
+      return {og, idx, bary};
+    }).sort((a,b)=>a.bary-b.bary || a.idx-b.idx);
+    keyed.forEach((rec, idx)=>{ rec.og._order=idx; });
+    level.ogs=keyed.map(rec=>rec.og);
+  });
+
+  model.levels.forEach((level, li)=>{
+    level.x=pad.left + li*colGap;
+    level.ogs.forEach((og, idx)=>{ og.x=level.x; og.y=pad.top + idx*rowGap; });
+  });
+
+  const colorScale=d3.scaleOrdinal(palette.concat(_pvmOgHlPalette));
+  const id2og=new Map();
+  model.levels.forEach(level=>level.ogs.forEach(og=>id2og.set(og.id, og)));
+  const svg=d3.select(wrap).append("svg")
+    .attr("width", width)
+    .attr("height", height)
+    .style("display","block");
+
+  const axis=svg.append("g");
+  model.levels.forEach(level=>{
+    axis.append("text")
+      .attr("x", level.x)
+      .attr("y", 18)
+      .attr("text-anchor","middle")
+      .attr("font-size", 12)
+      .attr("font-weight", 700)
+      .attr("fill", "#314553")
+      .text(level.name);
+    axis.append("text")
+      .attr("x", level.x)
+      .attr("y", 33)
+      .attr("text-anchor","middle")
+      .attr("font-size", 10)
+      .attr("fill", "#7c8b95")
+      .text(`${level.ogs.length} OG${level.ogs.length!==1?"s":""} · ${level.species_count} spp`);
+  });
+
+  const relatedMap=new Map();
+  function relAdd(a,b){
+    if(!relatedMap.has(a)) relatedMap.set(a, new Set([a]));
+    if(!relatedMap.has(b)) relatedMap.set(b, new Set([b]));
+    relatedMap.get(a).add(b);
+    relatedMap.get(b).add(a);
+  }
+  model.levels.forEach(level=>level.ogs.forEach(og=>{
+    if(!relatedMap.has(og.id)) relatedMap.set(og.id, new Set([og.id]));
+  }));
+  model.links.forEach(link=>relAdd(link.source, link.target));
+
+  const linkG=svg.append("g").attr("fill","none");
+  const linkSel=linkG.selectAll(".hog-link")
+    .data(model.links)
+    .enter()
+    .append("path")
+      .attr("class","hog-link")
+      .attr("data-source", link=>link.source)
+      .attr("data-target", link=>link.target);
+  linkSel.each(function(link){
+    const s=id2og.get(link.source), t=id2og.get(link.target);
+    if(!s||!t){ d3.select(this).remove(); return; }
+    const x1=s.x+9, x2=t.x-9, y1=s.y, y2=t.y;
+    const dx=Math.max(30, (x2-x1)*0.45);
+    d3.select(this)
+      .attr("d", `M${x1},${y1}C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`)
+      .attr("stroke", colorScale(link.source_og))
+      .attr("stroke-width", Math.max(1.5, Math.sqrt(link.weight)))
+      .attr("stroke-opacity", 0.55)
+      .append("title")
+      .text(`${link.source_og} → ${link.target_og} (${link.weight} genes)`);
+  });
+
+  const nodeG=svg.append("g");
+  const nodeSel=nodeG.selectAll(".hog-node")
+    .data(model.levels.flatMap(level=>level.ogs.map(og=>({level, og}))))
+    .enter()
+    .append("g")
+      .attr("class","hog-node")
+      .attr("data-id", d=>d.og.id)
+      .attr("transform", d=>`translate(${d.og.x},${d.og.y})`);
+
+  function hogTooltipHtml(level, og){
+    const refSummary=hogReferenceSummary(og.genes);
+    const speciesList=og.species.length ? og.species.join(", ") : "NA";
+    const genePreview=og.genes.slice(0,6).join(", ");
+    const moreGenes=og.genes.length>6 ? `, +${og.genes.length-6} more` : "";
+    let html='<div class="tt-name">'+og.og+'</div>';
+    html += '<div class="tt-row"><span>Level</span><strong>'+level.name+'</strong></div>';
+    html += '<div class="tt-row"><span>Genes</span><strong>'+og.size+'</strong></div>';
+    html += '<div class="tt-row"><span>Species</span><strong>'+og.species.length+'</strong></div>';
+    if(og.subtitle) html += '<div class="tt-row"><span>MRCA</span><strong>'+og.subtitle+'</strong></div>';
+    if(refSummary.direct.length){
+      html += '<div class="tt-row"><span>Reference genes</span><strong style="color:#8e44ad">'+refSummary.direct.join("/")+'</strong></div>';
+    } else if(refSummary.inferred.length){
+      html += '<div class="tt-row"><span>Reference-like</span><strong>'+refSummary.inferred.join("/")+'</strong></div>';
+    }
+    html += '<div style="margin-top:4px;font-size:10px;color:#666;line-height:1.45"><div><strong>Species:</strong> '+speciesList+'</div><div><strong>Genes:</strong> '+genePreview+moreGenes+'</div></div>';
+    return html;
+  }
+
+  function clearHogHover(){
+    linkSel
+      .attr("stroke-opacity", 0.55)
+      .attr("stroke-width", link=>Math.max(1.5, Math.sqrt(link.weight)));
+    nodeSel.style("opacity", 1);
+    nodeSel.select("circle")
+      .attr("stroke", "#fff")
+      .attr("stroke-width", 1.5);
+    nodeSel.selectAll("text")
+      .attr("opacity", 1);
+    hideTip();
+  }
+
+  function applyHogHover(level, og, event){
+    const related=relatedMap.get(og.id) || new Set([og.id]);
+    nodeSel.style("opacity", d=>related.has(d.og.id)?1:0.22);
+    nodeSel.select("circle")
+      .attr("stroke", d=>d.og.id===og.id?"#111":"#fff")
+      .attr("stroke-width", d=>d.og.id===og.id?3:1.5);
+    nodeSel.selectAll("text")
+      .attr("opacity", d=>related.has(d.og.id)?1:0.28);
+    linkSel
+      .attr("stroke-opacity", link=>(link.source===og.id||link.target===og.id||(related.has(link.source)&&related.has(link.target)))?0.95:0.08)
+      .attr("stroke-width", link=>{
+        const base=Math.max(1.5, Math.sqrt(link.weight));
+        return (link.source===og.id||link.target===og.id)?base+1.3:base;
+      });
+    showTip(event, hogTooltipHtml(level, og));
+  }
+
+  model.levels.forEach(level=>{
+    nodeSel.filter(d=>d.level===level).each(function(d){
+      const og=d.og;
+      const g=d3.select(this);
+      const fill=colorScale(og.og);
+      g.append("circle")
+        .attr("r", Math.max(4, Math.min(11, 3 + Math.sqrt(og.size))))
+        .attr("fill", fill)
+        .attr("stroke", "#fff")
+        .attr("stroke-width", 1.5);
+      g.append("text")
+        .attr("x", 12)
+        .attr("y", -2)
+        .attr("font-size", 11)
+        .attr("font-weight", 600)
+        .attr("fill", "#314553")
+        .text(`${og.og} [${og.size}]`);
+      g.append("text")
+        .attr("x", 12)
+        .attr("y", 11)
+        .attr("font-size", 9)
+        .attr("fill", "#8a98a3")
+        .text(og.subtitle || "");
+      g.on("mouseover", function(event){ applyHogHover(level, og, event); })
+       .on("mousemove", moveTip)
+       .on("mouseout", clearHogHover);
+    });
+  });
+
+  subtitle.textContent=`${model.levels.length} clade levels · broad to nested · SOS ${model.sos.toFixed(2)}`;
+}
+
+function runHierPossvm(){
+  if(!rootNode){
+    document.getElementById("hog-result").textContent="No tree loaded.";
+    return;
+  }
+  if(_pvmHogNodes.length<2){
+    document.getElementById("hog-result").textContent="Select at least two named clades.";
+    return;
+  }
+  const sos=parseFloat(document.getElementById("possvm-sos").value);
+  let model;
+  try{
+    model=buildHierPossvmModel(_pvmHogNodes, sos);
+  }catch(err){
+    document.getElementById("hog-result").textContent=String(err&&err.message?err.message:err);
+    return;
+  }
+  _pvmHogModel=model;
+  renderHogMap(model);
+  document.getElementById("hog-map-panel").style.display="block";
+  const totalOgs=model.levels.reduce((acc, level)=>acc+level.ogs.length, 0);
+  document.getElementById("hog-result").textContent=`${model.levels.length} levels · ${totalOgs} hOG nodes`;
+}
+
 function pvmReset(){
-  _pvmActive=false; _pvmIngroupSps=null;
+  _pvmActive=false; _pvmIngroupSps=null; _pvmOgs=null;
+  cladeHighlights.forEach((rec,uid)=>{ if(rec._fromOgHl) cladeHighlights.delete(uid); });
+  _ogHlActive=false;
+  document.getElementById("btn-highlight-ogs").classList.remove("active-btn");
   colorMode="og";
   rebuildOgColors();
   const n=Object.keys(activeOgs()).length;
@@ -4261,7 +4912,7 @@ function renderTree(animate){
     .attr("fill",d=>{
       if(d.data.leaf){
         const gid2=d.data.gene_id||d.data.name;
-        const og2=ogGene2Name[gid2]||d.data.og||"";
+        const og2=leafOgName(d);
         if(ogHlSet!==null){
           if(!ogHlSet.has(og2)) return "#e8e8e8";
           const gi=ogHlGroupIndex.get(og2)??0;
@@ -4390,8 +5041,7 @@ function renderTree(animate){
       el.selectAll("tspan").remove();
       if(!isLeafLabelVisible(d)) return;
       const gid=d.data.gene_id||d.data.name;
-      // ogGene2Name takes priority so POSSVM-assigned OGs show over pipeline annotations
-      const og=ogGene2Name[gid]||d.data.og||"";
+      const og=leafOgName(d);
       const ref=d.data.ref||"";
       // dim if either species-hl or OG-hl is active and this tip doesn't match
       const notSpHl=hlSet!==null&&!hlSet.has(d.data.species||"");
@@ -4619,7 +5269,7 @@ function rerootAtNode(d, splitFrac){
   _isRerooted=true;
   // Clear POSSVM state — it's invalidated when topology changes (re-run after rerooting)
   if(_pvmActive){
-    _pvmActive=false; _pvmIngroupSps=null;
+    _pvmActive=false; _pvmIngroupSps=null; _pvmOgs=null;
     cladeHighlights.forEach((rec,uid)=>{ if(rec._fromOgHl) cladeHighlights.delete(uid); });
     if(_ogHlActive){ _ogHlActive=false; document.getElementById("btn-highlight-ogs").classList.remove("active-btn"); }
     document.getElementById("possvm-reset-btn").style.display="none";
@@ -4660,7 +5310,7 @@ function _collapseToOGs(){
     const ogGroups={};
     rootNode.leaves().forEach(l=>{
       const gid=l.data.gene_id||l.data.name||"";
-      const og=l.data.og||ogGene2Name[gid]||"";
+      const og=leafOgName(l);
       if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);
     });
     for(const [og,leaves] of Object.entries(ogGroups)){
@@ -4699,7 +5349,7 @@ function toggleHighlightOGs(){
   });
   if(!found){
     const ogGroups={};
-    rootNode.leaves().forEach(l=>{const gid=l.data.gene_id||l.data.name||""; const og=l.data.og||ogGene2Name[gid]||""; if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);});
+    rootNode.leaves().forEach(l=>{const og=leafOgName(l); if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);});
     for(const [og,leaves] of Object.entries(ogGroups)){
       const mrca=findExactOgRoot(leaves);
       if(mrca&&!mrca.data.leaf) ogNodes.push({node:mrca,label:og});
@@ -4708,9 +5358,8 @@ function toggleHighlightOGs(){
   if(!ogNodes.length){alert("No OG nodes found."); return;}
   // Remove any previous OG highlights, then add one per OG
   cladeHighlights.forEach((rec,uid)=>{ if(rec._fromOgHl) cladeHighlights.delete(uid); });
-  const palette2=["#a8d8ea","#ffcef3","#d4f1c4","#ffd6a5","#e2d0f8","#c8f0de","#ffe4a8","#ffd0d0"];
   ogNodes.forEach(({node,label},i)=>{
-    const col=palette2[i%palette2.length];
+    const col=ogBaseColor(label, i);
     cladeHighlights.set(node._uid,{
       color:col,
       label,
@@ -4747,8 +5396,7 @@ function focusHighlighted(){
         match=hmFocusGids.has(d.data.gene_id||d.data.name);
       } else {
         const sp=d.data.species||"";
-        const gid=d.data.gene_id||d.data.name;
-        const og=d.data.og||ogGene2Name[gid]||"";
+        const og=leafOgName(d);
         match=(!hlSet||hlSet.has(sp))&&(!ogHlSet||ogHlSet.has(og));
       }
       hasHl.set(d,match);
@@ -4816,6 +5464,10 @@ def parse_args(argv=None):
                    help="TSV with family metadata (genefam.csv or gene_families_searchinfo.csv)")
     p.add_argument("--species_tree", default=None,
                    help="Newick species tree (named internal nodes for clade colouring)")
+    p.add_argument("--refnames", default=None,
+                   help="POSSVM refnames TSV (gene_id<TAB>name) for OG naming and tooltip annotation")
+    p.add_argument("--refsps", default=None,
+                   help="Comma-separated reference species filter, matching POSSVM --refsps")
     p.add_argument("--output", required=True, help="Output HTML file path")
     return p.parse_args(argv)
 
@@ -5007,8 +5659,12 @@ def build_report_context(args) -> dict:
     )
     domain_hits = load_domain_hits(search_dir)
     gene_lengths = load_gene_lengths(cluster_dir)
+    refname_map = load_reference_names(args.refnames, args.refsps)
     for gene_id, length in gene_lengths.items():
         gene_meta.setdefault(gene_id, {})["length"] = length
+    for gene_id, ref_name in refname_map.items():
+        gene_meta.setdefault(gene_id, {})["is_reference_gene"] = True
+        gene_meta[gene_id]["reference_gene_name"] = ref_name
 
     return {
         "species_order": species_order,
@@ -5024,6 +5680,7 @@ def build_report_context(args) -> dict:
         "no_tree_genes": no_tree_genes,
         "domain_hits": domain_hits,
         "gene_meta": gene_meta,
+        "refname_map": refname_map,
         "records": records,
         "prev_records": prev_records,
     }
@@ -5046,6 +5703,7 @@ def render_report_html(context: dict) -> str:
         .replace("%%NO_TREE_GENES_JSON%%", json.dumps(context["no_tree_genes"]))
         .replace("%%DOMAIN_DATA_JSON%%", json.dumps(context["domain_hits"]))
         .replace("%%GENE_META_JSON%%", json.dumps(context["gene_meta"]))
+        .replace("%%REFNAME_MAP_JSON%%", json.dumps(context["refname_map"]))
     )
 
 

@@ -11,6 +11,12 @@ params.family_info   = params.containsKey('family_info')
 params.species_tree  = params.containsKey('species_tree')
     ? params.species_tree
     : "${projectDir}/data/species_tree.full.newick"
+params.refnames      = params.containsKey('refnames')
+    ? params.refnames
+    : (params.containsKey('REFNAMES') ? params.REFNAMES : null)
+params.refsps        = params.containsKey('refsps')
+    ? params.refsps
+    : (params.containsKey('REFSPECIES') ? params.REFSPECIES : null)
 params.run_generax   = params.containsKey('run_generax') ? params.run_generax : false
 params.OUTDIR        = params.containsKey('OUTDIR')
     ? params.OUTDIR
@@ -289,6 +295,10 @@ process REPORT {
     path("report_step2.html")
 
 	    script:
+        def reportRefArgs = []
+        if (params.refnames) reportRefArgs << "--refnames ${params.refnames}"
+        if (params.refsps)   reportRefArgs << "--refsps ${params.refsps}"
+        def refArgs = reportRefArgs.join(' ')
 	    """
 	    export PYTHONNOUSERSITE=1
 	    python ${projectDir}/workflow/report_step2.py \
@@ -298,6 +308,7 @@ process REPORT {
 	        --cluster_dir     ${params.OUTDIR}/clusters \
 	        --family_info     ${params.family_info} \
 	        --species_tree    ${params.species_tree} \
+            ${refArgs} \
 	        --output          report_step2.html
     """
 }
