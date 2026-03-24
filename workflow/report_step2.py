@@ -773,9 +773,9 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
                 <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()" title="Draw branches proportional to evolutionary distance instead of a cladogram">Branch lengths</button>
                 <span class="ctrl-field">
                   Tip:
-                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show gene identifier in tip labels"><input type="checkbox" id="chk-geneid" checked> ID</label>
-                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show orthogroup name in tip labels"><input type="checkbox" id="chk-og" checked> OG</label>
-                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show reference orthologue in tip labels"><input type="checkbox" id="chk-ref" checked> ref</label>
+                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show gene identifier in tip labels"><input type="checkbox" id="chk-geneid"> ID</label>
+                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show orthogroup name in tip labels"><input type="checkbox" id="chk-og"> OG</label>
+                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show reference orthologue in tip labels"><input type="checkbox" id="chk-ref"> ref</label>
                   <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Hide tip labels for species not in the current highlight set"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
                 </span>
                 <div class="ctrl-inline-group">
@@ -1133,9 +1133,9 @@ let tipFontSize    = null;        // null = auto; number = user override (px)
 let treeLinkWidth  = 1.3;        // branch stroke-width in screen px
 let treeHeightMult = 1.0;        // vertical stretch multiplier for the tree
 let treeWidthMult  = 1.0;        // horizontal stretch multiplier for the tree
-let showGeneId    = true;        // tip label parts
-let showOGName    = true;
-let showRefOrtho  = true;
+let showGeneId    = false;       // tip label parts
+let showOGName    = false;
+let showRefOrtho  = false;
 let showSupport        = false;   // show internal node support values
 let showDSNodes        = false;   // show D/S event type at every internal node (POSSVM)
 let hideNonHl          = false;   // hide non-highlighted tip labels when hlSet active
@@ -1208,8 +1208,10 @@ function leafLabelParts(d){
   };
 }
 
+function treeLabelFontSVG(){ return (ogHlSet!==null ? 2 : 1) * tipFontSVG(); }
+
 function computeLeafLabelLayout(leaves){
-  const fs=tipFontSVG();
+  const fs=treeLabelFontSVG();
   const layout={
     gidW:0, ogW:0, refW:0,
     sepW:measureTextPx(" \u00b7 ", fs, "monospace", "400"),
@@ -1281,8 +1283,8 @@ function ogHighlightSubtitle(node){
 
 function leafOgName(d){
   const gid=d&&d.data ? (d.data.gene_id||d.data.name||"") : "";
-  if(_pvmActive) return ogGene2Name[gid]||"";
-  return ogGene2Name[gid]||((d&&d.data&&d.data.og)||"");
+  const sourceMap=sourceOgGeneMapForCurrentTree();
+  return sourceMap[gid]||((d&&d.data&&d.data.og)||"");
 }
 
 // onPick  = called live on every input event (colour-drag preview)
@@ -1398,6 +1400,7 @@ let hmColOrderOverride = null; // drag-reorder: array of column ids overriding n
 let hmOGIndex      = null;   // lazy: {og_name → {hgId,family,cls,total,species_counts}}
 let hmGeneIndex    = null;   // lazy: {gene_id → og_name}
 let hmSearchIndex  = null;   // lazy: [{label,type,cls,fam,hg_id}] for global search
+let hmBatchSelection = new Set(); // search dropdown items staged for bulk add
 
 function getEffectiveCustomOGs(){
   const all=new Set(hmCustomOGs);
@@ -1577,7 +1580,7 @@ function showTip(event, d) {
         html += '<div class="tt-row"><span>Reference gene</span><strong style="color:#8e44ad">'+REFNAME_MAP[gid]+'</strong></div>';
       }
       if (currentDetail) {
-        for (const [og,genes] of Object.entries(activeOgs())) {
+        for (const [og,genes] of Object.entries(sourceOgsForCurrentTree())) {
           if (genes.includes(gid)) {
             const ogCol=ogBaseColor(og);
             html += '<div class="tt-row"><span>OG</span><strong style="color:'+ogCol+'">'+og+'</strong></div>'; break;
@@ -1610,8 +1613,8 @@ function showTip(event, d) {
       const nL = d._children ? countDescLeaves(d._children) : d.leaves().length;
       html += '<div class="tt-row"><span>Subtree leaves</span><strong>'+nL+'</strong></div>';
       html += '<div class="tt-row" style="color:#888"><span>'+(d._children?"collapsed":"expanded")+'</span><span>click to '+(d._children?"expand":"collapse")+'</span></div>';
-      if (isOGNode(d) && currentDetail && activeOgs()[d.data.name])
-        html += '<div class="tt-row"><span>OG members</span><strong>'+activeOgs()[d.data.name].length+'</strong></div>';
+      if (isOGNode(d) && currentDetail && sourceOgsForCurrentTree()[d.data.name])
+        html += '<div class="tt-row"><span>OG members</span><strong>'+sourceOgsForCurrentTree()[d.data.name].length+'</strong></div>';
     }
   }
   tooltipEl.innerHTML = html;
@@ -2746,17 +2749,33 @@ function hmTextSearchInput(val){
   ];
   _hmSearchSel=-1;
 
-  dd.innerHTML=_hmSearchHits.map((h,i)=>{
+  const batchBar=ogSection.length ? `
+    <div style="display:flex;align-items:center;gap:6px;padding:5px 10px;background:#fafcff;border-bottom:1px solid #e7eef7;font-size:10px;position:sticky;top:0;z-index:1">
+      <button type="button" onclick="hmSearchSelectVisible()" style="padding:1px 6px;font-size:10px;border:1px solid #bfd0e3;border-radius:3px;background:#fff;cursor:pointer">Select visible</button>
+      <button type="button" onclick="hmSearchClearSelected()" style="padding:1px 6px;font-size:10px;border:1px solid #d6d6d6;border-radius:3px;background:#fff;cursor:pointer">Clear</button>
+      <button type="button" onclick="hmSearchAddSelected()" style="margin-left:auto;padding:1px 8px;font-size:10px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer">Add selected</button>
+    </div>` : "";
+  dd.innerHTML=batchBar+_hmSearchHits.map((h,i)=>{
     if(h.kind==="sep") return `<div style="padding:3px 10px;font-size:10px;color:#aaa;background:#f5f5f5;border-top:1px solid #eee;border-bottom:1px solid #eee;font-weight:600;letter-spacing:.05em;text-transform:uppercase">${h.label}</div>`;
     if(h.kind==="nav") return `<div data-i="${i}" style="padding:4px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;color:${h.type==="hg"?"#333":h.type==="family"?"#555":"#888"}" onmousedown="hmTextSearchGo(${i})">&#8594; ${h.label}</div>`;
     if(h.type==="group"){
-      const done=hmCustomGroups.some(g=>g.groupType===h.groupType&&g.key===h.key)||h.ogs.every(og=>effOGs.has(og));
+      const done=hmSearchItemDone(h);
       const icon=h.groupType==="class"?"\uD83D\uDCC2":"\uD83E\uDDF9";
-      return `<div data-i="${i}" style="padding:4px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;background:${done?"#e8f5e9":"#f0f6ff"};color:${done?"#2e7d32":"#1a4a7a"}" onmousedown="hmTextSearchGo(${i})">${icon} <b>${h.key}</b><span style="color:#aaa;font-size:10px"> \u00b7 ${h.groupType} \u00b7 ${h.count} OGs</span>${done?`<span style="float:right">&#10003;</span>`:""}</div>`;
+      const checked=hmBatchSelection.has(hmSearchItemKey(h));
+      return `<div data-i="${i}" style="padding:4px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;background:${done?"#e8f5e9":checked?"#eaf3ff":"#f0f6ff"};color:${done?"#2e7d32":"#1a4a7a"};display:flex;align-items:center;gap:7px" onmousedown="hmTextSearchGo(${i})">
+        <input type="checkbox" ${checked?'checked':''} ${done?'disabled':''} onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onchange="hmSearchToggle(${i})">
+        <span>${icon} <b>${h.key}</b><span style="color:#aaa;font-size:10px"> \u00b7 ${h.groupType} \u00b7 ${h.count} OGs</span></span>
+        ${done?`<span style="margin-left:auto">&#10003;</span>`:""}
+      </div>`;
     }
-    const r=hmOGIndex[h.og]||{family:"",total:0}; const already=effOGs.has(h.og);
+    const r=hmOGIndex[h.og]||{family:"",total:0}; const already=hmSearchItemDone(h);
+    const checked=hmBatchSelection.has(hmSearchItemKey(h));
     const lbl=h.matchedGene?`<span style="color:#888;font-size:10px">gene</span> <b>${h.matchedGene}</b><span style="color:#aaa;font-size:10px"> \u2192 ${h.og} \u00b7 ${r.family}</span>`:`<b>${h.og}</b><span style="color:#aaa;font-size:10px"> \u00b7 ${r.family} \u00b7 ${r.total} genes</span>`;
-    return `<div data-i="${i}" style="padding:4px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;background:${already?"#e8f5e9":"#fff"};color:${already?"#2e7d32":"#222"}" onmousedown="hmTextSearchGo(${i})">${lbl}${already?`<span style="float:right;color:#27ae60">&#10003;</span>`:""}</div>`;
+    return `<div data-i="${i}" style="padding:4px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;background:${already?"#e8f5e9":checked?"#eaf3ff":"#fff"};color:${already?"#2e7d32":"#222"};display:flex;align-items:center;gap:7px" onmousedown="hmTextSearchGo(${i})">
+      <input type="checkbox" ${checked?'checked':''} ${already?'disabled':''} onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onchange="hmSearchToggle(${i})">
+      <span>${lbl}</span>
+      ${already?`<span style="margin-left:auto;color:#27ae60">&#10003;</span>`:""}
+    </div>`;
   }).join("")||`<div style="padding:6px 10px;color:#aaa">No matches</div>`;
   dd.style.display="block";
 }
@@ -2776,28 +2795,91 @@ function hmTextSearchKey(ev){
 }
 function hmTextSearchGo(i){
   const h=_hmSearchHits[i]; if(!h||h.kind==="sep") return;
-  document.getElementById("hm-search-dd").style.display="none";
-  document.getElementById("hm-text-search").value=""; hmTextFilter="";
   if(h.kind==="nav"){
+    document.getElementById("hm-search-dd").style.display="none";
+    document.getElementById("hm-text-search").value=""; hmTextFilter="";
     if(h.type==="class"){ hmViewMode="class"; hmActiveClass=h.cls; hmActiveFamily=hmActiveHG=hmActiveHGRec=null; }
     else if(h.type==="family"){ hmViewMode="family"; hmActiveClass=h.cls; hmActiveFamily=h.fam; hmActiveHG=hmActiveHGRec=null; }
     else if(h.type==="hg"){
       const rec=TREE_INDEX.find(r=>r.id===h.hg_id); if(!rec) return;
       hmViewMode="og"; hmActiveClass=h.cls; hmActiveFamily=h.fam; hmActiveHG=h.hg_id; hmActiveHGRec=rec;
     }
-  } else { // add to custom selection
-    if(h.type==="group"){
-      if(!hmCustomGroups.some(g=>g.groupType===h.groupType&&g.key===h.key))
-        hmCustomGroups.push({groupType:h.groupType,key:h.key,label:h.key,ogs:h.ogs});
-    } else {
-      if(!hmCustomOGs.includes(h.og)) hmCustomOGs.push(h.og);
-    }
-    hmViewMode="custom";
-    const bar=document.getElementById("hm-custom-bar");
-    bar.style.display="flex"; _positionCustomBar();
-    renderCustomChips();
+  } else {
+    hmSearchToggle(i);
+    return;
   }
   drawHeatmap();
+}
+
+function hmSearchItemKey(h){
+  if(!h) return "";
+  if(h.type==="group") return `group:${h.groupType}:${h.key}`;
+  if(h.type==="og") return `og:${h.og}`;
+  return "";
+}
+
+function hmSearchItemDone(h){
+  if(!h || h.kind==="nav" || h.kind==="sep") return false;
+  const effOGs=new Set(getEffectiveCustomOGs());
+  if(h.type==="group")
+    return hmCustomGroups.some(g=>g.groupType===h.groupType&&g.key===h.key) || h.ogs.every(og=>effOGs.has(og));
+  return effOGs.has(h.og);
+}
+
+function hmSearchToggle(i){
+  const h=_hmSearchHits[i];
+  if(!h || h.kind==="nav" || h.kind==="sep" || hmSearchItemDone(h)) return;
+  const key=hmSearchItemKey(h);
+  if(!key) return;
+  if(hmBatchSelection.has(key)) hmBatchSelection.delete(key);
+  else hmBatchSelection.add(key);
+  hmTextSearchInput(document.getElementById("hm-text-search").value||"");
+}
+
+function hmAddSearchHit(h){
+  if(!h || hmSearchItemDone(h)) return false;
+  if(h.type==="group"){
+    if(!hmCustomGroups.some(g=>g.groupType===h.groupType&&g.key===h.key))
+      hmCustomGroups.push({groupType:h.groupType,key:h.key,label:h.key,ogs:h.ogs});
+  } else if(h.type==="og"){
+    if(!hmCustomOGs.includes(h.og)) hmCustomOGs.push(h.og);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+function hmSearchAddSelected(){
+  let changed=false;
+  _hmSearchHits.forEach(h=>{
+    const key=hmSearchItemKey(h);
+    if(key && hmBatchSelection.has(key)) changed = hmAddSearchHit(h) || changed;
+  });
+  hmBatchSelection.clear();
+  if(!changed){
+    hmTextSearchInput(document.getElementById("hm-text-search").value||"");
+    return;
+  }
+  hmViewMode="custom";
+  const bar=document.getElementById("hm-custom-bar");
+  bar.style.display="flex";
+  _positionCustomBar();
+  renderCustomChips();
+  drawHeatmap();
+  hmTextSearchInput(document.getElementById("hm-text-search").value||"");
+}
+
+function hmSearchSelectVisible(){
+  _hmSearchHits.forEach(h=>{
+    const key=hmSearchItemKey(h);
+    if(key && !hmSearchItemDone(h)) hmBatchSelection.add(key);
+  });
+  hmTextSearchInput(document.getElementById("hm-text-search").value||"");
+}
+
+function hmSearchClearSelected(){
+  hmBatchSelection.clear();
+  hmTextSearchInput(document.getElementById("hm-text-search").value||"");
 }
 
 // ── Custom OG selection helpers ────────────────────────────────────────────
@@ -3195,6 +3277,9 @@ document.getElementById("hl-search").addEventListener("keydown",function(e){
 document.getElementById("hl-search").addEventListener("change",function(){
   if(this.value.trim()) addHlTag(this.value);
 });
+document.getElementById("hog-node-search").addEventListener("keydown",function(e){
+  if(e.key==="Enter"&&this.value.trim()){ addHogNodeFromInput(); e.preventDefault(); }
+});
 
 document.getElementById("tip-font-slider").addEventListener("input",function(){
   tipFontSize=+this.value;
@@ -3540,6 +3625,14 @@ function sourceOgsForCurrentTree(){
   return currentDetail?currentDetail.ogs:{};
 }
 
+function sourceOgGeneMapForCurrentTree(){
+  const gene2og={};
+  for(const [og, genes] of Object.entries(sourceOgsForCurrentTree()||{})){
+    (genes||[]).forEach(gid=>{ if(!(gid in gene2og)) gene2og[gid]=og; });
+  }
+  return gene2og;
+}
+
 const treeSvg = d3.select("#tree-svg");
 let rootNode=null, gMain=null, _uid=0, _zoom=null, _zoomScale=1;
 let _compareNode1=null;  // first node selected for species comparison
@@ -3549,10 +3642,11 @@ function tipFontSVG(){ return (tipFontSize!==null?tipFontSize:11)/_zoomScale; }
 function applyTipFontSize(){
   if(!gMain) return;
   const fs=tipFontSVG();
-  gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?fs:0);
-  gMain.selectAll(".og-label").attr("font-size",fs);
+  const labelFs=treeLabelFontSVG();
+  gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?labelFs:0);
+  gMain.selectAll(".og-label").attr("font-size",labelFs);
   // update MRCA sub-label tspan inside og-label
-  gMain.selectAll(".og-label tspan:nth-child(2)").attr("font-size",Math.max(7,fs*0.82));
+  gMain.selectAll(".og-label tspan:nth-child(2)").attr("font-size",Math.max(7,labelFs*0.82));
   const colR2=Math.max(10,fs*0.9), leafR2=fs*0.36, colCx2=-(colR2-leafR2);
   gMain.selectAll(".count-label").attr("font-size",fs).attr("x",d=>d&&d._children&&!d._isOgCol?colCx2:null);
   gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",colR2).attr("cx",colCx2);
@@ -3560,7 +3654,7 @@ function applyTipFontSize(){
   gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
 }
 
-function isOGNode(d){ return !d.data.leaf && d.data.name && activeOgs()[d.data.name]!==undefined; }
+function isOGNode(d){ return !d.data.leaf && d.data.name && sourceOgsForCurrentTree()[d.data.name]!==undefined; }
 
 // Species-tree hierarchy for MRCA lookup (built once from SP_TREE_DATA)
 const _spHier=(function(){
@@ -3748,14 +3842,11 @@ function annotateOGNodes(){
   // This keeps the MRCA stable when subclades are collapsed: the MRCA is computed
   // from the full leaf set, then we only annotate it if it is itself visible.
   const ogGroups={};
+  const sourceMap=sourceOgGeneMapForCurrentTree();
   (function walkAll(n){
     if(n.data.leaf){
       const gid=n.data.gene_id||n.data.name||"";
-      // When POSSVM is active: only use POSSVM-assigned OGs (ingroup only).
-      // This prevents outgroup pipeline OGs from generating labels that clutter the view.
-      const og=_pvmActive
-        ? (ogGene2Name[gid]||"")
-        : (n.data.og||ogGene2Name[gid]||"");
+      const og=sourceMap[gid]||(n.data.og||"");
       if(og)(ogGroups[og]=ogGroups[og]||[]).push(n);
       return;
     }
@@ -5576,7 +5667,7 @@ function renderTree(animate){
   // leaf labels: gene_id + OG name
   nodeSel.select(".leaf-label")
     .attr("x",7).attr("y",0).attr("dy",null).attr("dominant-baseline","middle").attr("text-anchor","start")
-    .attr("font-size",d=>d.data.leaf?tipFontSVG():0)
+    .attr("font-size",d=>d.data.leaf?treeLabelFontSVG():0)
     .attr("font-family","monospace")
     .style("cursor",()=>_compareNode1?"crosshair":"default")
     .on("click",(event,d)=>{
@@ -5638,7 +5729,7 @@ function renderTree(animate){
     .attr("x",d=>d._children?BADGE_W+6:-7)
     .attr("dy","0.35em")
     .attr("text-anchor",d=>d._children?"start":"end")
-    .attr("font-size",tipFontSVG())
+    .attr("font-size",treeLabelFontSVG())
     .style("cursor",d=>{
       if(_compareNode1) return "crosshair";
       if(d._isOgCol) return "pointer";
@@ -5690,7 +5781,7 @@ function renderTree(animate){
         if(mrca){
           el.append("tspan")
             .attr("x",BADGE_W+6).attr("dy","1.2em")
-            .attr("font-size",Math.max(7,tipFontSVG()*0.82))
+            .attr("font-size",Math.max(7,treeLabelFontSVG()*0.82))
             .attr("fill","#888")
             .text(mrca);
         }
@@ -5896,9 +5987,10 @@ function _collapseToOGs(){
   rootNode.each(d=>{
     if(!d.data.leaf&&isOGNode(d)&&d.children){d._children=d.children;d.children=null;d._isOgCol=true;found=true;}
   });
-  // pass 2b: fallback – derive OGs from leaf og field or ogGene2Name map (works for
-  // original trees that lack POSSVM-annotated internals and pipe-sep leaf names)
-  if(!found){
+  // pass 2b: derive OGs from leaf og field or ogGene2Name map for any OGs not
+  // already collapsed by pass 2a.  Leaves inside pass-2a triangles are invisible
+  // to rootNode.leaves(), so there is no double-processing.
+  {
     const ogGroups={};
     rootNode.leaves().forEach(l=>{
       const gid=l.data.gene_id||l.data.name||"";
@@ -5935,13 +6027,14 @@ function toggleHighlightOGs(){
   // Collect OG root nodes (same logic as _collapseToOGs pass 2a/2b)
   const ogNodes=[];   // [{node, label}]
   const ogs=activeOgs();
-  let found=false;
+  const foundOgNames=new Set();
   rootNode.each(d=>{
-    if(!d.data.leaf&&isOGNode(d)){ogNodes.push({node:d,label:d.data.name}); found=true;}
+    if(!d.data.leaf&&isOGNode(d)){ogNodes.push({node:d,label:d.data.name}); foundOgNames.add(d.data.name);}
   });
-  if(!found){
+  // Also collect OGs present only in leaf annotations (not named on internal nodes)
+  {
     const ogGroups={};
-    rootNode.leaves().forEach(l=>{const og=leafOgName(l); if(og)(ogGroups[og]=ogGroups[og]||[]).push(l);});
+    rootNode.leaves().forEach(l=>{const og=leafOgName(l); if(og&&!foundOgNames.has(og))(ogGroups[og]=ogGroups[og]||[]).push(l);});
     for(const [og,leaves] of Object.entries(ogGroups)){
       const mrca=findExactOgRoot(leaves);
       if(mrca&&!mrca.data.leaf) ogNodes.push({node:mrca,label:og});
