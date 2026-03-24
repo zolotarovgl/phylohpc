@@ -292,7 +292,7 @@ Determines which orthogroups were likely present in the last common ancestor (LC
 ### Run
 
 ```bash
-cat ids.txt | grep -E 'Fork|RFX' > ancestry_ids.txt
+cat ids.txt | grep -E 'RFX' > ancestry_ids.txt
 # Single clade
 nextflow run step4.ancestry.nf \
     -profile local,fast \
@@ -300,10 +300,7 @@ nextflow run step4.ancestry.nf \
     --ids ancestry_ids.txt
 
 # Multiple clades in one run
-nextflow run step4.ancestry.nf \
-    -profile slurm,precise \
-    --node_names "Bilateria,Metazoa,Deuterostomia" \
-    --ids ids.txt
+nextflow run step4.ancestry.nf -profile local,fast --node_names "Metazoa,Bilateria,Deuterostomia,Chordata" --ids ancestry_ids.txt
 ```
 
 `--node_names` must match named internal nodes in `data/species_tree.full.newick`.
