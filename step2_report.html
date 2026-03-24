@@ -268,7 +268,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
               <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()" title="Switch between available tree sources (e.g. GeneRax vs FastTree)">Showing: GeneRax</button>
               <button class="ctrl-btn" id="btn-collapse-ogs" onclick="toggleCollapseToOGs()" title="Collapse each orthogroup clade into a single labelled triangle">Collapse to OGs</button>
               <button class="ctrl-btn" id="btn-highlight-ogs" onclick="toggleHighlightOGs()" title="Shade the background of each orthogroup clade with its colour">Highlight OGs</button>
-              <button class="ctrl-btn" id="btn-possvm" onclick="togglePossvmPanel(event)" title="Re-call orthogroups using the POSSVM species-overlap method — choose ingroup species, then click Run">POSSVM</button>
+              <button class="ctrl-btn" id="btn-possvm" onclick="togglePossvmPanel(event)" title="Re-call orthogroups using the POSSVM species-overlap method — choose ingroup species, then click Run">Orthogroups</button>
               <button class="ctrl-btn" onclick="downloadTreeSVG()" title="Download the current tree view as an SVG file">&#11015; SVG</button>
               <button class="ctrl-btn" onclick="downloadTreePNG()" title="Download the current tree view as a PNG image">&#11015; PNG</button>
             </div>
@@ -507,7 +507,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <button onclick="clearHogNodes()" style="padding:3px 8px;font-size:10px;border:1px solid #aaa;border-radius:3px;background:#f5f5f5;cursor:pointer">Clear</button>
           <button onclick="runHierPossvm()" style="padding:3px 8px;font-size:10px;border:1px solid #2980b9;border-radius:3px;background:#edf6fd;color:#1a5276;cursor:pointer">Run hOGs</button>
         </div>
-        <div id="hog-clade-wrap" style="display:none;border:1px solid #d7e7f5;border-radius:4px;padding:4px;margin-bottom:6px;overflow:auto;background:#f7fbff;max-height:170px"></div>
+        <div id="hog-clade-wrap" style="display:none;border:1px solid #d7e7f5;border-radius:4px;padding:4px;margin-bottom:6px;overflow:auto;background:#f7fbff;height:170px;min-height:80px;min-width:200px;resize:both"></div>
         <div id="hog-node-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
         <div id="hog-result" style="color:#1a5276;font-size:10px;min-height:14px"></div>
       </div>
@@ -523,6 +523,10 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button onclick="closeHogMapPanel()" style="border:none;background:none;cursor:pointer;font-size:16px;color:#8896a0;line-height:1">&times;</button>
   </div>
   <div id="hog-map-wrap" style="width:100%;height:calc(100% - 52px);overflow:auto;background:#fff"></div>
+  <div id="hog-map-resize" title="Drag to resize" style="position:absolute;bottom:0;right:0;width:16px;height:16px;cursor:nwse-resize;opacity:.5"
+    onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=.5">
+    <svg width="16" height="16"><polyline points="6,14 14,6" stroke="#88a" stroke-width="1.5" stroke-linecap="round"/><polyline points="10,14 14,10" stroke="#88a" stroke-width="1.5" stroke-linecap="round"/></svg>
+  </div>
 </div>
 <div id="clade-hl-popup" style="position:fixed;display:none;background:#fff;border:1px solid #e67e22;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:270;flex-direction:column;gap:5px">
   <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600">Clade highlight</div>
@@ -822,8 +826,11 @@ function ogLeafColor(geneId, species) {
   if (hlSet !== null) {
     if (!hlSet.has(species||"")) return "#ccc";
     const gi = hlGroupIndex.get(species||"");
-    return gi !== undefined ? hlTagColor(gi) : (ogLeaf2Color[geneId] || "#ccc");
+    if (gi !== undefined) return hlTagColor(gi);
+    if (window._hogClickGenes && !window._hogClickGenes.has(geneId)) return "#ccc";
+    return ogLeaf2Color[geneId] || "#ccc";
   }
+  if (window._hogClickGenes && !window._hogClickGenes.has(geneId)) return "#ccc";
   return ogLeaf2Color[geneId] || "#ccc";
 }
 
@@ -847,14 +854,19 @@ function refNameTokens(values){
 }
 
 function hogLabelFromGenes(baseOg, genes){
+  // Name the OG by the reference gene names present in it, following the same
+  // logic as POSSVM's ref_tagcluster: collect ref names from direct REFNAME_MAP
+  // entries first, then from per-gene ref_ortholog annotations (which are
+  // genuine orthologs assigned by the pipeline run — not "like", just real ones).
+  // Only fall back to the raw OG id when no reference information is available.
   const direct=refNameTokens(genes.map(gid=>REFNAME_MAP[gid]).filter(Boolean));
-  if(direct.length) return `${baseOg}:${direct.join("/")}`;
+  if(direct.length) return direct.join("/");
   const inferred=refNameTokens(
     genes
       .map(gid=>((GENE_META[gid]||{}).ref_ortholog||"").trim())
       .filter(name=>name && name!=="NA")
   );
-  if(inferred.length) return `${baseOg}:like:${inferred.join("/")}`;
+  if(inferred.length) return inferred.join("/");
   return baseOg;
 }
 
@@ -2961,6 +2973,7 @@ function selectTree(rec){
   document.getElementById("og-hl-search").value="";
   renderOgHlTags();
   _pvmActive=false; _pvmIngroupSps=null; _pvmOgs=null;
+  window._hogClickGenes=null;
   cladeSp2Color={}; cladeSp2Group={}; cladeGrpColor={}; ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   cladeHighlights.clear();
   _pvmHogModel=null; closeHogMapPanel();
@@ -3001,6 +3014,7 @@ function selectTree(rec){
 
 function rebuildOgColors(){
   if(colorMode!=="og")return;
+  window._hogClickGenes=null;
   ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
   const ogs=activeOgs();
   Object.keys(ogs).sort().forEach((og,i)=>{
@@ -3625,6 +3639,11 @@ function pvmDrawHogCladeTree(){
   const wrap=document.getElementById("hog-clade-wrap");
   wrap.innerHTML="";
   if(!SP_TREE_DATA){ wrap.innerHTML='<span style="color:#888;font-size:10px;padding:4px">No species tree loaded.</span>'; return; }
+  // Redraw when the user resizes the pane
+  if(!wrap._hogResizeObs){
+    wrap._hogResizeObs=new ResizeObserver(()=>pvmDrawHogCladeTree());
+    wrap._hogResizeObs.observe(wrap);
+  }
   function flat(n){return[n].concat(n.children?n.children.flatMap(flat):[]);}
   function clone(n){return Object.assign({},n,{children:n.children?n.children.map(clone):null});}
   const treeSpSet=new Set(pvmGetTreeSpecies());
@@ -3639,7 +3658,7 @@ function pvmDrawHogCladeTree(){
   if(!tree){ wrap.innerHTML='<span style="color:#888;font-size:10px;padding:4px">No matching species.</span>'; return; }
   const allN=flat(tree);
   const leaves=allN.filter(n=>!n.children);
-  const leafH=14, lM=6, W=270;
+  const leafH=14, lM=6, W=Math.max(220, wrap.clientWidth-10);
   leaves.forEach((l,i)=>{l._y=i*leafH+leafH/2;});
   function assignY(n){if(n.children){n.children.forEach(assignY);n._y=(n.children[0]._y+n.children[n.children.length-1]._y)/2;}}
   assignY(tree);
@@ -4063,7 +4082,7 @@ function buildHierPossvmModel(levelNames, sos){
     const rawId=og;
     return {
       id:`${rootRec.name}::${og}`,
-      og:og,
+      og:hogLabelFromGenes(og, genes),
       raw_id:rawId,
       emergent:true,
       clade:rootRec.name,
@@ -4128,12 +4147,18 @@ function buildHierPossvmModel(levelNames, sos){
       const result=computePossvmAssignments(pruned, recSpecies, sos);
       const entries=Object.entries(result.ogs).map(([og, genes])=>[og, genes.filter(gid=>keepGenes.includes(gid))]).filter(([, genes])=>genes.length);
       entries.sort((a,b)=>b[1].length-a[1].length || a[0].localeCompare(b[0]));
+      const usedChildLabels=new Set();
       entries.forEach(([og, genes], idx)=>{
         const species=[...new Set(genes.map(gid=>gene2sp.get(gid)).filter(Boolean))].sort((a,b)=>speciesOrder.indexOf(a)-speciesOrder.indexOf(b));
-        // Use the local POSSVM rerun's own OG ids for split children instead of
-        // inheriting the broad parent OG name into every descendant label.
-        const rawId=entries.length===1 ? parentOg.raw_id : og;
-        const label=entries.length===1 ? parentOg.og : hogLabelFromGenes(rawId, genes);
+        // Always base child labels on the parent OG's raw_id so they inherit
+        // the pipeline OG context.  For splits, hogLabelFromGenes appends the
+        // reference-gene content of each sub-cluster (e.g. OG_0001:like:Pax5).
+        // Deduplicate within the same parent in case two children share refs.
+        const rawId=parentOg.raw_id;
+        const baseLabel=entries.length===1 ? parentOg.og : hogLabelFromGenes(rawId, genes);
+        let label=baseLabel; let sfx=2;
+        while(usedChildLabels.has(label)){ label=`${baseLabel}#${sfx++}`; }
+        usedChildLabels.add(label);
         const childId=`${rec.name}::${parentOg.id}::${idx+1}`;
         nextOgs.push({
           id:childId,
@@ -4171,6 +4196,31 @@ function buildHierPossvmModel(levelNames, sos){
     });
   }
   levels.forEach((level, li)=>level.ogs.forEach(og=>{ og._levelIndex=li; }));
+
+  // ── Keep only OG chains that span ALL selected levels ────────────────────
+  // Back-propagate from the last level: an OG "reaches the end" if it is at
+  // the last level, or if at least one of its children reaches the end.
+  // This lets the user see only meaningful duplication/split patterns that
+  // are traceable across every clade they selected.
+  if(levels.length>1){
+    const childrenOf=new Map();
+    links.forEach(link=>{
+      if(!childrenOf.has(link.source)) childrenOf.set(link.source,[]);
+      childrenOf.get(link.source).push(link.target);
+    });
+    const reachesEnd=new Set();
+    levels[levels.length-1].ogs.forEach(og=>reachesEnd.add(og.id));
+    for(let li=levels.length-2;li>=0;li--){
+      levels[li].ogs.forEach(og=>{
+        if((childrenOf.get(og.id)||[]).some(cid=>reachesEnd.has(cid))) reachesEnd.add(og.id);
+      });
+    }
+    levels.forEach(level=>{ level.ogs=level.ogs.filter(og=>reachesEnd.has(og.id)); });
+    const kept=links.filter(l=>reachesEnd.has(l.source)&&reachesEnd.has(l.target));
+    links.length=0; kept.forEach(l=>links.push(l));
+  }
+  // ── End span-all-levels filter ────────────────────────────────────────────
+
   const allById=new Map();
   levels.forEach(level=>level.ogs.forEach(og=>allById.set(og.id, og)));
   const bySource=new Map();
@@ -4333,6 +4383,11 @@ function assignHogOrders(levels, links){
 function closeHogMapPanel(){
   const panel=document.getElementById("hog-map-panel");
   if(panel) panel.style.display="none";
+  if(window._hogClickGenes){
+    window._hogClickGenes=null;
+    cladeHighlights.forEach((rec,uid)=>{ if(rec._fromHogClick) cladeHighlights.delete(uid); });
+    if(rootNode) renderTree(false);
+  }
 }
 
 let _hogPanelDragInit=false;
@@ -4371,11 +4426,52 @@ function initHogMapPanelDrag(){
     panel.style.top=nextTop+"px";
   });
   window.addEventListener("mouseup",()=>{ dragging=false; });
+
+  // ── Resize handle ──────────────────────────────────────────────────────────
+  const resizeHandle=document.getElementById("hog-map-resize");
+  if(resizeHandle){
+    let resizing=false, rStartX=0, rStartY=0, rBaseW=0, rBaseH=0;
+    resizeHandle.addEventListener("mousedown",(ev)=>{
+      const rect=panel.getBoundingClientRect();
+      // Pin position so the panel doesn't jump when we switch from right: to left:
+      panel.style.left=rect.left+"px";
+      panel.style.top=rect.top+"px";
+      panel.style.right="auto";
+      resizing=true;
+      rStartX=ev.clientX; rStartY=ev.clientY;
+      rBaseW=rect.width;   rBaseH=rect.height;
+      ev.preventDefault(); ev.stopPropagation();
+    });
+    window.addEventListener("mousemove",(ev)=>{
+      if(!resizing) return;
+      panel.style.width =Math.max(420, rBaseW+(ev.clientX-rStartX))+"px";
+      panel.style.height=Math.max(260, rBaseH+(ev.clientY-rStartY))+"px";
+    });
+    window.addEventListener("mouseup",()=>{ resizing=false; });
+  }
 }
 
 function highlightHogClade(og, color){
   if(!rootNode || !og || !og.genes || !og.genes.length) return;
+  // Clear previous hOG-click clade backgrounds
   cladeHighlights.forEach((rec,uid)=>{ if(rec._fromHogClick) cladeHighlights.delete(uid); });
+  // Clear previous hOG-click leaf coloring
+  if(window._hogClickGenes){
+    window._hogClickGenes.forEach(gid=>{ delete ogLeaf2Color[gid]; delete ogGene2Name[gid]; });
+  }
+  delete ogName2Color[window._hogClickOgName];
+
+  // Register this OG's genes in the leaf-color maps so they light up
+  // in the gene tree while all other leaves dim to the default grey.
+  const fill=color||"#4a90d9";
+  window._hogClickGenes=new Set(og.genes);
+  window._hogClickOgName=og.og;
+  og.genes.forEach(gid=>{ ogLeaf2Color[gid]=fill; ogGene2Name[gid]=og.og; });
+  ogName2Color[og.og]=fill;
+  colorMode="og";
+  const cbs=document.getElementById("color-by"); if(cbs) cbs.value="og";
+
+  // Expand any collapsed nodes so MRCA lookup works
   rootNode.each(d=>{ if(d._children){ d.children=d._children; d._children=null; d._isOgCol=false; } });
   const want=new Set(og.genes);
   const leaves=[];
@@ -4385,14 +4481,11 @@ function highlightHogClade(og, color){
       if(want.has(gid)) leaves.push(d);
     }
   });
-  if(!leaves.length){
-    renderTree(false);
-    return;
-  }
+  if(!leaves.length){ renderTree(false); return; }
   const mrca=findExactOgRoot(leaves);
   if(mrca){
     cladeHighlights.set(mrca._uid,{
-      color: color || "#cfe8ff",
+      color: fill,
       label: og.og,
       subtitle: ogHighlightSubtitle(mrca),
       _fromHogClick:true,
