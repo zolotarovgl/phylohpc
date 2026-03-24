@@ -114,7 +114,22 @@ def test_load_family_info(tmp_path):
     csv = tmp_path / "info.csv"
     csv.write_text("MyFam\tc1\tc2\tc3\tc4\tc5\tMyClass\n")
     info = r2.load_family_info(str(csv))
-    assert info == {"MyFam": "MyClass"}
+    assert info == {"MyFam": "MyClass", "MyClass": "MyClass"}
+
+def test_load_family_info_accepts_genefam_format(tmp_path):
+    csv = tmp_path / "genefam.csv"
+    csv.write_text("Forkhead\tForkhead\t1.1\t3\tGA\tTF\ttfs\n")
+    info = r2.load_family_info(str(csv))
+    assert info["Forkhead"] == "tfs"
+    assert info["tfs"] == "tfs"
+
+def test_load_family_details_accepts_genefam_format(tmp_path):
+    csv = tmp_path / "genefam.csv"
+    csv.write_text("Forkhead\tForkhead\t1.1\t3\tGA\tTF\ttfs\n")
+    details = r2.load_family_details(str(csv))
+    assert details["Forkhead"]["pfam"] == ["Forkhead"]
+    assert details["Forkhead"]["category"] == "TF"
+    assert details["Forkhead"]["cls"] == "tfs"
 
 def test_build_family_records(tmp_path):
     gl = tmp_path / "Pre.Wnt.genes.list"

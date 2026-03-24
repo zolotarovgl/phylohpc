@@ -748,6 +748,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
               <button class="ctrl-btn" onclick="expandAll()" title="Expand all collapsed nodes">Expand all</button>
               <button class="ctrl-btn" onclick="collapseAll()" title="Collapse all nodes to leaves">Collapse all</button>
               <button class="ctrl-btn" id="btn-reset-root" onclick="resetRoot()" title="Restore the original root (undo all rerooting)" style="display:none">&#x21BA; Reset root</button>
+              <button class="ctrl-btn" id="btn-reset-focus" onclick="resetFocus()" title="Restore the full tree after focusing on a subtree" style="display:none">&#x21F1; Reset focus</button>
               <button class="ctrl-btn" onclick="fitTree()" title="Fit the tree to the current panel size">&#x2922; Fit</button>
               <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()" title="Switch between available tree sources (e.g. GeneRax vs FastTree)">Showing: GeneRax</button>
               <button class="ctrl-btn" id="btn-collapse-ogs" onclick="toggleCollapseToOGs()" title="Collapse each orthogroup clade into a single labelled triangle">Collapse to OGs</button>
@@ -927,6 +928,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     <button id="ccp-triangle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a filled triangle (proportional size)">&#x25BD; Triangle</button>
     <button id="ccp-circle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a circle with leaf count">&#x25EF; Circle</button>
     <button id="ccp-reroot" style="padding:4px 10px;font-size:11px;border:1px solid #27ae60;border-radius:4px;background:#f0fff4;color:#1a7a42;cursor:pointer" title="Reroot the tree at this node (the selected node becomes one child of the new root)">&#x21C5; Reroot here</button>
+    <button id="ccp-focus" style="padding:4px 10px;font-size:11px;border:1px solid #8e44ad;border-radius:4px;background:#faf5ff;color:#6c3483;cursor:pointer" title="Limit the tree view to this subtree">⌕ Focus subtree</button>
     <button id="ccp-compare" style="padding:4px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer" title="Compare species coverage with another node">&#x2316; Compare</button>
     <button id="ccp-highlight" style="padding:4px 10px;font-size:11px;border:1px solid #e67e22;border-radius:4px;background:#fff8f0;color:#c0622a;cursor:pointer" title="Highlight subtree background with a colour">&#x25A0; Highlight</button>
   </div>
@@ -935,6 +937,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="tri-popup-title"></div>
   <div style="display:flex;gap:5px;flex-wrap:wrap">
     <button id="tap-expand" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x25B7; Expand</button>
+    <button id="tap-focus" style="padding:3px 10px;font-size:11px;border:1px solid #8e44ad;border-radius:4px;background:#faf5ff;color:#6c3483;cursor:pointer">⌕ Focus</button>
     <button id="tap-rename" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x270F; Rename</button>
     <button id="tap-color"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Color</button>
     <button id="tap-compare" style="padding:3px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer">&#x2316; Compare</button>
@@ -997,7 +1000,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   </div>
 </div>
 <div id="hog-map-panel" style="position:fixed;display:none;top:72px;right:18px;width:min(760px,calc(100vw - 80px));height:min(460px,calc(100vh - 110px));background:#fff;border:1px solid #cfd8de;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);z-index:330;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid #e8edf1;background:#f7fafc">
+  <div id="hog-map-header" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid #e8edf1;background:#f7fafc;cursor:move;user-select:none">
     <div>
       <div style="font-weight:700;font-size:12px;color:#314553">Hierarchical orthogroups</div>
       <div id="hog-map-subtitle" style="font-size:10px;color:#7c8b95;margin-top:2px"></div>
@@ -1192,11 +1195,65 @@ function leafLabelText(d){
   return parts.join(" \u00b7 ");
 }
 
-function leafLabelRightPx(d, mg){
-  const text=leafLabelText(d);
+function leafLabelParts(d){
+  if(!isLeafLabelVisible(d)) return {gid:"", og:"", ref:""};
+  return {
+    gid:(d.data.gene_id||d.data.name||""),
+    og:leafOgName(d),
+    ref:(d.data.ref||""),
+  };
+}
+
+function computeLeafLabelLayout(leaves){
+  const fs=tipFontSVG();
+  const layout={
+    gidW:0, ogW:0, refW:0,
+    sepW:measureTextPx(" \u00b7 ", fs, "monospace", "400"),
+    hasGid:false, hasOg:false, hasRef:false,
+  };
+  for(const d of leaves){
+    const {gid, og, ref}=leafLabelParts(d);
+    if(showGeneId&&gid){
+      layout.hasGid=true;
+      layout.gidW=Math.max(layout.gidW, measureTextPx(gid, fs, "monospace", "400"));
+    }
+    if(showOGName&&!showOGLabels&&og){
+      layout.hasOg=true;
+      layout.ogW=Math.max(layout.ogW, measureTextPx(og, fs, "monospace", "400"));
+    }
+    if(showRefOrtho&&ref){
+      layout.hasRef=true;
+      layout.refW=Math.max(layout.refW, measureTextPx(ref, fs, "monospace", "400"));
+    }
+  }
+  return layout;
+}
+
+function leafLabelRightPx(d, mg, layout){
   const base=nodeX(d,mg)+7;
-  if(!text) return base;
-  return base + measureTextPx(text, tipFontSVG(), "monospace", "400");
+  const parts=leafLabelParts(d);
+  if(!parts.gid&&!parts.og&&!parts.ref) return base;
+  if(!layout) layout=computeLeafLabelLayout([d]);
+  let width=0;
+  if(layout.hasGid) width+=layout.gidW;
+  if(layout.hasOg){
+    if(layout.hasGid) width+=layout.sepW;
+    width+=layout.ogW;
+  }
+  if(layout.hasRef){
+    if(layout.hasGid||layout.hasOg) width+=layout.sepW;
+    width+=layout.refW;
+  }
+  return base + width;
+}
+
+function leafLabelColumnXs(layout){
+  const gidX=7;
+  const ogSepX=gidX + (layout.hasGid ? layout.gidW : 0);
+  const ogX=ogSepX + (layout.hasGid ? layout.sepW : 0);
+  const refSepX=ogX + (layout.hasOg ? layout.ogW : 0);
+  const refX=refSepX + ((layout.hasGid || layout.hasOg) ? layout.sepW : 0);
+  return {gidX, ogSepX, ogX, refSepX, refX};
 }
 
 function nodeSpeciesSet(node){
@@ -1265,26 +1322,53 @@ function naturalSortStrings(arr){
   return [...arr].sort((a,b)=>a.localeCompare(b, undefined, {numeric:true, sensitivity:"base"}));
 }
 
+function refNameTokens(values){
+  return naturalSortStrings([...new Set(
+    values
+      .flatMap(v=>String(v||"").split("/"))
+      .map(v=>v.trim())
+      .filter(Boolean)
+  )]);
+}
+
 function hogLabelFromGenes(baseOg, genes){
-  const direct=naturalSortStrings([...new Set(genes.map(gid=>REFNAME_MAP[gid]).filter(Boolean))]);
+  const direct=refNameTokens(genes.map(gid=>REFNAME_MAP[gid]).filter(Boolean));
   if(direct.length) return `${baseOg}:${direct.join("/")}`;
-  const inferred=naturalSortStrings([...new Set(
+  const inferred=refNameTokens(
     genes
       .map(gid=>((GENE_META[gid]||{}).ref_ortholog||"").trim())
       .filter(name=>name && name!=="NA")
-  )]);
+  );
   if(inferred.length) return `${baseOg}:like:${inferred.join("/")}`;
   return baseOg;
 }
 
 function hogReferenceSummary(genes){
-  const direct=naturalSortStrings([...new Set(genes.map(gid=>REFNAME_MAP[gid]).filter(Boolean))]);
-  const inferred=naturalSortStrings([...new Set(
+  const direct=refNameTokens(genes.map(gid=>REFNAME_MAP[gid]).filter(Boolean));
+  const inferred=refNameTokens(
     genes
       .map(gid=>((GENE_META[gid]||{}).ref_ortholog||"").trim())
       .filter(name=>name && name!=="NA")
-  )]);
+  );
   return {direct, inferred};
+}
+
+function relabelOgMapWithReferences(rawOgMap){
+  const used=new Set();
+  const relabeled={};
+  Object.entries(rawOgMap)
+    .sort((a,b)=>a[0].localeCompare(b[0], undefined, {numeric:true, sensitivity:"base"}))
+    .forEach(([rawOg, genes])=>{
+      const baseLabel=hogLabelFromGenes(rawOg, genes);
+      let label=baseLabel;
+      let suffix=2;
+      while(used.has(label)){
+        label=`${baseLabel}#${suffix++}`;
+      }
+      used.add(label);
+      relabeled[label]=[...genes];
+    });
+  return relabeled;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1535,6 +1619,8 @@ function hideTip() { tooltipEl.style.display = "none"; }
 const cpEl = document.getElementById("collapsed-popup");
 const customNodeNames = {};
 let cpActiveNode = null;
+let _origTreeDictForFocus=null;
+let _isSubtreeFocused=false;
 
 function collectLeafGenes(children) {
   const genes = [];
@@ -1571,6 +1657,10 @@ function collectLeafGenes(children) {
     const node=_ccpNode; if(!node) return; hide();
     _userRerooted=true;
     rerootAtNode(node);
+  });
+  document.getElementById("ccp-focus").addEventListener("click",()=>{
+    const node=_ccpNode; if(!node) return; hide();
+    focusOnNode(node);
   });
   document.getElementById("ccp-compare").addEventListener("click",()=>{
     const node=_ccpNode; if(!node) return; hide();
@@ -1682,6 +1772,10 @@ let cladeHlExtend = 20;          // how many px past the rightmost leaf the high
   document.getElementById("tap-expand").addEventListener("click",()=>{
     const node=_nd; if(!node) return; hide();
     node.children=node._children; node._children=null; node._isOgCol=false; renderTree(true);
+  });
+  document.getElementById("tap-focus").addEventListener("click",()=>{
+    const node=_nd; if(!node) return; hide();
+    focusOnNode(node);
   });
   document.getElementById("tap-rename").addEventListener("click",()=>{
     const node=_nd; if(!node) return; hide();
@@ -3426,6 +3520,12 @@ function activeOgs(){
   return currentDetail?currentDetail.ogs:{};
 }
 
+function sourceOgsForCurrentTree(){
+  if(treeSource==="original"&&currentDetail)
+    return currentDetail.prev_ogs||currentDetail.ogs||{};
+  return currentDetail?currentDetail.ogs:{};
+}
+
 const treeSvg = d3.select("#tree-svg");
 let rootNode=null, gMain=null, _uid=0, _zoom=null, _zoomScale=1;
 let _compareNode1=null;  // first node selected for species comparison
@@ -3610,16 +3710,13 @@ function assignBranchLenPos(node, cum){
 /** Horizontal (x) pixel position of a node, honouring branch-length mode. */
 function nodeX(d, mg){ return (useBranchLen?(d._by||0)*_phyloScale:d.y)+mg.left; }
 
-/** Rounded-corner elbow path for a cladogram/phylogram link.
- *  Correct cladogram shape: vertical stem first, then horizontal to child. */
+/** Orthogonal elbow path for a cladogram/phylogram link.
+ *  Phylogenetic trees are rendered with hard right-angle joints:
+ *  vertical stem first, then horizontal to child. */
 function elbowPath(s, t, mg, r){
   const sx=nodeX(s,mg), sy=s.x+mg.top;
   const tx=nodeX(t,mg), ty=t.x+mg.top;
-  const dy=ty-sy;
-  if(Math.abs(dy)<r*2) return `M${sx},${sy}V${ty}H${tx}`;
-  return dy>0
-    ? `M${sx},${sy}V${ty-r}A${r},${r} 0 0,1 ${sx+r},${ty}H${tx}`
-    : `M${sx},${sy}V${ty+r}A${r},${r} 0 0,0 ${sx+r},${ty}H${tx}`;
+  return `M${sx},${sy}V${ty}H${tx}`;
 }
 
 /** Annotate expanded internal nodes with _og_label via MRCA from tip OG data.
@@ -4188,84 +4285,186 @@ function pruneTreeToGeneSet(node, geneSet){
   return node;
 }
 
+function cloneTreeDict(treeDict){
+  return JSON.parse(JSON.stringify(treeDict));
+}
+
+function hierarchyFromTreeData(treeData){
+  if(!treeData) return null;
+  // Accept either a plain tree dict or an existing d3.hierarchy node.
+  if(typeof treeData.each==="function") return d3.hierarchy(_h2d(treeData), d=>d.children||null);
+  return d3.hierarchy(cloneTreeDict(treeData), d=>d.children||null);
+}
+
+function treeDictForGeneSet(treeRoot, genes){
+  const geneSet=genes instanceof Set ? genes : new Set(genes||[]);
+  if(!treeRoot || !geneSet.size) return null;
+  const cloned=hierarchyFromTreeData(treeRoot);
+  const pruned=pruneTreeToGeneSet(cloned, geneSet);
+  return pruned ? _h2d(pruned) : null;
+}
+
 function computePossvmAssignments(treeRoot, ingroupSps, sos){
-  function tagSps(node){
+  function naturalCmp(a, b){
+    return String(a).localeCompare(String(b), undefined, {numeric:true, sensitivity:"base"});
+  }
+
+  function collect(node){
     const ch=node.children||node._children;
     if(!ch||!ch.length){
+      const gid=node.data.gene_id||node.data.name||"";
       const sp=node.data.species||"";
-      node._pvmSps=ingroupSps.has(sp)?new Set([sp]):new Set();
-      node._pvmCnt=ingroupSps.has(sp)?1:0;
-    } else {
-      node._pvmSps=new Set(); node._pvmCnt=0;
-      for(const c of ch){
-        tagSps(c);
-        c._pvmSps.forEach(s=>node._pvmSps.add(s));
-        node._pvmCnt+=c._pvmCnt;
-      }
+      node._pvmAllSps=sp ? new Set([sp]) : new Set();
+      node._pvmAllLeaves=gid ? [gid] : [];
+      node._pvmInLeaves=(gid && ingroupSps.has(sp)) ? [gid] : [];
+      node._pvmEvent=null;
+      return;
+    }
+    node._pvmAllSps=new Set();
+    node._pvmAllLeaves=[];
+    node._pvmInLeaves=[];
+    for(const c of ch){
+      collect(c);
+      c._pvmAllSps.forEach(s=>node._pvmAllSps.add(s));
+      if(c._pvmAllLeaves&&c._pvmAllLeaves.length) node._pvmAllLeaves.push(...c._pvmAllLeaves);
+      if(c._pvmInLeaves&&c._pvmInLeaves.length) node._pvmInLeaves.push(...c._pvmInLeaves);
     }
   }
 
   function classify(node){
     const ch=node.children||node._children;
-    if(!ch||ch.length<2){node._pvmEvent=null;return;}
+    if(!ch||ch.length<2){ node._pvmEvent=null; return; }
     for(const c of ch) classify(c);
     let isD=false;
-    outer:for(let i=0;i<ch.length&&!isD;i++){
+    outer: for(let i=0;i<ch.length&&!isD;i++){
       for(let j=i+1;j<ch.length&&!isD;j++){
-        const si=ch[i]._pvmSps, sj=ch[j]._pvmSps;
+        const si=ch[i]._pvmAllSps, sj=ch[j]._pvmAllSps;
         if(!si.size||!sj.size) continue;
-        let ovl=0; si.forEach(s=>{if(sj.has(s))ovl++;});
-        if(ovl/Math.min(si.size,sj.size)>sos){isD=true;break outer;}
+        let ovl=0;
+        si.forEach(s=>{ if(sj.has(s)) ovl++; });
+        if(ovl/Math.min(si.size, sj.size) > sos){ isD=true; break outer; }
       }
     }
-    if(isD && node._pvmSps.size===1) isD=false;
+    if(isD && node._pvmAllSps.size===1) isD=false;
     node._pvmEvent=isD?"D":"S";
   }
 
-  let ogCounter=0;
-  const newOgs={};
-  function assign(node,ogId){
+  function isOrthologyEvent(node){
+    if(node._pvmEvent==="S") return true;
+    if(node._pvmEvent!=="D") return false;
     const ch=node.children||node._children;
-    if(!ch||!ch.length){
-      const sp=node.data.species||"";
-      if(ingroupSps.has(sp)&&ogId){
-        if(!newOgs[ogId]) newOgs[ogId]=[];
-        newOgs[ogId].push(node.data.gene_id||node.data.name);
+    if(!ch||ch.length!==2) return false;
+    const left=[...ch[0]._pvmAllSps];
+    const right=[...ch[1]._pvmAllSps];
+    return left.length===1 && right.length===1 && left[0]===right[0];
+  }
+
+  const adjacency=new Map();
+  function ensureNode(gid){
+    if(gid && !adjacency.has(gid)) adjacency.set(gid, new Set());
+  }
+  function addEdge(a, b){
+    if(!a||!b||a===b) return;
+    ensureNode(a); ensureNode(b);
+    adjacency.get(a).add(b);
+    adjacency.get(b).add(a);
+  }
+
+  function buildOrthologyGraph(node){
+    const ch=node.children||node._children;
+    if(!ch||ch.length<2) return;
+    for(const c of ch) buildOrthologyGraph(c);
+    if(!isOrthologyEvent(node)) return;
+    for(let i=0;i<ch.length;i++){
+      for(let j=i+1;j<ch.length;j++){
+        const left=ch[i]._pvmInLeaves||[];
+        const right=ch[j]._pvmInLeaves||[];
+        if(!left.length||!right.length) continue;
+        for(const a of left){
+          for(const b of right){
+            addEdge(a,b);
+          }
+        }
       }
-      return;
-    }
-    if(node._pvmEvent==="D"){
-      for(const c of ch){
-        if(c._pvmSps.size>0) assign(c,"OG_"+String(++ogCounter).padStart(4,"0"));
-        else assign(c,null);
-      }
-    } else {
-      let cur=ogId;
-      if(!cur&&node._pvmSps.size>0) cur="OG_"+String(++ogCounter).padStart(4,"0");
-      for(const c of ch) assign(c,cur);
     }
   }
 
-  tagSps(treeRoot);
+  function seededOrder(nodes){
+    function key(s){
+      let h=11;
+      const str=String(s);
+      for(let i=0;i<str.length;i++) h=((h*131)+str.charCodeAt(i))>>>0;
+      return h;
+    }
+    return [...nodes].sort((a,b)=>key(a)-key(b) || naturalCmp(a,b));
+  }
+
+  function lpaClusters(nodes){
+    if(!nodes.length) return {};
+    const labels=new Map(nodes.map(gid=>[gid,gid]));
+    const baseOrder=seededOrder(nodes);
+    const maxIter=Math.max(25, nodes.length*3);
+    for(let iter=0; iter<maxIter; iter++){
+      let changed=false;
+      const order=(iter%2===0) ? baseOrder : [...baseOrder].reverse();
+      for(const gid of order){
+        const neigh=[...(adjacency.get(gid)||[])];
+        if(!neigh.length) continue;
+        const counts=new Map();
+        for(const nb of neigh){
+          const lbl=labels.get(nb)||nb;
+          counts.set(lbl, (counts.get(lbl)||0)+1);
+        }
+        let best=labels.get(gid)||gid;
+        let bestCount=-1;
+        counts.forEach((count, lbl)=>{
+          if(count>bestCount || (count===bestCount && naturalCmp(lbl, best)<0)){
+            best=lbl;
+            bestCount=count;
+          }
+        });
+        if(best!==labels.get(gid)){
+          labels.set(gid, best);
+          changed=true;
+        }
+      }
+      if(!changed) break;
+    }
+    const groups=new Map();
+    for(const gid of nodes){
+      const lbl=labels.get(gid)||gid;
+      if(!groups.has(lbl)) groups.set(lbl, []);
+      groups.get(lbl).push(gid);
+    }
+    const ordered=[...groups.values()].map(genes=>genes.sort(naturalCmp))
+      .sort((a,b)=>b.length-a.length || naturalCmp(a[0]||"", b[0]||""));
+    const ogs={};
+    ordered.forEach((genes, idx)=>{
+      ogs["OG_"+String(idx+1).padStart(4,"0")]=genes;
+    });
+    return ogs;
+  }
+
+  collect(treeRoot);
   classify(treeRoot);
-  let rootOg=null;
-  if(treeRoot._pvmEvent!=="D"&&treeRoot._pvmSps.size>0)
-    rootOg="OG_"+String(++ogCounter).padStart(4,"0");
-  assign(treeRoot,rootOg);
-  return {ogs:newOgs, root:treeRoot};
+  const ingroupGenes=(treeRoot._pvmInLeaves||[]).slice().sort(naturalCmp);
+  ingroupGenes.forEach(ensureNode);
+  buildOrthologyGraph(treeRoot);
+  return {ogs:lpaClusters(ingroupGenes), root:treeRoot};
 }
 
 function applyPossvmRun(newOgs, ingroupSps){
-  const nOgs=Object.keys(newOgs).length;
+  const namedOgs=relabelOgMapWithReferences(newOgs);
+  const nOgs=Object.keys(namedOgs).length;
   ogLeaf2Color={}; ogName2Color={}; ogGene2Name={};
-  Object.keys(newOgs).sort().forEach((og,i)=>{
+  Object.keys(namedOgs).sort((a,b)=>a.localeCompare(b, undefined, {numeric:true, sensitivity:"base"})).forEach((og,i)=>{
     const col=palette[i%palette.length];
     ogName2Color[og]=col;
-    for(const gid of newOgs[og]){ogLeaf2Color[gid]=col;ogGene2Name[gid]=og;}
+    for(const gid of namedOgs[og]){ogLeaf2Color[gid]=col;ogGene2Name[gid]=og;}
   });
   _pvmActive=true;
   _pvmIngroupSps=ingroupSps;
-  _pvmOgs=newOgs;
+  _pvmOgs=namedOgs;
   colorMode="og";
   // Sync the colour-by dropdown so the UI reflects the active mode
   const _cbs=document.getElementById("color-by");
@@ -4277,8 +4476,8 @@ function applyPossvmRun(newOgs, ingroupSps){
   // Fully expand the tree first so MRCA lookup works on all leaves.
   rootNode.each(n=>{if(n._children){n.children=n._children;n._children=null;n._isOgCol=false;}});
   rootNode.each(n=>{n._uid=n._uid||0;}); // ensure _uid is set (set during renderTree; defensive)
-  Object.keys(newOgs).sort().forEach((og,i)=>{
-    const leaves=newOgs[og].map(gid=>{
+  Object.keys(namedOgs).sort((a,b)=>a.localeCompare(b, undefined, {numeric:true, sensitivity:"base"})).forEach((og,i)=>{
+    const leaves=namedOgs[og].map(gid=>{
       let found=null;
       rootNode.each(n=>{if(n.data.leaf&&(n.data.gene_id||n.data.name)===gid) found=n;});
       return found;
@@ -4318,6 +4517,7 @@ function buildHierPossvmModel(levelNames, sos){
   const clades=getNamedSpeciesTreeClades();
   const byName=new Map(clades.map(rec=>[rec.name, rec]));
   const gene2sp=getCurrentGeneSpeciesMap();
+  const currentOgs=sourceOgsForCurrentTree();
   const seen=new Set();
   const selected=levelNames.map(name=>byName.get(name)).filter(Boolean).filter(rec=>{
     const key=rec.species.slice().sort().join("|");
@@ -4339,14 +4539,18 @@ function buildHierPossvmModel(levelNames, sos){
   if(!selected.length) return {levels, links, sos};
 
   const rootRec=selected[0];
-  const rootResult=computePossvmAssignments(cloneCurrentTreeForPvm(), new Set(rootRec.species), sos);
-  const rootOgs=Object.entries(rootResult.ogs).map(([og, genes])=>{
+  const rootSpecies=new Set(rootRec.species);
+  const rootOgs=Object.entries(currentOgs)
+    .map(([og, genes])=>[og, genes.filter(gid=>rootSpecies.has(gene2sp.get(gid)))])
+    .filter(([, genes])=>genes.length)
+    .map(([og, genes])=>{
     const species=[...new Set(genes.map(gid=>gene2sp.get(gid)).filter(Boolean))].sort((a,b)=>speciesOrder.indexOf(a)-speciesOrder.indexOf(b));
     const rawId=og;
     return {
       id:`${rootRec.name}::${og}`,
-      og:hogLabelFromGenes(rawId, genes),
+      og:og,
       raw_id:rawId,
+      emergent:true,
       clade:rootRec.name,
       depth:rootRec.depth,
       size:genes.length,
@@ -4354,6 +4558,7 @@ function buildHierPossvmModel(levelNames, sos){
       species,
       subtitle:spMRCAName(new Set(species)) || rootRec.name,
       parent_id:null,
+      tree_dict:treeDictForGeneSet(rootNode, genes),
     };
   }).sort((a,b)=>b.size-a.size || a.og.localeCompare(b.og));
   levels.push({
@@ -4375,9 +4580,11 @@ function buildHierPossvmModel(levelNames, sos){
       if(keepGenes.length===1){
         const gid=keepGenes[0];
         const species=[gene2sp.get(gid)].filter(Boolean);
+        const singletonTree=parentOg.tree_dict ? treeDictForGeneSet(parentOg.tree_dict, [gid]) : null;
         nextOgs.push({
           id:`${rec.name}::${parentOg.id}::1`,
           og:parentOg.og,
+          emergent:(parentOg.genes||[]).length>1,
           clade:rec.name,
           depth:rec.depth,
           size:1,
@@ -4385,6 +4592,8 @@ function buildHierPossvmModel(levelNames, sos){
           species,
           subtitle:spMRCAName(new Set(species)) || rec.name,
           parent_id:parentOg.id,
+          raw_id:parentOg.raw_id,
+          tree_dict:singletonTree || parentOg.tree_dict,
         });
         links.push({
           source:parentOg.id,
@@ -4398,21 +4607,25 @@ function buildHierPossvmModel(levelNames, sos){
         });
         return;
       }
-      const pruned=pruneTreeToGeneSet(cloneCurrentTreeForPvm(), new Set(keepGenes));
+      const parentTree=parentOg.tree_dict ? hierarchyFromTreeData(parentOg.tree_dict) : cloneCurrentTreeForPvm();
+      const pruned=pruneTreeToGeneSet(parentTree, new Set(keepGenes));
       if(!pruned) return;
       const result=computePossvmAssignments(pruned, recSpecies, sos);
       const entries=Object.entries(result.ogs).map(([og, genes])=>[og, genes.filter(gid=>keepGenes.includes(gid))]).filter(([, genes])=>genes.length);
       entries.sort((a,b)=>b[1].length-a[1].length || a[0].localeCompare(b[0]));
       entries.forEach(([og, genes], idx)=>{
         const species=[...new Set(genes.map(gid=>gene2sp.get(gid)).filter(Boolean))].sort((a,b)=>speciesOrder.indexOf(a)-speciesOrder.indexOf(b));
-        const rawId=entries.length===1 ? parentOg.raw_id : `${parentOg.raw_id}.${idx+1}`;
-        const label=hogLabelFromGenes(rawId, genes);
+        // Use the local POSSVM rerun's own OG ids for split children instead of
+        // inheriting the broad parent OG name into every descendant label.
+        const rawId=entries.length===1 ? parentOg.raw_id : og;
+        const label=entries.length===1 ? parentOg.og : hogLabelFromGenes(rawId, genes);
         const childId=`${rec.name}::${parentOg.id}::${idx+1}`;
         nextOgs.push({
           id:childId,
           og:label,
           raw_id:rawId,
           raw_og:og,
+          emergent:entries.length>1,
           clade:rec.name,
           depth:rec.depth,
           size:genes.length,
@@ -4420,6 +4633,7 @@ function buildHierPossvmModel(levelNames, sos){
           species,
           subtitle:spMRCAName(new Set(species)) || rec.name,
           parent_id:parentOg.id,
+          tree_dict:treeDictForGeneSet(result.root, genes),
         });
         links.push({
           source:parentOg.id,
@@ -4441,7 +4655,164 @@ function buildHierPossvmModel(levelNames, sos){
       ogs:nextOgs.sort((a,b)=>b.size-a.size || a.og.localeCompare(b.og)),
     });
   }
-  return {levels, links, sos};
+  levels.forEach((level, li)=>level.ogs.forEach(og=>{ og._levelIndex=li; }));
+  const allById=new Map();
+  levels.forEach(level=>level.ogs.forEach(og=>allById.set(og.id, og)));
+  const bySource=new Map();
+  links.forEach(link=>{
+    if(!bySource.has(link.source)) bySource.set(link.source, []);
+    bySource.get(link.source).push(link);
+  });
+
+  const visibleLevels=levels.map((level, li)=>{
+    const showAllForLevel=(li===0 || li===levels.length-1);
+    let ogs=level.ogs.filter(og=>showAllForLevel || og.emergent);
+    // If a selected intermediate level only carries parent OGs forward and
+    // does not introduce a new split, still render those carried-through OGs
+    // so the level does not misleadingly appear as "0 OGs".
+    if(li>0 && !ogs.length && level.ogs.length){
+      ogs=level.ogs.map(og=>({ ...og, carried:true }));
+    } else {
+      ogs=ogs.map(og=>({ ...og, carried:!!og.carried }));
+    }
+    return {
+      ...level,
+      ogs,
+    };
+  });
+  const visibleSet=new Set();
+  visibleLevels.forEach(level=>level.ogs.forEach(og=>visibleSet.add(og.id)));
+
+  function collectVisibleTargets(sourceId){
+    const out=bySource.get(sourceId)||[];
+    const acc=[];
+    for(const link of out){
+      const child=allById.get(link.target);
+      if(!child) continue;
+      if(visibleSet.has(child.id)){
+        acc.push({
+          target:child,
+          weight:child.size,
+          genes:[...(child.genes||[])],
+        });
+      } else {
+        acc.push(...collectVisibleTargets(child.id));
+      }
+    }
+    return acc;
+  }
+
+  const visibleLinks=[];
+  visibleLevels.forEach((level, li)=>{
+    level.ogs.forEach(sourceOg=>{
+      const targets=collectVisibleTargets(sourceOg.id);
+      targets.forEach(({target, weight, genes})=>{
+        visibleLinks.push({
+          source:sourceOg.id,
+          target:target.id,
+          source_level:li,
+          target_level:target._levelIndex,
+          source_og:sourceOg.og,
+          target_og:target.og,
+          weight,
+          genes,
+        });
+      });
+    });
+  });
+
+  return {levels:visibleLevels, links:visibleLinks, sos};
+}
+
+function hogChildSortForParent(parent, children){
+  return children.slice().sort((a,b)=>{
+    const aCarry=(a.og.raw_id&&parent.raw_id&&a.og.raw_id===parent.raw_id) || a.og.og===parent.og;
+    const bCarry=(b.og.raw_id&&parent.raw_id&&b.og.raw_id===parent.raw_id) || b.og.og===parent.og;
+    if(aCarry!==bCarry) return aCarry ? -1 : 1;
+    return b.og.size-a.og.size || a.og.og.localeCompare(b.og.og) || a.idx-b.idx;
+  });
+}
+
+function assignHogOrders(levels, links){
+  const incomingByTarget=new Map();
+  links.forEach(link=>{
+    if(!incomingByTarget.has(link.target)) incomingByTarget.set(link.target, []);
+    incomingByTarget.get(link.target).push(link);
+  });
+  levels.forEach((level, li)=>{
+    if(li===0){
+      level.ogs.forEach((og, idx)=>{ og._order=idx; });
+      return;
+    }
+    const prevLevel=levels[li-1];
+    const childBuckets=new Map();
+    const orphans=[];
+    level.ogs.forEach((og, idx)=>{
+      const inbound=(incomingByTarget.get(og.id)||[]).filter(link=>link.target_level===li);
+      if(!inbound.length){
+        orphans.push({og, idx});
+        return;
+      }
+      const primary=inbound.slice().sort((a,b)=>b.weight-a.weight || a.source.localeCompare(b.source))[0];
+      if(!childBuckets.has(primary.source)) childBuckets.set(primary.source, []);
+      childBuckets.get(primary.source).push({og, idx, parentId:primary.source});
+    });
+
+    const assignments=[];
+    let nextFree=0;
+    prevLevel.ogs
+      .slice()
+      .sort((a,b)=>(a._order??0)-(b._order??0) || a.og?.localeCompare?.(b.og||"") || 0)
+      .forEach(parent=>{
+        const children=hogChildSortForParent(parent, childBuckets.get(parent.id)||[]);
+        if(!children.length) return;
+        const blockLen=children.length;
+        const anchor=Math.max(0, Math.round(parent._order ?? nextFree));
+        const idealStart=Math.max(0, Math.round(anchor - (blockLen-1)/2));
+        const start=Math.max(nextFree, idealStart);
+        const positions=Array.from({length:blockLen}, (_,i)=>start+i);
+        nextFree=start+blockLen;
+
+        const carryIdx=children.findIndex(ch=>
+          (ch.og.raw_id&&parent.raw_id&&ch.og.raw_id===parent.raw_id) || ch.og.og===parent.og
+        );
+        const centerOrder=positions
+          .map((pos,i)=>({pos,i,diff:Math.abs(pos-anchor)}))
+          .sort((a,b)=>a.diff-b.diff || a.pos-b.pos);
+        const placed=new Array(blockLen);
+        const usedPosIdx=new Set();
+        const usedChildIdx=new Set();
+        if(carryIdx>=0){
+          const slot=centerOrder[0].i;
+          placed[slot]=children[carryIdx];
+          usedPosIdx.add(slot);
+          usedChildIdx.add(carryIdx);
+        }
+        const remainingChildren=children
+          .map((child,i)=>({child,i}))
+          .filter(rec=>!usedChildIdx.has(rec.i))
+          .map(rec=>rec.child);
+        const remainingSlots=centerOrder
+          .map(rec=>rec.i)
+          .filter(i=>!usedPosIdx.has(i));
+        remainingSlots.forEach((slot, idx)=>{
+          placed[slot]=remainingChildren[idx];
+        });
+        positions.forEach((pos, idx)=>{
+          const child=placed[idx];
+          if(!child) return;
+          child.og._order=pos;
+          assignments.push(child);
+        });
+      });
+
+    orphans.sort((a,b)=>a.idx-b.idx).forEach(orphan=>{
+      orphan.og._order=nextFree++;
+      assignments.push(orphan);
+    });
+    assignments.sort((a,b)=>a.og._order-b.og._order || a.idx-b.idx);
+    level.ogs=assignments.map(rec=>rec.og);
+  });
 }
 
 function closeHogMapPanel(){
@@ -4449,7 +4820,74 @@ function closeHogMapPanel(){
   if(panel) panel.style.display="none";
 }
 
+let _hogPanelDragInit=false;
+function initHogMapPanelDrag(){
+  if(_hogPanelDragInit) return;
+  const panel=document.getElementById("hog-map-panel");
+  const header=document.getElementById("hog-map-header");
+  if(!panel || !header) return;
+  _hogPanelDragInit=true;
+  let dragging=false, startX=0, startY=0, baseLeft=0, baseTop=0;
+  header.addEventListener("mousedown",(ev)=>{
+    if(ev.target.closest("button")) return;
+    const rect=panel.getBoundingClientRect();
+    dragging=true;
+    startX=ev.clientX;
+    startY=ev.clientY;
+    baseLeft=rect.left;
+    baseTop=rect.top;
+    panel.style.left=rect.left+"px";
+    panel.style.top=rect.top+"px";
+    panel.style.right="auto";
+    ev.preventDefault();
+  });
+  window.addEventListener("mousemove",(ev)=>{
+    if(!dragging) return;
+    const panelRect=panel.getBoundingClientRect();
+    const nextLeft=Math.min(
+      Math.max(8, baseLeft + (ev.clientX-startX)),
+      Math.max(8, window.innerWidth - panelRect.width - 8)
+    );
+    const nextTop=Math.min(
+      Math.max(8, baseTop + (ev.clientY-startY)),
+      Math.max(8, window.innerHeight - panelRect.height - 8)
+    );
+    panel.style.left=nextLeft+"px";
+    panel.style.top=nextTop+"px";
+  });
+  window.addEventListener("mouseup",()=>{ dragging=false; });
+}
+
+function highlightHogClade(og, color){
+  if(!rootNode || !og || !og.genes || !og.genes.length) return;
+  cladeHighlights.forEach((rec,uid)=>{ if(rec._fromHogClick) cladeHighlights.delete(uid); });
+  rootNode.each(d=>{ if(d._children){ d.children=d._children; d._children=null; d._isOgCol=false; } });
+  const want=new Set(og.genes);
+  const leaves=[];
+  rootNode.each(d=>{
+    if(d.data && d.data.leaf){
+      const gid=d.data.gene_id||d.data.name||"";
+      if(want.has(gid)) leaves.push(d);
+    }
+  });
+  if(!leaves.length){
+    renderTree(false);
+    return;
+  }
+  const mrca=findExactOgRoot(leaves);
+  if(mrca){
+    cladeHighlights.set(mrca._uid,{
+      color: color || "#cfe8ff",
+      label: og.og,
+      subtitle: ogHighlightSubtitle(mrca),
+      _fromHogClick:true,
+    });
+  }
+  renderTree(false);
+}
+
 function renderHogMap(model){
+  initHogMapPanelDrag();
   const wrap=document.getElementById("hog-map-wrap");
   const subtitle=document.getElementById("hog-map-subtitle");
   wrap.innerHTML="";
@@ -4468,28 +4906,11 @@ function renderHogMap(model){
     if(!linkMap.has(key)) linkMap.set(key, []);
     linkMap.get(key).push(link);
   });
-  model.levels.forEach((level, li)=>{
-    if(li===0){
-      level.ogs.forEach((og, idx)=>{ og._order=idx; });
-      return;
-    }
-    const keyed=level.ogs.map((og, idx)=>{
-      const inbound=linkMap.get(`${li-1}:${li}:${og.id}`)||[];
-      if(!inbound.length) return {og, idx, bary:idx+0.5};
-      const total=inbound.reduce((acc, link)=>acc+link.weight, 0) || 1;
-      const bary=inbound.reduce((acc, link)=>{
-        const prev=model.levels[li-1].ogs.find(p=>p.id===link.source);
-        return acc + ((prev?prev._order:0) * link.weight);
-      }, 0) / total;
-      return {og, idx, bary};
-    }).sort((a,b)=>a.bary-b.bary || a.idx-b.idx);
-    keyed.forEach((rec, idx)=>{ rec.og._order=idx; });
-    level.ogs=keyed.map(rec=>rec.og);
-  });
+  assignHogOrders(model.levels, model.links);
 
   model.levels.forEach((level, li)=>{
     level.x=pad.left + li*colGap;
-    level.ogs.forEach((og, idx)=>{ og.x=level.x; og.y=pad.top + idx*rowGap; });
+    level.ogs.forEach((og)=>{ og.x=level.x; og.y=pad.top + og._order*rowGap; });
   });
 
   const colorScale=d3.scaleOrdinal(palette.concat(_pvmOgHlPalette));
@@ -4636,7 +5057,11 @@ function renderHogMap(model){
         .text(og.subtitle || "");
       g.on("mouseover", function(event){ applyHogHover(level, og, event); })
        .on("mousemove", moveTip)
-       .on("mouseout", clearHogHover);
+       .on("mouseout", clearHogHover)
+       .on("click", function(event){
+         event.stopPropagation();
+         highlightHogClade(og, fill);
+       });
     });
   });
 
@@ -4743,6 +5168,12 @@ function drawGeneTree(treeData, opts){
     _pvmMidpointApplied=false; _userRerooted=false;
     document.getElementById("btn-reset-root").style.display="none";
   }
+  if(opts.preserveFocusState){
+    document.getElementById("btn-reset-focus").style.display="inline";
+  } else {
+    _isSubtreeFocused=false; _origTreeDictForFocus=null;
+    document.getElementById("btn-reset-focus").style.display="none";
+  }
   renderTree(false);
   // auto-fit after layout
   setTimeout(fitTree, 260);
@@ -4800,9 +5231,11 @@ function renderTree(animate){
     _phyloScale=iW/maxBL;
   }
 
+  const visibleLeafNodes=rootNode.descendants().filter(d=>d.data&&d.data.leaf);
+  const leafLabelLayout=computeLeafLabelLayout(visibleLeafNodes);
   const visLeafRight=d3.max(
-    rootNode.descendants().filter(d=>d.data&&d.data.leaf),
-    d=>leafLabelRightPx(d, mg)
+    visibleLeafNodes,
+    d=>leafLabelRightPx(d, mg, leafLabelLayout)
   ) || (nodeX(rootNode,mg)+iWeff);
   const maxCladeLabelWidth=cladeHighlights.size
     ? d3.max(Array.from(cladeHighlights.values()), rec=>Math.max(
@@ -5049,8 +5482,9 @@ function renderTree(animate){
 
   // leaf labels: gene_id + OG name
   nodeSel.select(".leaf-label")
-    .attr("x",7).attr("dy","0.32em").attr("text-anchor","start")
+    .attr("x",7).attr("y",0).attr("dy",null).attr("dominant-baseline","middle").attr("text-anchor","start")
     .attr("font-size",d=>d.data.leaf?tipFontSVG():0)
+    .attr("font-family","monospace")
     .style("cursor",()=>_compareNode1?"crosshair":"default")
     .on("click",(event,d)=>{
       // In compare mode, leaf labels also act as a click target for the second node
@@ -5063,9 +5497,8 @@ function renderTree(animate){
       const el=d3.select(this);
       el.selectAll("tspan").remove();
       if(!isLeafLabelVisible(d)) return;
-      const gid=d.data.gene_id||d.data.name;
-      const og=leafOgName(d);
-      const ref=d.data.ref||"";
+      const cols=leafLabelColumnXs(leafLabelLayout);
+      const {gid, og, ref}=leafLabelParts(d);
       // dim if either species-hl or OG-hl is active and this tip doesn't match
       const notSpHl=hlSet!==null&&!hlSet.has(d.data.species||"");
       const ogHlActive=ogHlSet!==null;
@@ -5082,11 +5515,29 @@ function renderTree(animate){
       const sepCol=notHl?"#ddd":"#bbb";
       const ogCol=notHl?"#ccc":(inOgHl?baseCol:"#4a7aad");
       const refCol=notHl?"#ccc":"#2e8b57";
-      let first=true;
-      function sep(){ if(!first) el.append("tspan").attr("fill",sepCol).text(" \u00b7 "); first=false; }
-      if(showGeneId){ sep(); el.append("tspan").attr("fill",baseCol).text(gid); }
-      if(showOGName&&!showOGLabels&&og){ sep(); el.append("tspan").attr("fill",ogCol).text(og); }
-      if(showRefOrtho&&ref){ sep(); el.append("tspan").attr("fill",refCol).text(ref); }
+      const hasOgText=showOGName&&!showOGLabels&&og;
+      const hasRefText=showRefOrtho&&ref;
+      if(leafLabelLayout.hasGid){
+        if(showGeneId&&gid){
+          el.append("tspan").attr("x",cols.gidX).attr("fill",baseCol).text(gid);
+        }
+      }
+      if(leafLabelLayout.hasOg){
+        if(leafLabelLayout.hasGid && (hasOgText || hasRefText)){
+          el.append("tspan").attr("x",cols.ogSepX).attr("fill",sepCol).text(" \u00b7 ");
+        }
+        if(hasOgText){
+          el.append("tspan").attr("x",cols.ogX).attr("fill",ogCol).text(og);
+        }
+      }
+      if(leafLabelLayout.hasRef){
+        if((leafLabelLayout.hasGid||leafLabelLayout.hasOg) && hasRefText){
+          el.append("tspan").attr("x",cols.refSepX).attr("fill",sepCol).text(" \u00b7 ");
+        }
+        if(hasRefText){
+          el.append("tspan").attr("x",cols.refX).attr("fill",refCol).text(ref);
+        }
+      }
     });
 
   // OG labels: beside OG-collapsed triangle, or beside expanded OG-named internal
@@ -5166,12 +5617,37 @@ function renderTree(animate){
 // ── reroot ──────────────────────────────────────────────────────────────────
 let _origTreeDictForReroot=null;   // saved before the first reroot
 let _isRerooted=false;
+function resetFocus(){
+  if(!_origTreeDictForFocus)return;
+  const fullTree=_origTreeDictForFocus;
+  _origTreeDictForFocus=null;
+  _isSubtreeFocused=false;
+  document.getElementById("btn-reset-focus").style.display="none";
+  drawGeneTree(fullTree);
+}
 function resetRoot(){
   if(!_origTreeDictForReroot)return;
   _isRerooted=false;
   document.getElementById("btn-reset-root").style.display="none";
-  drawGeneTree(_origTreeDictForReroot);
+  drawGeneTree(_origTreeDictForReroot, {preserveFocusState:_isSubtreeFocused});
   _origTreeDictForReroot=null;
+}
+
+function focusOnTreeDict(treeDict){
+  if(!treeDict||!rootNode) return;
+  if(!_isSubtreeFocused) _origTreeDictForFocus=_h2d(rootNode);
+  // Explicit subtree focus should show the focused clade itself, not inherit a
+  // previous heatmap-driven gene filter that can hide all tip labels.
+  hmFocusGids=null;
+  _isSubtreeFocused=true;
+  document.getElementById("btn-reset-focus").style.display="inline";
+  drawGeneTree(cloneTreeDict(treeDict), {preserveFocusState:true});
+}
+
+function focusOnNode(d){
+  if(!d||!rootNode) return;
+  if(d.data&&d.data.leaf) return;
+  focusOnTreeDict(_h2d(d));
 }
 
 // Convert a d3-hierarchy node to a plain dict.
@@ -5298,7 +5774,7 @@ function rerootAtNode(d, splitFrac){
     document.getElementById("possvm-reset-btn").style.display="none";
     document.getElementById("possvm-result").textContent="";
   }
-  drawGeneTree(newRootDict,{preserveRerootState:true});
+  drawGeneTree(newRootDict,{preserveRerootState:true, preserveFocusState:_isSubtreeFocused});
 }
 // ── tree controls ──
 function expandAll(){
