@@ -42,6 +42,10 @@ For local macOS work on Apple Silicon, use the Rosetta/x86_64 environment in
 
 ```bash
 mamba env create -f workflow/environment.yaml
+```
+
+
+```bash
 mamba activate phylo
 ```
 
@@ -70,8 +74,8 @@ Key tools: HMMER, MAFFT, IQ-TREE2, FastTree, MCL, GeneRax, POSSVM, PastML, ete3,
 **On the CRG HPC**, load the required modules before running any pipeline:
 ```bash
 mamba activate phylo
-module load Java          # for Nextflow
-module load OpenMPI       # for GeneRax only
+module load Java          
+module load OpenMPI       
 ```
 
 ---
@@ -138,11 +142,10 @@ Searches the input proteome with HMMER against the defined PFAM profiles, then c
 
 ```bash
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1/
-
-
+PROFILE=local,precise
 # Interactive
 nextflow run step1.nf \
-    -profile local,fast \
+    -profile $PROFILE \
     -resume \
     -w $WORKDIR \
     --genefam_info genefam.csv \
@@ -151,8 +154,9 @@ nextflow run step1.nf \
     -with-trace  reports/trace.step1.txt
 
 # SLURM
+PROFILE=slurm,fast
 sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf \
-    -resume -profile slurm,fast \
+    -resume -profile $PROFILE \
     -w $WORKDIR \
     --report  reports/report.step1.html \
     --trace   reports/trace.step1.txt \
@@ -252,24 +256,10 @@ sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf \
 
 ## Create an interactive report 
 
+The script now takes as input results dir and figures out much of the rest
 ```bash
-python workflow/report_step2.py --possvm_dir results/possvm --search_dir results/search/ --cluster_dir results/clusters --family_info genefam.csv --species_tree data/species_tree.full.newick --output report2.html
+python workflow/report_step2.py --results_dir results --species_tree data/species_tree.full.newick --family_info genefam.csv --output report2.html
 ```
-
-## Step 3 — Gather per-species annotations
-
-Collect POSSVM ortholog assignments into per-species annotation tables. Uses the GeneRax-reconciled POSSVM output when available, falling back to the raw-tree output otherwise.
-
-```bash
-python workflow/gather_annotations.py \
-    --search-dir results/search/ \
-    --tree-dir   results/possvm/ results/possvm_prev \
-    --id         sps_annotate \
-    --outdir     results/annotations/ \
-    --split-prefix
-```
-
-`sps_annotate` is a file listing the species prefixes to annotate. Outputs one TSV per species (or per species × gene family prefix with `--split-prefix`), with columns: gene ID, OG name, reference OG, reference gene name.
 
 ---
 
@@ -294,14 +284,41 @@ Determines which orthogroups were likely present in the last common ancestor (LC
 ```bash
 cat ids.txt | grep -E 'RFX' > ancestry_ids.txt
 # Single clade
-nextflow run step4.ancestry.nf \
-    -profile local,fast \
-    --node_names Bilateria \
-    --ids ancestry_ids.txt
+
+mamba activate phylo
+module load Java          # for Nextflow
+module load OpenMPI       # for GeneRax only
 
 # Multiple clades in one run
-nextflow run step4.ancestry.nf -profile local,fast --node_names "Metazoa,Bilateria,Deuterostomia,Chordata" --ids ancestry_ids.txt
+nextflow run step4.ancestry.nf -profile local,fast --node_names "Metazoa,Bilateria,Euarchontoglires" --ids ancestry_ids.txt --max_cpus 24 -resume
+
+
+python workflow/visualize_hog_hierarchy.py \
+  --links results/ancestry/hog_links/*.og_links.tsv \
+  --stats results/ancestry/hog_links/*.og_stats.tsv \
+  --levels "Metazoa,Bilateria,Chordata,Euarchontoglires" \
+  --output results/ancestry/hog_hierarchy.html
+
 ```
+
+```bash
+snakemake -s step4_ancestry.smk --cores 24 \
+    --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=ancestry_ids.txt
+```
+
+
+```bash
+
+python /users/asebe/gzolotarov/projects/2025_phylogeny/phylohpc/phylogeny/main.py possvm -t         results/gene_trees/tfs.Homeodomains.HG3.treefile --refsps   Mmus -r data/Mmus_gene_names.csv  --outgroup results/ancestry/Metazoa/Metazoa.ignore_species.txt -o Metazoa.tfs.Homeodomains.HG3 -p  results/ancestry/Metazoa/possvm/tfs.Homeodomains.HG3.
+
+
+mkdir -p results/hOGs
+python phylogeny/submodules/possvm-orthology/possvm.py -i results/gene_trees/tfs.Homeodomains.HG3.treefile --refsps   Mmus -r data/Mmus_gene_names.csv  --outgroup results/ancestry/Metazoa/Metazoa.ignore_species.txt -o Metazoa.tfs.Homeodomains.HG3 -p  results/hOGs/Metazoa.tfs.Homeodomains.HG3. -method lpa
+
+
+```
+
+
 
 `--node_names` must match named internal nodes in `data/species_tree.full.newick`.
 
@@ -361,42 +378,13 @@ python workflow/check_job.v2.py -f job_ids > job_stats.tab
 
 `downstream_stats.R` and `resources.R` plot CPU/memory efficiency across jobs. `generax_stats.R` analyses GeneRax runtime scaling with SPR radius.
 
----
 
-## Repository layout
+# hOGs   
+
+
+The ancestry step attempts to implement the hierarchical orthogroups 
+
+```bash
+F=results/ancestry/Bilateria/possvm/Bilateria.tfs.Homeodomains.HG3.ortholog_groups.csv 
 
 ```
-step1.nf                        PFAM search + clustering
-step2.nf                        Alignment, gene trees, POSSVM, GeneRax
-generax.nf                      Standalone GeneRax re-run
-step4.ancestry.nf               Ancestral gene content reconstruction
-nextflow.config                 Profiles and default parameters
-workflow/
-  environment.yaml              Conda environment
-  extract_clade.py              Extract in/out-of-clade species from named node
-  build_pam.py                  Build presence/absence matrix from POSSVM output
-  ancestral_reconstruction.py   PastML wrapper + output parsing
-  visualize_ancestry.py         Self-contained D3.js HTML generator
-  gather_annotations.py         Per-species ortholog annotation tables
-  select_hgs.py                 Filter HGs for downstream analysis
-  get_seqstat.py                Sequence statistics per HG
-  predict_resources.py          Resource prediction from trained models
-  check_tree.py                 Validate and prune species tree
-  check_job.v2.py               Query SLURM job statistics
-  models/                       Pre-trained resource prediction models
-data/
-  species_tree.full.newick      Full tree with named internal nodes
-  species_tree.newick           Binary tree for GeneRax
-  Mmus_gene_names.csv           Reference gene name mapping
-```
-
----
-
-## TODOs
-
-- [ ] HG phylogenetic profiles (presence/absence across all species)
-- [ ] GeneRax: assess whether sharing information across families improves reconciliation
-- [ ] Resource efficiency reports
-- [ ] Re-clustering: prevent DIAMOND reruns; evaluate MMseqs2
-- [ ] Allow IQ-TREE2 to resume from existing checkpoint files
-- [ ] Proper handling of MAFFT OOM errors (exit code 1 vs. 137)

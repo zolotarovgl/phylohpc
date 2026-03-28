@@ -1,3 +1,4 @@
+.snakemake
 work/*
 work_*
 test/*

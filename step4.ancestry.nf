@@ -145,6 +145,7 @@ process VISUALIZE_HIERARCHY {
     input:
     path(all_links)
     path(all_stats)
+    path(all_trees)
     val(levels_str)
 
     output:
@@ -155,6 +156,7 @@ process VISUALIZE_HIERARCHY {
     python ${projectDir}/workflow/visualize_hog_hierarchy.py \
         --links  ${all_links} \
         --stats  ${all_stats} \
+        --trees  ${all_trees} \
         --levels '${levels_str}' \
         --output hog_hierarchy.html
     """
@@ -202,6 +204,7 @@ workflow {
     // Step 4: collect everything and build the visualisation
     all_links = link_out.map { links, stats -> links }.collect()
     all_stats = link_out.map { links, stats -> stats }.collect()
+    all_trees = clade_info.map { node, in_sp, ign_sp, pruned -> pruned }.collect()
 
-    VISUALIZE_HIERARCHY(all_links, all_stats, levels_val)
+    VISUALIZE_HIERARCHY(all_links, all_stats, all_trees, levels_val)
 }

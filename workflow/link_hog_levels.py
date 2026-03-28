@@ -173,18 +173,20 @@ def main() -> None:
             og_genes[og].append(gene)
         for og, genes in sorted(og_genes.items()):
             species = sorted({get_species_prefix(g) for g in genes})
+            total_species = len(in_species_map.get(level, set())) or len(species)
             stat_rows.append({
                 "hg":       args.hg,
                 "level":    level,
                 "og":       og,
                 "n_genes":  len(genes),
                 "n_species": len(species),
+                "n_total_species": total_species,
                 "species":  ",".join(species),
             })
 
     pd.DataFrame(
         stat_rows,
-        columns=["hg", "level", "og", "n_genes", "n_species", "species"],
+        columns=["hg", "level", "og", "n_genes", "n_species", "n_total_species", "species"],
     ).to_csv(args.output_stats, sep="\t", index=False)
 
     # ── Cross-level OG edges ───────────────────────────────────────────────────

@@ -256,6 +256,23 @@ process PVM_PREV {
 
 	cpus 1
 
+	memory {
+		def base = res[id]?.pvm_mem ?: 500.MB
+		return base + (task.attempt - 1) * 500.MB
+	}
+
+	time {
+		def base = res[id]?.pvm_time ?: 5.min
+		return base * task.attempt
+	}
+
+	errorStrategy {
+		return task.attempt <= 3 ? 'retry' : 'ignore'
+	}
+
+	maxRetries 3
+	maxErrors -1
+
 	input:
 	tuple val(id), path(tree), path(aln), path(refnames_file)
 
@@ -300,15 +317,13 @@ process REPORT {
         if (params.refsps)   reportRefArgs << "--refsps ${params.refsps}"
         def refArgs = reportRefArgs.join(' ')
 	    """
-	    export PYTHONNOUSERSITE=1
-	    python ${projectDir}/workflow/report_step2.py \
-	        --possvm_dir      ${params.OUTDIR}/possvm \
-	        --possvm_prev_dir ${params.OUTDIR}/possvm_prev \
-	        --search_dir      ${params.OUTDIR}/search \
-	        --cluster_dir     ${params.OUTDIR}/clusters \
-	        --family_info     ${params.family_info} \
-	        --species_tree    ${params.species_tree} \
-            ${refArgs} \
+		    export PYTHONNOUSERSITE=1
+		    python ${projectDir}/workflow/report_step2.py \
+		        --results_dir     ${params.OUTDIR} \
+		        --family_info     ${params.family_info} \
+		        --species_tree    ${params.species_tree} \
+		        --species_info    ${projectDir}/data/species_info.tsv \
+	            ${refArgs} \
 	        --output          report_step2.html
     """
 }
@@ -337,21 +352,27 @@ process GR_watcher {
     }
 
     errorStrategy {
+        def max_attempts = 5
         if( task.exitStatus == 10 ) {
             log.warn "GeneRax | ${id} | Exit 10 | Family parsing error — ignored"
             return 'ignore'
         }
-        else if( task.exitStatus == 137 ) {
-            log.warn "GeneRax | ${id} | Exit 137 | Likely OOM — retrying (attempt ${task.attempt})"
+        else if( task.attempt <= max_attempts ) {
+            if( task.exitStatus == 137 ) {
+                log.warn "GeneRax | ${id} | Exit 137 | Likely OOM — retrying (attempt ${task.attempt}/${max_attempts})"
+            }
+            else {
+                log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retrying (attempt ${task.attempt}/${max_attempts})"
+            }
             return 'retry'
         }
         else {
-            log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retrying"
-            return 'retry'
+            log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retries exhausted — ignored"
+            return 'ignore'
         }
     }
 
-    maxRetries 2
+    maxRetries 5
     maxErrors -1
 
     input:
