@@ -757,8 +757,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           </label>
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
             Rotation:
-            <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="65" style="width:70px;cursor:pointer;accent-color:#4a90d9">
-            <span id="hm-col-rot-val" style="width:24px;text-align:right">65</span>&deg;
+            <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="90" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="hm-col-rot-val" style="width:24px;text-align:right">90</span>&deg;
           </label>
           <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
             Colour:
@@ -776,6 +776,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <button onclick="downloadHeatmapPNG()" title="Download heatmap as PNG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; PNG</button>
           <button onclick="downloadHeatmapSVG()" title="Download heatmap as SVG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; SVG</button>
           <button id="btn-hm-sp-logos" onclick="hmToggleSpLogos()" title="Toggle species images in cladogram" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#128444; Logos</button>
+          <button id="btn-hm-group-hg" onclick="hmToggleGroupByHG()" title="Group columns by Homology Group (drag group headers to reorder)" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#8801; Group HG</button>
           <details style="margin-left:auto;font-size:10px">
             <summary style="cursor:pointer;color:#888;list-style:none">&#9432; Help</summary>
             <div style="position:absolute;z-index:50;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;box-shadow:0 2px 8px rgba(0,0,0,.12);line-height:1.7;color:#999;min-width:300px;right:10px">
@@ -1243,7 +1244,7 @@ let collapsedFraction  = 1.0;     // fraction of proportional space for OG-colla
 let hmSplitSets   = [];      // array of Set<species> for heatmap row splitting
 let hmSplitLabels = [];      // display label for each split group
 let hmColFontSize = 9;       // column label font size (px)
-let hmColRotation = 65;      // column label rotation angle (degrees)
+let hmColRotation = 90;      // column label rotation angle (degrees)
 let hmColorMode   = "zscore"; // "zscore" | "absolute"
 let hmTextFilter  = "";       // free-text filter for heatmap columns
 const spCollapsed = new Set();   // node _ids collapsed in species tree
@@ -1497,6 +1498,8 @@ let hmColSortSp    = null;   // sort heatmap columns by this species' count (des
 let hmCustomOGs    = [];     // user-selected individual OG names for custom view
 let hmCustomGroups = [];     // bulk selections: [{type:"class"|"family", key, label, ogs:[...]}]
 let hmColOrderOverride = null; // drag-reorder: array of column ids overriding natural order
+let hmGroupByHG    = false;   // group columns by parent HG / family / class
+let hmGroupOrderOverride = null; // ordered array of group keys for drag-reorder of groups
 let hmOGIndex      = null;   // lazy: {og_name → {hgId,family,cls,total,species_counts}}
 let hmGeneIndex    = null;   // lazy: {gene_id → og_name}
 let hmSearchIndex  = null;   // lazy: [{label,type,cls,fam,hg_id}] for global search
@@ -1516,6 +1519,19 @@ function hmToggleSpLogos(){
   const btn = document.getElementById("btn-hm-sp-logos");
   if(btn){ btn.style.background = hmShowSpLogos ? "#d0e8ff" : "#fff"; btn.style.fontWeight = hmShowSpLogos ? "600" : ""; }
   drawCladogram();
+}
+
+function hmToggleGroupByHG(){
+  hmGroupByHG = !hmGroupByHG;
+  hmGroupOrderOverride = null;
+  const btn = document.getElementById("btn-hm-group-hg");
+  if(btn){
+    btn.style.background   = hmGroupByHG ? "#e8f0fe" : "#fff";
+    btn.style.color        = hmGroupByHG ? "#1a56c4" : "#555";
+    btn.style.borderColor  = hmGroupByHG ? "#1a56c4" : "#888";
+    btn.style.fontWeight   = hmGroupByHG ? "600" : "";
+  }
+  drawHeatmap();
 }
 
 function getEffectiveCustomOGs(){
@@ -2706,6 +2722,48 @@ function drawHeatmap() {
     });
   }
 
+  // ── column grouping by HG / family / class ─────────────────────────────
+  let _colGrpKey = null; // fn: d → group key string
+  if(hmGroupByHG){
+    if(hmViewMode==="custom"||hmViewMode==="og"){ buildOGIndex(); _colGrpKey=d=>hmOGIndex[d.id]?.hgId||"?"; }
+    else if(hmViewMode==="hg")     _colGrpKey=d=>d.family||"?";
+    else if(hmViewMode==="family") _colGrpKey=d=>d.class||"?";
+  }
+  let hmGrpBoundaries=new Set(); // col indices where a new group starts (excl. 0)
+  let hmGrpMeta=[];              // [{key, startIdx, count}]
+  if(_colGrpKey && data.length){
+    // collect ordered unique group keys
+    const seenGrps=[], grpSeen=new Set();
+    data.forEach(d=>{ const k=_colGrpKey(d); if(!grpSeen.has(k)){grpSeen.add(k);seenGrps.push(k);} });
+    let orderedGrps=seenGrps;
+    if(hmGroupOrderOverride&&hmGroupOrderOverride.length){
+      const inOv=new Set(hmGroupOrderOverride);
+      orderedGrps=[...hmGroupOrderOverride.filter(k=>grpSeen.has(k)),...seenGrps.filter(k=>!inOv.has(k))];
+    }
+    const grpRank=new Map(orderedGrps.map((k,i)=>[k,i]));
+    // stable sort by group rank, preserving intra-group column order
+    const origPos=new Map(data.map((d,i)=>[d.id,i]));
+    data=[...data].sort((a,b)=>{
+      const ga=grpRank.get(_colGrpKey(a))??999, gb=grpRank.get(_colGrpKey(b))??999;
+      if(ga!==gb) return ga-gb;
+      return (origPos.get(a.id)??0)-(origPos.get(b.id)??0);
+    });
+    // compute boundaries and group metadata
+    let prevKey=_colGrpKey(data[0]), grpStart=0;
+    hmGrpMeta.push({key:prevKey,startIdx:0,count:0});
+    for(let i=1;i<data.length;i++){
+      const k=_colGrpKey(data[i]);
+      if(k!==prevKey){
+        hmGrpBoundaries.add(i);
+        hmGrpMeta[hmGrpMeta.length-1].count=i-grpStart;
+        grpStart=i; prevKey=k;
+        hmGrpMeta.push({key:k,startIdx:i,count:0});
+      }
+    }
+    hmGrpMeta[hmGrpMeta.length-1].count=data.length-grpStart;
+  }
+  const HM_GROUP_H = hmGrpMeta.length>1 ? 20 : 0;
+
   // ── heatmap row splitting ──────────────────────────────────────────────
   // ── row grouping: driven by species-tree splits OR active highlight queries ──
   // Priority: hmSplitSets > hlSet.  Both reorder rows and draw separator bands.
@@ -2739,7 +2797,7 @@ function drawHeatmap() {
   // top margin: enough room for rotated column labels (using truncated length)
   const maxColLen=data.reduce((m,d)=>Math.max(m,(colLabelTrunc(d)||"").length),0);
   const hmColLabelH=Math.ceil(Math.sin(hmColRotation*Math.PI/180)*maxColLen*hmColFontSize*0.6)+8;
-  const hmTM=Math.max(HM_TOP, hmColLabelH+14);
+  const hmTM=Math.max(HM_TOP, hmColLabelH+14)+HM_GROUP_H;
   hmTopActual = hmTM; // always sync before cladogram draws
   const nRows=hmOrder.length;
   const CELLS_BOTTOM=nRows*14+hmTM;   // y just below the last cell row
@@ -2905,7 +2963,7 @@ function drawHeatmap() {
     .attr("opacity",0).attr("pointer-events","none");
   let _hmDragIdx=null,_hmDragTgt=null,_hmDragMoved=false,_hmDragSX=0;
   svg.selectAll("text.hm-col").data(data).enter().append("text").attr("class","hm-col")
-    .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W+cW/2},${hmTM-6}) rotate(-${hmColRotation})`)
+    .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W+cW/2},${hmTM-6-HM_GROUP_H}) rotate(-${hmColRotation})`)
     .attr("font-size",hmColFontSize).style("cursor","grab")
     .attr("text-anchor","start")
     .text(colLabelTrunc)
@@ -2937,6 +2995,76 @@ function drawHeatmap() {
         }
         _hmDragIdx=null; _hmDragTgt=null;
       }));
+
+  // ── group headers + vertical separators ───────────────────────────────
+  if(hmGrpMeta.length>1){
+    const grpHdrY=hmTM-HM_GROUP_H;
+    let _hmGrpDragKey=null,_hmGrpDragTgt=null,_hmGrpDragMoved=false,_hmGrpDragSX=0;
+    hmGrpMeta.forEach(g=>{
+      const x0=g.startIdx*cW+ROW_LABEL_W;
+      const w=g.count*cW;
+      const midX=x0+w/2;
+      // drag rect
+      svg.append("rect")
+        .attr("x",x0+1).attr("y",grpHdrY)
+        .attr("width",w-2).attr("height",HM_GROUP_H-4).attr("rx",3)
+        .attr("fill","#e8eef6").attr("stroke","#b0bcd0").attr("stroke-width",1)
+        .style("cursor","grab")
+        .on("mouseover",ev=>showTip(ev,"<b>"+g.key+"</b><br><span style='color:#aaa;font-size:10px'>"+g.count+" column"+(g.count!==1?"s":"")+" — drag to reorder group</span>"))
+        .on("mousemove",moveTip).on("mouseout",hideTip)
+        .call(d3.drag()
+          .on("start",(event)=>{ _hmGrpDragKey=g.key; _hmGrpDragMoved=false; _hmGrpDragSX=event.x; })
+          .on("drag",(event)=>{
+            if(Math.abs(event.x-_hmGrpDragSX)>6) _hmGrpDragMoved=true;
+            if(!_hmGrpDragMoved) return;
+            // estimate target group index from mouse x
+            let cumX=ROW_LABEL_W, tgt=hmGrpMeta.length;
+            for(let gi=0;gi<hmGrpMeta.length;gi++){
+              if(event.x<cumX+hmGrpMeta[gi].count*cW/2){ tgt=gi; break; }
+              cumX+=hmGrpMeta[gi].count*cW;
+            }
+            _hmGrpDragTgt=tgt;
+          })
+          .on("end",()=>{
+            hideTip();
+            if(_hmGrpDragMoved&&_hmGrpDragKey!==null&&_hmGrpDragTgt!==null){
+              const ordered=hmGrpMeta.map(x=>x.key);
+              const srcIdx=ordered.indexOf(_hmGrpDragKey);
+              if(srcIdx>=0){
+                ordered.splice(srcIdx,1);
+                const ins=Math.max(0,Math.min(ordered.length,_hmGrpDragTgt>srcIdx?_hmGrpDragTgt-1:_hmGrpDragTgt));
+                ordered.splice(ins,0,_hmGrpDragKey);
+                hmGroupOrderOverride=[...ordered];
+                drawHeatmap();
+              }
+            }
+            _hmGrpDragKey=null; _hmGrpDragTgt=null; _hmGrpDragMoved=false;
+          }));
+      // group key label (top line)
+      const maxChars=Math.max(2,Math.floor(w/5.5));
+      svg.append("text")
+        .attr("x",midX).attr("y",grpHdrY+7)
+        .attr("text-anchor","middle").attr("dominant-baseline","middle")
+        .attr("font-size",9).attr("font-weight","600").attr("fill","#2c4a7c")
+        .attr("pointer-events","none")
+        .text(g.key.length>maxChars?g.key.slice(0,maxChars-1)+"\u2026":g.key);
+      // column count badge (bottom line)
+      svg.append("text")
+        .attr("x",midX).attr("y",grpHdrY+HM_GROUP_H-6)
+        .attr("text-anchor","middle").attr("dominant-baseline","middle")
+        .attr("font-size",7).attr("fill","#6a7f99").attr("pointer-events","none")
+        .text(g.count);
+    });
+    // black vertical separator lines at group boundaries
+    hmGrpBoundaries.forEach(ci=>{
+      const x=ci*cW+ROW_LABEL_W;
+      svg.append("line")
+        .attr("x1",x).attr("x2",x)
+        .attr("y1",grpHdrY).attr("y2",CELLS_BOTTOM+HM_BAR_H+10)
+        .attr("stroke","#1a1a1a").attr("stroke-width",1.5)
+        .attr("pointer-events","none");
+    });
+  }
 
   // ── column-sum bar chart (below cells) ───────────────────────────────────
   const colTotals=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
