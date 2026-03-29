@@ -23,6 +23,7 @@ Outputs
 import argparse
 import html as _html
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -154,6 +155,454 @@ def load_domain_hits(search_dir: Path) -> dict:
     for gene_id, gene_hits in hits.items():
         gene_hits.sort(key=lambda rec: (rec["start"], rec["end"], rec["name"]))
     return dict(hits)
+
+
+def build_domain_spans(domain_hits: dict) -> dict:
+    """Return compact {gene_id: [start,end]} spans for alignment-range rendering."""
+    spans: dict = {}
+    for gene_id, hits in domain_hits.items():
+        if not hits:
+            continue
+        starts = [int(h["start"]) for h in hits if "start" in h]
+        ends = [int(h["end"]) for h in hits if "end" in h]
+        if not starts or not ends:
+            continue
+        spans[gene_id] = [min(starts), max(ends)]
+    return spans
+
+
+def load_search_gene_lengths(search_dir: Path) -> dict:
+    """Return {gene_id: protein_length} from *.seqs.fasta.fai sidecar files."""
+    lengths: dict = {}
+    if not search_dir.is_dir():
+        return lengths
+    for fai_file in sorted(search_dir.glob("*.seqs.fasta.fai")):
+        try:
+            with open(fai_file) as fh:
+                for line in fh:
+                    cols = line.rstrip("\n").split("\t")
+                    if len(cols) < 2:
+                        continue
+                    gene_id = cols[0].strip()
+                    if not gene_id:
+                        continue
+                    try:
+                        lengths[gene_id] = int(cols[1])
+                    except ValueError:
+                        continue
+        except OSError:
+            continue
+    return lengths
+
+
+def load_gene_to_hg_map(cluster_dir: Path) -> tuple[dict, dict]:
+    """Return ({gene_id: hg_id}, {hg_id: size}) from cluster FASTA files."""
+    gene_to_hg: dict = {}
+    hg_sizes: dict = {}
+    if not cluster_dir.is_dir():
+        return gene_to_hg, hg_sizes
+    for fasta_file in sorted(cluster_dir.glob("*.fasta")):
+        hg_id = fasta_file.stem
+        size = 0
+        try:
+            with open(fasta_file) as fh:
+                for line in fh:
+                    if not line.startswith(">"):
+                        continue
+                    gene_id = line[1:].strip().split()[0]
+                    if not gene_id:
+                        continue
+                    gene_to_hg[gene_id] = hg_id
+                    size += 1
+        except OSError:
+            continue
+        hg_sizes[hg_id] = size
+    return gene_to_hg, hg_sizes
+
+
+def build_exact_domain_catalog(search_dir: Path, gene_lengths: dict) -> dict:
+    """Return a compact per-protein catalog from *.domains_ummerged.csv and *.domains.csv."""
+    if not search_dir.is_dir():
+        return {
+            "genes": [],
+            "lengths": [],
+            "tracks": [],
+            "families": [],
+            "names": [],
+            "pfams": [],
+        }
+
+    merged_ranges: dict = defaultdict(dict)
+    for merged_file in sorted(search_dir.glob("*.domains.csv")):
+        track = merged_file.name[: -len(".domains.csv")]
+        try:
+            with open(merged_file) as fh:
+                for line in fh:
+                    cols = line.rstrip("\n").split("\t")
+                    if len(cols) < 3:
+                        continue
+                    gene_id = cols[0].strip()
+                    if not gene_id:
+                        continue
+                    try:
+                        start = int(float(cols[1]))
+                        end = int(float(cols[2]))
+                    except ValueError:
+                        continue
+                    merged_ranges[track][gene_id] = [start, end]
+        except OSError:
+            continue
+
+    family_dict: list[str] = []
+    family_ix: dict = {}
+    name_dict: list[str] = []
+    name_ix: dict = {}
+    pfam_dict: list[str] = []
+    pfam_ix: dict = {}
+
+    def _intern(value: str, labels: list[str], index: dict) -> int:
+        value = (value or "").strip()
+        idx = index.get(value)
+        if idx is None:
+            idx = len(labels)
+            labels.append(value)
+            index[value] = idx
+        return idx
+
+    gene_tracks: dict = defaultdict(list)
+    for ummerged_file in sorted(search_dir.glob("*.domains_ummerged.csv")):
+        track = ummerged_file.name[: -len(".domains_ummerged.csv")]
+        per_gene_hits: dict = defaultdict(list)
+        try:
+            with open(ummerged_file) as fh:
+                for line in fh:
+                    cols = line.rstrip("\n").split("\t")
+                    if len(cols) < 6:
+                        continue
+                    gene_id = cols[0].strip()
+                    if not gene_id:
+                        continue
+                    try:
+                        start = int(float(cols[1]))
+                        end = int(float(cols[2]))
+                    except ValueError:
+                        continue
+                    hit_name = cols[3].strip()
+                    pfam_id = cols[4].strip()
+                    per_gene_hits[gene_id].append([
+                        start,
+                        end,
+                        _intern(hit_name, name_dict, name_ix),
+                        _intern(pfam_id, pfam_dict, pfam_ix),
+                    ])
+        except OSError:
+            continue
+
+        fam_idx = _intern(track, family_dict, family_ix)
+        for gene_id, hits in per_gene_hits.items():
+            hits.sort(key=lambda rec: (rec[0], rec[1], rec[2], rec[3]))
+            merged = merged_ranges.get(track, {}).get(gene_id)
+            if merged:
+                range_start, range_end = merged
+            else:
+                range_start = min(h[0] for h in hits)
+                range_end = max(h[1] for h in hits)
+            gene_tracks[gene_id].append([fam_idx, range_start, range_end, hits])
+
+    genes = sorted(gene_tracks.keys())
+    tracks = []
+    lengths = []
+    for gene_id in genes:
+        track_rows = gene_tracks[gene_id]
+        track_rows.sort(key=lambda rec: (family_dict[rec[0]], rec[1], rec[2]))
+        tracks.append(track_rows)
+        lengths.append(int(gene_lengths.get(gene_id, 0) or 0))
+
+    return {
+        "genes": genes,
+        "lengths": lengths,
+        "tracks": tracks,
+        "families": family_dict,
+        "names": name_dict,
+        "pfams": pfam_dict,
+    }
+
+
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    vals = sorted(values)
+    mid = len(vals) // 2
+    if len(vals) % 2:
+        return float(vals[mid])
+    return (float(vals[mid - 1]) + float(vals[mid])) / 2.0
+
+
+def _interval_overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> float:
+    overlap = min(a_end, b_end) - max(a_start, b_start)
+    if overlap <= 0:
+        return 0.0
+    a_len = max(1, a_end - a_start)
+    b_len = max(1, b_end - b_start)
+    return overlap / min(a_len, b_len)
+
+
+def _normalize_architecture_hits(hits: list[dict]) -> list[dict]:
+    """Collapse strongly overlapping same-name hits, keeping the best c-evalue."""
+    if not hits:
+        return []
+    ordered = sorted(
+        hits,
+        key=lambda rec: (
+            int(rec["start"]),
+            int(rec["end"]),
+            str(rec.get("name") or ""),
+            float(rec.get("evalue", math.inf)),
+        ),
+    )
+    kept: list[dict] = []
+    for hit in ordered:
+        if not kept:
+            kept.append(dict(hit))
+            continue
+        prev = kept[-1]
+        if (
+            (prev.get("name") or "") == (hit.get("name") or "")
+            and _interval_overlap_fraction(
+                int(prev["start"]),
+                int(prev["end"]),
+                int(hit["start"]),
+                int(hit["end"]),
+            ) >= 0.5
+        ):
+            prev_ev = float(prev.get("evalue", math.inf))
+            hit_ev = float(hit.get("evalue", math.inf))
+            if hit_ev < prev_ev:
+                kept[-1] = dict(hit)
+        else:
+            kept.append(dict(hit))
+    return kept
+
+
+def build_domain_architecture_catalog(search_dir: Path, gene_lengths: dict, gene_to_hg: dict, hg_sizes: dict) -> dict:
+    """Return a compact family-centric catalog of exact-hit domain architectures."""
+    empty = {
+        "families": [],
+        "domains": [],
+        "species": [],
+        "hgs": [],
+        "entries": [],
+        "overview": {"nodes": [], "links": []},
+    }
+    if not search_dir.is_dir():
+        return empty
+
+    family_hits: dict = defaultdict(lambda: defaultdict(list))
+    shared_domains: dict = defaultdict(set)
+    for ummerged_file in sorted(search_dir.glob("*.domains_ummerged.csv")):
+        family = ummerged_file.name[: -len(".domains_ummerged.csv")]
+        try:
+            with open(ummerged_file) as fh:
+                for line in fh:
+                    cols = line.rstrip("\n").split("\t")
+                    if len(cols) < 6:
+                        continue
+                    gene_id = cols[0].strip()
+                    hit_name = cols[3].strip()
+                    if not gene_id or not hit_name:
+                        continue
+                    try:
+                        start = int(float(cols[1]))
+                        end = int(float(cols[2]))
+                    except ValueError:
+                        continue
+                    try:
+                        c_evalue = float(cols[5])
+                    except ValueError:
+                        c_evalue = math.inf
+                    family_hits[family][gene_id].append(
+                        {
+                            "start": start,
+                            "end": end,
+                            "name": hit_name,
+                            "evalue": c_evalue,
+                        }
+                    )
+                    shared_domains[hit_name].add(family)
+        except OSError:
+            continue
+
+    families = sorted(family_hits.keys())
+    if not families:
+        return empty
+
+    domain_labels: list[str] = []
+    domain_index: dict[str, int] = {}
+    species_labels: list[str] = []
+    species_index: dict[str, int] = {}
+    hg_labels: list[str] = []
+    hg_index: dict[str, int] = {}
+
+    def _intern(value: str, labels: list[str], index: dict[str, int]) -> int:
+        value = (value or "").strip()
+        idx = index.get(value)
+        if idx is None:
+            idx = len(labels)
+            labels.append(value)
+            index[value] = idx
+        return idx
+
+    entries = []
+    overview_node_counts: dict[str, int] = defaultdict(int)
+    overview_family_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    overview_edge_counts: dict[tuple[str, str], int] = defaultdict(int)
+    repeated_domain_families = sorted(
+        d for d, fams in shared_domains.items() if len(fams) > 1
+    )
+    if repeated_domain_families:
+        print(
+            f"WARN: {len(repeated_domain_families)} PFAM names occur in multiple families; architecture calling remains family-scoped.",
+            file=sys.stderr,
+        )
+
+    for family in families:
+        arch_map: dict = {}
+        for gene_id, hits in family_hits[family].items():
+            norm_hits = _normalize_architecture_hits(hits)
+            if not norm_hits:
+                continue
+            uniq_domains = []
+            seen_domains = set()
+            for hit in norm_hits:
+                domain_name = hit["name"]
+                if domain_name in seen_domains:
+                    continue
+                seen_domains.add(domain_name)
+                uniq_domains.append(domain_name)
+            for domain_name in uniq_domains:
+                overview_node_counts[domain_name] += 1
+                overview_family_counts[domain_name][family] += 1
+            for i in range(len(uniq_domains)):
+                for j in range(i + 1, len(uniq_domains)):
+                    a, b = sorted((uniq_domains[i], uniq_domains[j]))
+                    overview_edge_counts[(a, b)] += 1
+            series = tuple(hit["name"] for hit in norm_hits)
+            rec = arch_map.get(series)
+            if rec is None:
+                rec = {"members": [], "layouts": []}
+                arch_map[series] = rec
+            species = get_species_prefix(gene_id)
+            protein_length = int(gene_lengths.get(gene_id, 0) or 0)
+            max_end = max(int(hit["end"]) for hit in norm_hits)
+            denom = protein_length if protein_length > 0 else max_end
+            denom = max(denom, 1)
+            rec["members"].append((species, gene_id))
+            rec["layouts"].append(
+                [
+                    (
+                        int(round((int(hit["start"]) / denom) * 1000)),
+                        int(round((int(hit["end"]) / denom) * 1000)),
+                        hit["name"],
+                    )
+                    for hit in norm_hits
+                ]
+            )
+
+        arch_rows = []
+        for series, rec in arch_map.items():
+            members = sorted(rec["members"], key=lambda row: (row[0], row[1]))
+            count = len(members)
+            species_ids = sorted(
+                {
+                    _intern(species, species_labels, species_index)
+                    for species, _gene in members
+                }
+            )
+            hg_counts: dict[str, int] = defaultdict(int)
+            for _species, gene_id in members:
+                hg_id = gene_to_hg.get(gene_id)
+                if hg_id:
+                    hg_counts[hg_id] += 1
+            hg_rows = []
+            for hg_id, arch_count in sorted(hg_counts.items(), key=lambda row: (-row[1], row[0])):
+                hg_rows.append([
+                    _intern(hg_id, hg_labels, hg_index),
+                    arch_count,
+                    int(hg_sizes.get(hg_id, arch_count) or arch_count),
+                ])
+            consensus_hits = []
+            if rec["layouts"]:
+                for pos, domain_name in enumerate(series):
+                    starts = [layout[pos][0] for layout in rec["layouts"] if len(layout) > pos]
+                    ends = [layout[pos][1] for layout in rec["layouts"] if len(layout) > pos]
+                    consensus_hits.append(
+                        [
+                            int(round(_median(starts))),
+                            int(round(_median(ends))),
+                            _intern(domain_name, domain_labels, domain_index),
+                        ]
+                    )
+            arch_rows.append(
+                [
+                    [_intern(name, domain_labels, domain_index) for name in series],
+                    count,
+                    species_ids,
+                    hg_rows,
+                    consensus_hits,
+                ]
+            )
+        arch_rows.sort(
+            key=lambda rec: (
+                -int(rec[1]),
+                len(rec[0]),
+                [domain_labels[idx] for idx in rec[0]],
+            )
+        )
+        entries.append(arch_rows)
+
+    family_lookup = {family: idx for idx, family in enumerate(families)}
+    overview_nodes = []
+    for domain_name, count in overview_node_counts.items():
+        fam_rows = sorted(
+            overview_family_counts[domain_name].items(),
+            key=lambda row: (-row[1], row[0]),
+        )
+        dominant_family_idx = family_lookup.get(fam_rows[0][0], -1) if fam_rows else -1
+        overview_nodes.append(
+            [
+                _intern(domain_name, domain_labels, domain_index),
+                count,
+                dominant_family_idx,
+                [[family_lookup[fam], fam_count] for fam, fam_count in fam_rows if fam in family_lookup],
+            ]
+        )
+    overview_nodes.sort(
+        key=lambda rec: (
+            -int(rec[1]),
+            domain_labels[rec[0]],
+        )
+    )
+    overview_links = []
+    for (a, b), count in sorted(
+        overview_edge_counts.items(),
+        key=lambda row: (-row[1], row[0][0], row[0][1]),
+    ):
+        overview_links.append(
+            [
+                _intern(a, domain_labels, domain_index),
+                _intern(b, domain_labels, domain_index),
+                count,
+            ]
+        )
+
+    return {
+        "families": families,
+        "domains": domain_labels,
+        "species": species_labels,
+        "hgs": hg_labels,
+        "entries": entries,
+        "overview": {"nodes": overview_nodes, "links": overview_links},
+    }
 
 
 def load_species_images(img_dir: Optional[str]) -> dict:
@@ -340,6 +789,17 @@ def gene_tree_to_dict(node) -> dict:
                 d["support"] = round(sv, 2)
         except (TypeError, ValueError, AttributeError):
             pass
+        # With ete3 format=1, numeric internal-node labels land in node.name rather
+        # than node.support (support stays at the default 1.0).  Try node.name as a
+        # fallback so that IQ-TREE bootstrap and GeneRax PP values are preserved.
+        if "support" not in d and node.name:
+            try:
+                sv2 = float(node.name)
+                if sv2 != 1.0:
+                    d["support"] = round(sv2, 2)
+                    d["name"] = ""  # was a numeric label, not an OG/clade name
+            except (TypeError, ValueError):
+                pass  # genuine string label (OG name, clade name) — leave as name
         d["children"] = [gene_tree_to_dict(c) for c in node.children]
     return d
 
@@ -529,6 +989,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Step 2 Report</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html{height:100%;height:-webkit-fill-available}
@@ -570,6 +1031,137 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 /* ── Tree pane ── */
 #pane-trees{flex-direction:column}
 #app{display:flex;flex:1;overflow:hidden}
+
+/* ── Alignment pane ── */
+#pane-align{flex-direction:row}
+#aln-sidebar{flex:0 0 220px;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fff;overflow:hidden}
+#aln-sidebar-top{padding:8px;border-bottom:1px solid #eee;flex-shrink:0}
+#aln-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}
+#aln-list{flex:1;overflow-y:auto}
+#aln-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#pane-proteins{flex-direction:row}
+#prot-sidebar{flex:0 0 250px;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fff;overflow:hidden}
+#prot-sidebar-top{padding:8px;border-bottom:1px solid #eee;display:flex;flex-direction:column;gap:6px}
+#prot-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}
+#prot-count{font-size:11px;color:#7f8c8d}
+#prot-list{flex:1;overflow-y:auto}
+.prot-item{padding:7px 10px;border-bottom:1px solid #f1f3f5;cursor:pointer;font-size:11px;color:#2c3e50;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.prot-item:hover{background:#f8fbff}
+.prot-item.active{background:#eaf3ff;color:#144a75;font-weight:600}
+.prot-badge{font-size:10px;color:#7f8c8d;background:#f3f5f7;border:1px solid #d8dde3;border-radius:999px;padding:1px 6px;white-space:nowrap}
+#prot-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:#fcfcfd}
+#prot-empty{flex:1;color:#999;font-size:13px;padding:40px;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px}
+#prot-view{flex:1;overflow:auto;padding:18px 20px 22px}
+#prot-summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+#prot-legend{display:flex;flex-wrap:wrap;gap:10px;margin:-2px 0 14px}
+.prot-legend-item{display:flex;align-items:center;gap:7px;font-size:11px;color:#455563;background:#f8fafc;border:1px solid #dce4eb;border-radius:999px;padding:4px 10px}
+.prot-legend-swatch{display:inline-block;flex:0 0 auto}
+.prot-legend-swatch.phylo{width:22px;height:12px;background:#cfcfcf;border:1px solid #111}
+.prot-legend-swatch.hitspan{width:22px;height:10px;border:1px solid #111;background:#e2e2e2}
+.prot-legend-swatch.hit{width:22px;height:12px;background:#72d25c;border:1px solid rgba(44,62,80,.6)}
+.prot-legend-swatch.guide{width:22px;height:0;border-top:2px dashed #8fa4b9}
+.prot-summary-chip{font-size:11px;color:#2c3e50;background:#f4f7fb;border:1px solid #dbe4ef;border-radius:999px;padding:4px 10px}
+.prot-track{background:#fff;border:1px solid #e3e8ee;border-radius:12px;padding:10px 12px 12px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.prot-track-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.prot-track-title{font-size:12px;font-weight:700;color:#234}
+.prot-track-meta{font-size:11px;color:#708090}
+.prot-svg-wrap{overflow-x:auto;padding-bottom:2px}
+.prot-svg-wrap.compact{overflow:visible}
+.prot-track-svg{display:block;min-width:920px}
+.prot-track-svg.compact{min-width:0}
+.prot-domain-legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.prot-domain-chip{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#304354;background:#f8fafc;border:1px solid #d7dde5;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.prot-domain-chip-swatch{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid rgba(17,17,17,.55);flex:0 0 auto}
+.prot-track-svg .prot-hit-group{transition:opacity .12s ease}
+.prot-track-svg:hover .prot-hit-group{opacity:.18}
+.prot-track-svg:hover .prot-hit-group:hover{opacity:1}
+.prot-track-svg .prot-hit-guide{stroke:#8fa4b9;stroke-width:1;stroke-dasharray:4 3;opacity:.7}
+.prot-track-svg .prot-span-guide{stroke:#5f6b76;stroke-width:1;stroke-dasharray:5 4;opacity:.8}
+.prot-track-svg .prot-span-group{transition:opacity .12s ease}
+.prot-track-svg .prot-hit-box{stroke:#111;stroke-width:1}
+.prot-track-svg .prot-hit-span{fill:#e2e2e2;stroke:#111;stroke-width:1.2}
+.prot-track-svg .prot-phylo-span{fill:#cfcfcf;stroke:#111;stroke-width:1.2}
+.prot-track-svg .prot-hit-group:hover .prot-hit-box{stroke:#203040;stroke-width:1.2}
+.prot-track-svg .prot-hit-coord{opacity:0;transition:opacity .12s ease;fill:#405162;font-size:10px;font-weight:700}
+.prot-track-svg .prot-hit-group:hover .prot-hit-coord{opacity:1}
+.prot-track-svg .prot-span-coord{opacity:0;transition:opacity .12s ease;fill:#2f3c46;font-size:10px;font-weight:700}
+.prot-track-svg .prot-span-group:hover .prot-span-coord{opacity:1}
+.prot-track-svg .prot-hit-hover-label{opacity:0;transition:opacity .12s ease;fill:#102030;font-size:10px;font-weight:700}
+.prot-track-svg .prot-hit-group:hover .prot-hit-hover-label{opacity:1}
+.prot-track-svg .prot-ruler-tick{stroke:#8a98a8;stroke-width:1}
+.prot-track-svg .prot-ruler-tick.major{stroke:#516173;stroke-width:1.2}
+.prot-track-svg .prot-ruler-label{fill:#667788;font-size:10px}
+.prot-track-svg .prot-row-label{fill:#6f7f8d;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.prot-hits{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.prot-hit-chip{font-size:10px;color:#34495e;background:#f8fafc;border:1px solid #d7dde5;border-radius:999px;padding:2px 8px;white-space:nowrap}
+#pane-architectures{flex-direction:row}
+#arch-fam-sidebar,#arch-list-sidebar{display:flex;flex-direction:column;background:#fff;overflow:hidden}
+#arch-fam-sidebar{flex:0 0 240px;border-right:1px solid #ccc}
+#arch-list-sidebar{flex:0 0 280px;border-right:1px solid #ccc}
+#arch-fam-top,#arch-list-top{padding:8px;border-bottom:1px solid #eee;display:flex;flex-direction:column;gap:6px}
+#arch-family-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}
+#arch-family-count,#arch-arch-count{font-size:11px;color:#7f8c8d}
+#arch-family-list,#arch-arch-list{flex:1;overflow-y:auto}
+.arch-item{padding:7px 10px;border-bottom:1px solid #f1f3f5;cursor:pointer;font-size:11px;color:#2c3e50;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.arch-item:hover{background:#f8fbff}
+.arch-item.active{background:#eaf3ff;color:#144a75;font-weight:600}
+.arch-item-main{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 auto}
+.arch-chip-list{display:flex;align-items:center;gap:0;flex-wrap:wrap;min-width:0}
+.arch-domain-chip{display:inline-flex;align-items:center;max-width:100%;padding:2px 8px;border:1px solid rgba(17,17,17,.5);border-radius:999px;font-size:10px;font-weight:700;line-height:1.2;color:#102030;white-space:nowrap}
+.arch-domain-chip.empty{background:#eef2f6;color:#5d6b78;border-color:#c5d0da}
+.arch-domain-link{width:16px;height:2px;background:#9aa5b1;flex:0 0 auto;margin:0 2px}
+.arch-domain-stack{position:relative;display:inline-block;vertical-align:middle;margin-right:2px}
+.arch-domain-chip-copy{position:absolute;top:0;display:inline-flex;z-index:1;pointer-events:none}
+.arch-domain-chip-copy .arch-domain-chip{color:transparent !important;text-shadow:none}
+.arch-domain-chip-front{position:relative;z-index:3;display:inline-flex}
+.arch-badge{font-size:10px;color:#7f8c8d;background:#f3f5f7;border:1px solid #d8dde3;border-radius:999px;padding:1px 6px;white-space:nowrap}
+#arch-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:#fcfcfd}
+#arch-empty{flex:1;color:#999;font-size:13px;padding:40px;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px}
+#arch-view{flex:1;overflow:auto;padding:18px 20px 22px}
+#arch-summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.arch-summary-chip{font-size:11px;color:#2c3e50;background:#f4f7fb;border:1px solid #dbe4ef;border-radius:999px;padding:4px 10px}
+#arch-network-wrap{background:#fff;border:1px solid #e3e8ee;border-radius:12px;padding:12px 14px;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+#arch-network{margin-top:10px}
+.arch-net-svg{display:block;width:100%;min-height:360px}
+.arch-net-link{stroke:#a9b3bc;stroke-opacity:.7}
+.arch-net-node{stroke:#111;stroke-width:1.2;cursor:pointer}
+.arch-net-node.active{stroke:#12385a;stroke-width:2.2}
+.arch-net-label{fill:#30404f;font-size:11px;font-weight:700;pointer-events:none}
+#arch-detail{display:grid;grid-template-columns:minmax(320px,1fr) minmax(360px,1fr);gap:14px;align-items:start}
+#arch-svg-wrap{background:#fff;border:1px solid #e3e8ee;border-radius:12px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,.03);overflow-x:auto;margin-bottom:0}
+.arch-svg{display:block;min-width:920px}
+.arch-domain-box{stroke:#111;stroke-width:1}
+.arch-domain-label{fill:#102030;font-size:10px;font-weight:700}
+.arch-domain-label.above{fill:#102030}
+.arch-connector{stroke:#98a3ae;stroke-width:3;stroke-linecap:round}
+.arch-row-label{fill:#6f7f8d;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+#arch-hgs-wrap{background:#fff;border:1px solid #e3e8ee;border-radius:12px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,.03);display:flex;flex-direction:column;height:min(72vh,820px);min-height:420px}
+#arch-hgs{display:flex;flex-direction:column;gap:6px;margin-top:10px;overflow:auto;flex:1}
+.arch-hg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 9px;border:1px solid #d7dde5;border-radius:8px;background:#f8fafc;cursor:pointer}
+.arch-hg-row:hover{background:#edf5ff;border-color:#b8cde5}
+.arch-hg-main{display:flex;flex-direction:column;gap:2px;min-width:0}
+.arch-hg-title{font-size:11px;font-weight:700;color:#234}
+.arch-hg-meta{font-size:10px;color:#6d7c8a}
+.arch-hg-badges{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.arch-share-badge{font-size:10px;color:#35506a;background:#eef3f8;border:1px solid #c9d4df;border-radius:999px;padding:1px 6px;white-space:nowrap;font-weight:700}
+#arch-singletons-wrap{display:flex;align-items:center;gap:6px;font-size:11px;color:#506070}
+#aln-controls{flex-shrink:0;padding:6px 12px;background:#f5f5f5;border-bottom:1px solid #ddd;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#aln-viewer{flex:1;display:none;grid-template-columns:220px 5px 1fr;grid-template-rows:24px 1fr;overflow:hidden;background:#fff;min-height:0}
+#aln-corner{grid-column:1;grid-row:1;background:#f0f0f0;border-right:1px solid #ccc;border-bottom:1px solid #ccc;position:relative;overflow:hidden;z-index:4}
+.aln-col-header{position:absolute;top:0;height:100%;display:flex;align-items:center;justify-content:flex-start;padding:0 6px;box-sizing:border-box;color:#44515e;font-size:10px;font-weight:700;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid #d9d9d9;background:rgba(255,255,255,.55);user-select:none}
+.aln-col-header.drag{cursor:grab}
+#aln-resize-bar{grid-column:2;grid-row:1/3;background:#e8e8e8;border-left:1px solid #ccc;border-right:1px solid #ccc;cursor:col-resize;z-index:2}
+#aln-resize-bar:hover,#aln-resize-bar.dragging{background:#bbb}
+#aln-tree-resize-bar,#aln-ref-resize-bar,#aln-species-resize-bar,#aln-mrca-resize-bar,#aln-range-resize-bar{position:absolute;top:0;bottom:0;width:5px;background:#e8e8e8;border-left:1px solid #ccc;border-right:1px solid #ccc;cursor:col-resize;z-index:3}
+#aln-tree-resize-bar:hover,#aln-tree-resize-bar.dragging,#aln-ref-resize-bar:hover,#aln-ref-resize-bar.dragging,#aln-species-resize-bar:hover,#aln-species-resize-bar.dragging,#aln-mrca-resize-bar:hover,#aln-mrca-resize-bar.dragging,#aln-range-resize-bar:hover,#aln-range-resize-bar.dragging{background:#bbb}
+#aln-ruler-wrap{grid-column:3;grid-row:1;overflow:hidden;border-bottom:1px solid #ccc;background:#f8f8f8;position:relative}
+#aln-names-wrap{grid-column:1;grid-row:2;overflow-y:auto;overflow-x:hidden;border-right:1px solid #ccc;background:#fafafa;position:relative}
+#aln-names-wrap::-webkit-scrollbar{width:10px;height:10px}
+#aln-names-wrap::-webkit-scrollbar-thumb{background:#bbb;border-radius:5px}
+#aln-seq-wrap{grid-column:3;grid-row:2;overflow:auto;position:relative}
+#aln-seq-wrap::-webkit-scrollbar{width:10px;height:10px}
+#aln-seq-wrap::-webkit-scrollbar-thumb{background:#bbb;border-radius:5px}
+#aln-empty{flex:1;color:#999;font-size:13px;padding:40px;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px}
 
 /* sidebar */
 #sidebar{flex:0 0 220px;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fff}
@@ -652,7 +1244,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 #mini-sp-panel svg text.msp-node-lbl{cursor:pointer;fill:#2980b9;font-size:10px}
 #mini-sp-panel svg text.msp-node-lbl:hover{fill:#e74c3c}
 /* tooltip */
-#tooltip{position:fixed;display:none;pointer-events:none;background:rgba(255,255,255,.97);border:1px solid #bbb;border-radius:5px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:100;max-width:260px}
+#tooltip{position:fixed;display:none;pointer-events:none;background:rgba(255,255,255,.97);border:1px solid #bbb;border-radius:5px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:100;max-width:min(920px,calc(100vw - 40px));max-height:min(85vh,900px);overflow:auto}
 /* collapsed-node popup */
 #collapsed-popup{position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:10px 12px;font-size:11px;box-shadow:0 3px 10px rgba(0,0,0,.2);z-index:200;min-width:230px}
 #collapsed-popup .cp-title{font-weight:700;margin-bottom:7px;font-size:12px;color:#333}
@@ -704,21 +1296,23 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <!-- vertical tab strip -->
   <div id="tab-strip">
     <button class="tab-btn" data-tab="families" onclick="switchTab('families')">&#9783; Families</button>
+    <button class="tab-btn" data-tab="architectures" onclick="switchTab('architectures')">&#9776; Domain Architectures</button>
     <button class="tab-btn active" data-tab="sptree" onclick="switchTab('sptree')">&#10022; Species Tree</button>
     <button class="tab-btn" data-tab="heatmap" onclick="switchTab('heatmap')">&#9639; Counts</button>
     <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">&#11044; Gene Trees</button>
+    <button class="tab-btn" id="tab-btn-align" data-tab="align" onclick="switchTab('align')">&#9644; Alignments</button>
   </div>
 
   <!-- ── Heatmap pane ── -->
   <div class="tab-pane" id="pane-heatmap">
-    <div id="hm-custom-bar" style="display:none;position:fixed;z-index:500;border:1px solid #c8b96e;border-top:none;background:#fffbf0;padding:4px 10px;box-shadow:0 4px 12px rgba(0,0,0,.15);border-radius:0 0 6px 6px;flex-direction:column;gap:3px">
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        <button id="hm-custom-toggle" onclick="hmToggleCustomBar()" title="Show/hide selection chips" style="padding:1px 6px;font-size:11px;border:1px solid #c8b96e;border-radius:3px;background:#fff8e1;cursor:pointer;line-height:1">&#9660;</button>
+    <div id="hm-custom-bar" style="display:none;position:fixed;z-index:500;border:1px solid #c8b96e;border-top:none;background:#fffbf0;box-shadow:0 4px 12px rgba(0,0,0,.15);border-radius:0 0 6px 6px;flex-direction:column;gap:0">
+      <div style="display:flex;align-items:center;gap:6px;padding:3px 10px;cursor:pointer" onclick="hmToggleCustomBar()">
+        <span id="hm-custom-toggle" style="font-size:10px;color:#888">&#9654;</span>
         <span id="hm-custom-summary" style="font-size:11px;color:#888;font-weight:600">Custom selection:</span>
-        <button onclick="hmCustomClear()" style="margin-left:auto;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">Clear all</button>
-        <button onclick="hmExitCustom()" style="padding:1px 8px;font-size:10px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer">&#8592; Browse mode</button>
+        <button onclick="event.stopPropagation();hmCustomClear()" style="margin-left:auto;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">Clear all</button>
+        <button onclick="event.stopPropagation();hmExitCustom()" style="padding:1px 8px;font-size:10px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer">&#8592; Browse</button>
       </div>
-      <div id="hm-custom-chips-wrap" style="display:flex">
+      <div id="hm-custom-chips-wrap" style="display:none;padding:2px 10px 4px;max-height:120px;overflow-y:auto">
         <span id="hm-custom-chips" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"></span>
       </div>
     </div>
@@ -777,6 +1371,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <button onclick="downloadHeatmapSVG()" title="Download heatmap as SVG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; SVG</button>
           <button id="btn-hm-sp-logos" onclick="hmToggleSpLogos()" title="Toggle species images in cladogram" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#128444; Logos</button>
           <button id="btn-hm-group-hg" onclick="hmToggleGroupByHG()" title="Group columns by Homology Group (drag group headers to reorder)" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#8801; Group HG</button>
+          <button id="btn-hm-flip" onclick="hmToggleFlip()" title="Flip heatmap: species as columns, HGs/OGs as rows with horizontal species tree" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#8646; Flip</button>
           <details style="margin-left:auto;font-size:10px">
             <summary style="cursor:pointer;color:#888;list-style:none">&#9432; Help</summary>
             <div style="position:absolute;z-index:50;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;box-shadow:0 2px 8px rgba(0,0,0,.12);line-height:1.7;color:#999;min-width:300px;right:10px">
@@ -959,6 +1554,97 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
     </div>
   </div>
 
+  <!-- ── Alignment pane ── -->
+  <div class="tab-pane" id="pane-align">
+    <div id="aln-sidebar">
+      <div id="aln-sidebar-top">
+        <input id="aln-search" type="text" placeholder="Search HG / family…" oninput="renderAlnSidebar(this.value)">
+      </div>
+      <div id="aln-list"></div>
+    </div>
+    <div id="aln-main">
+      <div id="aln-controls">
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Cell:
+          <input type="range" id="aln-cell-slider" min="4" max="18" step="1" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9" oninput="alnCellW=+this.value;alnCellH=Math.round(alnCellW*1.6);document.getElementById('aln-cell-val').textContent=alnCellW;renderAlignment()">
+          <span id="aln-cell-val">9</span>px
+        </label>
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Domains:
+          <input type="range" id="aln-domain-chip-slider" min="0.6" max="2.2" step="0.1" value="1.0" style="width:78px;cursor:pointer;accent-color:#48a868" oninput="alnSetDomainChipScale(this.value)">
+          <span id="aln-domain-chip-val">1.0</span>x
+        </label>
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Species:
+          <input type="text" id="aln-seq-filter" placeholder="Enter to add…" style="font-size:11px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;width:120px" onkeydown="_alnSpFilterKey(event)">
+        </label>
+        <span id="aln-sp-tags" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px"></span>
+        <button class="ctrl-btn" onclick="alnToggleBrLen()" id="btn-aln-brlen" title="Toggle branch lengths on/off">Br. len</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleSeqPanel()" id="btn-aln-seqpanel" title="Show/hide sequence alignment pane">Alignment</button>
+        <button class="ctrl-btn" onclick="alnToggleConsensus()" id="btn-aln-cons" title="Show/hide consensus row">Consensus</button>
+        <button class="ctrl-btn" onclick="alnToggleCollapseAllOGs()" id="btn-aln-collapse-ogs" title="Collapse all orthogroups to single rows">Collapse OGs</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleSeqId()" id="btn-aln-seqid" title="Show/hide sequence ID column">ID</button>
+        <button class="ctrl-btn" onclick="alnToggleRefCol()" id="btn-aln-ref" title="Show/hide reference ortholog name column">Ref</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleSpeciesCol()" id="btn-aln-species" title="Show/hide species column">Species</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleMrcaCol()" id="btn-aln-mrca" title="Show/hide MRCA clade column">MRCA</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleRangeCol()" id="btn-aln-range" title="Show/hide compact domain-architecture column">Domain Architecture</button>
+        <button class="ctrl-btn" onclick="alnToggleSource()" id="btn-aln-src" title="Toggle GeneRax / IQ-TREE tree source" style="display:none">IQ-TREE</button>
+        <button class="ctrl-btn" onclick="alnDownload()" title="Download alignment as FASTA">&#11015; FASTA</button>
+        <button class="ctrl-btn" onclick="alnDownloadPng()" title="Download alignment as PNG">&#11015; PNG</button>
+        <span id="aln-info" style="font-size:11px;color:#888;margin-left:8px"></span>
+      </div>
+      <div id="aln-viewer">
+        <div id="aln-corner"></div>
+        <div id="aln-resize-bar"></div>
+        <div id="aln-ruler-wrap"><canvas id="aln-ruler"></canvas></div>
+        <div id="aln-names-wrap" onscroll="_alnSyncFromNamesWrap(this)" onmousemove="_alnHandleNameHover(event)" onmouseleave="_alnHideTip()" onclick="_alnHandleNameClick(event)"><canvas id="aln-names-canvas"></canvas><div id="aln-tree-resize-bar" style="display:none"></div><div id="aln-ref-resize-bar" style="display:none"></div><div id="aln-species-resize-bar" style="display:none"></div><div id="aln-mrca-resize-bar" style="display:none"></div><div id="aln-range-resize-bar" style="display:none"></div></div>
+        <div id="aln-seq-wrap" onscroll="syncAlnScroll(this)" onclick="_alnHandleSeqClick(event)"><canvas id="aln-seq-canvas"></canvas></div>
+      </div>
+      <div id="aln-empty">
+        <div style="font-size:32px">&#9644;</div>
+        <div>Select an HG to view its alignment</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Domain-architecture pane ── -->
+  <div class="tab-pane" id="pane-architectures">
+    <div id="arch-fam-sidebar">
+      <div id="arch-fam-top">
+        <input id="arch-family-search" type="text" placeholder="Search family…" oninput="renderArchitectureFamilySidebar(this.value)">
+        <div id="arch-family-count"></div>
+      </div>
+      <div id="arch-family-list"></div>
+    </div>
+    <div id="arch-list-sidebar">
+      <div id="arch-list-top">
+        <div id="arch-singletons-wrap">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input id="arch-show-singletons" type="checkbox" onchange="architectureShowSingletons=this.checked;renderArchitectureList();renderArchitectureDetail()"> Include singletons</label>
+        </div>
+        <div id="arch-arch-count"></div>
+      </div>
+      <div id="arch-arch-list"></div>
+    </div>
+    <div id="arch-main">
+      <div id="arch-empty">
+        <div style="font-size:34px">&#9776;</div>
+        <div>Select a family to explore its PFAM co-occurrence network</div>
+      </div>
+      <div id="arch-view" style="display:none">
+        <div id="arch-summary"></div>
+        <div id="arch-network-wrap">
+          <div style="font-size:12px;font-weight:700;color:#234">PFAM co-occurrence network</div>
+          <div id="arch-network"></div>
+        </div>
+        <div id="arch-detail-empty" style="display:none;color:#71808f;font-size:12px;background:#fff;border:1px dashed #cfd8e3;border-radius:12px;padding:18px 16px;text-align:center">Click a PFAM node to list architectures, then select an architecture to inspect its consensus and HG distribution</div>
+        <div id="arch-detail" style="display:none">
+          <div id="arch-svg-wrap"></div>
+          <div id="arch-hgs-wrap">
+            <div style="font-size:12px;font-weight:700;color:#234">Homology groups carrying this architecture</div>
+            <div id="arch-hgs"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Species tree pane ── -->
   <div class="tab-pane active" id="pane-sptree">
     <div id="sptree-controls">
@@ -967,6 +1653,19 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         <input type="range" id="sptree-width-slider" min="20" max="100" step="5" value="50" style="width:90px;cursor:pointer;accent-color:#4a90d9">
         <span id="sptree-width-val">50</span>%
       </label>
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:6px">
+        Species colours:
+        <select id="sp-palette-select" style="font-size:11px;padding:2px 4px;border:1px solid #bbb;border-radius:3px;background:#fff">
+          <option value="turbo">Turbo</option>
+          <option value="viridis">Viridis</option>
+          <option value="warm">Warm</option>
+          <option value="cool">Cool</option>
+          <option value="tableau">Tableau</option>
+          <option value="set3">Set3</option>
+        </select>
+      </label>
+      <span id="sp-palette-preview" style="display:inline-flex;align-items:center;gap:2px;min-height:16px"></span>
+      <button class="ctrl-btn" id="btn-sp-apply-palette" onclick="applySelectedSpeciesPalette()" title="Apply the selected multi-colour palette to all species">Apply palette</button>
       <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">
         Triangle fill:
         <input type="color" id="col-tri-fill" value="#ffffff" style="width:28px;height:22px;cursor:pointer;border:1px solid #bbb;border-radius:3px;padding:1px">
@@ -983,6 +1682,13 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 <div id="sp-annot-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:300;min-width:150px">
   <div style="font-size:10px;color:#888;margin-bottom:6px;font-weight:600" id="sp-annot-popup-title"></div>
   <div id="sp-annot-popup-btns" style="display:flex;flex-direction:column;gap:4px"></div>
+</div>
+<div id="hm-open-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:320;min-width:160px">
+  <div style="font-size:10px;color:#888;margin-bottom:6px;font-weight:600" id="hm-open-popup-title">Open in</div>
+  <div style="display:flex;flex-direction:column;gap:5px">
+    <button id="hm-open-tree" style="padding:4px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer;text-align:left">Show Tree</button>
+    <button id="hm-open-align" style="padding:4px 10px;font-size:11px;border:1px solid #27ae60;border-radius:4px;background:#f0fff4;color:#1a7a42;cursor:pointer;text-align:left">Show Alignment</button>
+  </div>
 </div>
 <div id="mini-sp-panel">
   <div class="msp-title">Species tree — click a named node to highlight that clade</div>
@@ -1137,6 +1843,21 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 %%LAZY_SCRIPTS%%
 </div>
 
+<!-- ── Per-HG alignment data ── -->
+<div id="aln-data" style="display:none">
+%%ALN_SCRIPTS%%
+</div>
+
+<!-- ── Protein-domain catalog ── -->
+<div id="protein-domain-data-wrap" style="display:none">
+%%PROTEIN_DOMAIN_SCRIPT%%
+</div>
+
+<!-- ── Domain-architecture catalog ── -->
+<div id="architecture-data-wrap" style="display:none">
+%%ARCHITECTURE_SCRIPT%%
+</div>
+
 <script>
 // ═══════════════════════════════════════════════════════════════════════════════
 // DATA (injected by Python)
@@ -1158,6 +1879,9 @@ const REFNAME_MAP   = %%REFNAME_MAP_JSON%%;    // {gene_id: reference_name}
 const SPECIES_INFO   = %%SPECIES_INFO_JSON%%;   // {species_prefix: full_species_name}
 const SPECIES_GROUPS = %%SPECIES_GROUPS_JSON%%; // {species_prefix: group_name} (optional 3rd col of species_info.tsv)
 const SPECIES_IMAGES = %%SPECIES_IMAGES_JSON%%; // {species_prefix: data_uri}
+const HAVE_ALIGNMENTS = %%HAVE_ALIGNMENTS_JSON%%;
+const HAVE_PROTEIN_DOMAINS = %%HAVE_PROTEIN_DOMAINS_JSON%%;
+const HAVE_ARCHITECTURES = %%HAVE_ARCHITECTURES_JSON%%;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COLOUR SYSTEM
@@ -1167,12 +1891,15 @@ const palette = [
   "#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf",
   "#aec7e8","#ffbb78","#98df8a","#ff9896","#c5b0d5"
 ];
+const SPECIES_COLOR_PRESETS = {
+  turbo:   {label:"Turbo", type:"interp", fn:d3.interpolateTurbo},
+  viridis: {label:"Viridis", type:"interp", fn:d3.interpolateViridis},
+  warm:    {label:"Warm", type:"interp", fn:d3.interpolateWarm},
+  cool:    {label:"Cool", type:"interp", fn:d3.interpolateCool},
+  tableau: {label:"Tableau", type:"array", colors:d3.schemeTableau10},
+  set3:    {label:"Set3", type:"array", colors:d3.schemeSet3}
+};
 const SP_COLORS = {};
-(function(){
-  const n=SPECIES_ORDER.length;
-  SPECIES_ORDER.forEach((sp,i)=>{ SP_COLORS[sp]=d3.interpolateTurbo(n>1?i/(n-1):0.5); });
-  ALL_SPECIES.forEach(sp=>{ if(!SP_COLORS[sp]) SP_COLORS[sp]="#aaa"; });
-})();
 function spColor(sp) { return SP_COLORS[sp] || "#aaa"; }
 
 // ── Group colors (average RGB of member species colors) ───────────────────────
@@ -1184,7 +1911,8 @@ function _cssToRgb(css){
   return null;
 }
 function _rgbToHex(r,g,b){ return '#'+[r,g,b].map(v=>Math.round(v).toString(16).padStart(2,'0')).join(''); }
-const groupColors=(function(){
+let groupColors={};
+function recomputeGroupColors(){
   const members={};
   Object.entries(SPECIES_GROUPS).forEach(([sp,grp])=>{ (members[grp]||(members[grp]=[])).push(sp); });
   const out={};
@@ -1193,9 +1921,94 @@ const groupColors=(function(){
     if(!rgbs.length) return;
     out[grp]=_rgbToHex(d3.mean(rgbs,c=>c[0]),d3.mean(rgbs,c=>c[1]),d3.mean(rgbs,c=>c[2]));
   });
-  return out;
-})();
+  groupColors=out;
+}
 function groupColor(sp){ const g=SPECIES_GROUPS[sp]; return (g&&groupColors[g])||"#aaa"; }
+
+function orderedSpeciesPaletteList(){
+  const seen=new Set(), out=[];
+  SPECIES_ORDER.forEach(sp=>{ if(!seen.has(sp)){ seen.add(sp); out.push(sp); } });
+  ALL_SPECIES.forEach(sp=>{ if(!seen.has(sp)){ seen.add(sp); out.push(sp); } });
+  return out;
+}
+
+function _sampleSpeciesPreset(name, i, n){
+  const preset=SPECIES_COLOR_PRESETS[name]||SPECIES_COLOR_PRESETS.turbo;
+  if(preset.type==="interp") return preset.fn(n>1?i/(n-1):0.5);
+  const cols=preset.colors||palette;
+  if(!cols.length) return "#888";
+  if(n<=cols.length) return cols[Math.round((cols.length-1)*(n>1?i/(n-1):0.5))];
+  return d3.interpolateRgbBasis(cols)(n>1?i/(n-1):0.5);
+}
+
+function orderedSpeciesGroupBuckets(){
+  const buckets=[], byKey=new Map();
+  orderedSpeciesPaletteList().forEach(sp=>{
+    const grp=(SPECIES_GROUPS[sp]||"").trim();
+    const key=grp?`grp:${grp}`:`solo:${sp}`;
+    if(!byKey.has(key)){
+      const rec={key, group:grp, species:[]};
+      byKey.set(key, rec);
+      buckets.push(rec);
+    }
+    byKey.get(key).species.push(sp);
+  });
+  return buckets;
+}
+
+function _speciesVariantAroundBase(base, i, n){
+  if(n<=1) return base;
+  const col=d3.color(base);
+  if(!col) return base;
+  const lo=0.18, hi=0.82;
+  const t=lo + (hi-lo)*(n>1?i/(n-1):0.5);
+  const light=col.brighter(1.1).formatHex();
+  const dark=col.darker(0.9).formatHex();
+  return d3.interpolateLab(light, dark)(t);
+}
+
+function refreshSpeciesColorViews(){
+  recomputeGroupColors();
+  drawSpeciesTree();
+  if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
+  else drawCladogram();
+  if(rootNode) renderTree(false);
+  if(currentAlnId) renderAlignment();
+  const mini=document.getElementById("mini-sp-panel");
+  if(mini&&mini.style.display==="block") drawMiniSpTree();
+}
+
+function applySpeciesPalette(name, redraw=true){
+  const buckets=orderedSpeciesGroupBuckets();
+  buckets.forEach((bucket,i)=>{
+    const base=_sampleSpeciesPreset(name, i, buckets.length);
+    bucket.species.forEach((sp,j)=>{
+      SP_COLORS[sp]=_speciesVariantAroundBase(base, j, bucket.species.length);
+    });
+  });
+  ALL_SPECIES.forEach(sp=>{ if(!SP_COLORS[sp]) SP_COLORS[sp]="#aaa"; });
+  if(redraw) refreshSpeciesColorViews();
+}
+
+function updateSpeciesPalettePreview(name){
+  const wrap=document.getElementById("sp-palette-preview");
+  if(!wrap) return;
+  const n=6;
+  wrap.innerHTML=Array.from({length:n},(_,i)=>{
+    const c=_sampleSpeciesPreset(name,i,n);
+    return `<span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${c};border:1px solid rgba(0,0,0,.15)"></span>`;
+  }).join("");
+}
+
+function applySelectedSpeciesPalette(){
+  const sel=document.getElementById("sp-palette-select");
+  applySpeciesPalette(sel?sel.value:"turbo");
+}
+
+(function(){
+  applySpeciesPalette("turbo", false);
+  recomputeGroupColors();
+})();
 
 // ── Stable IDs for SP_TREE_DATA nodes (allows editing original by reference) ──
 const spNodeById = new Map();   // _spId → SP_TREE_DATA node reference
@@ -1204,6 +2017,27 @@ const spNodeById = new Map();   // _spId → SP_TREE_DATA node reference
   spNodeById.set(n._spId, n);
   (n.children||[]).forEach(c=>tagSpNodes(c,i));
 })(SP_TREE_DATA || {});
+
+function spTreeNodeKey(n){
+  if(n&&n._spId!=null) return "sp:"+n._spId;
+  return "leaves:"+spNodeLeaves(n).slice().sort().join(",");
+}
+
+function findSpMrcaForSpecies(root, speciesSet){
+  let best = null;
+  function walk(n){
+    let hits = 0;
+    if(n.children&&n.children.length){
+      n.children.forEach(c=>{ hits += walk(c); });
+    } else if(speciesSet.has(n.name)) {
+      hits = 1;
+    }
+    if(!best&&hits===speciesSet.size) best = n;
+    return hits;
+  }
+  walk(root);
+  return best;
+}
 
 function treeToNewick(n){
   const name=(n.name||"").replace(/[(),:;]/g,"_");
@@ -1247,7 +2081,7 @@ let hmColFontSize = 9;       // column label font size (px)
 let hmColRotation = 90;      // column label rotation angle (degrees)
 let hmColorMode   = "zscore"; // "zscore" | "absolute"
 let hmTextFilter  = "";       // free-text filter for heatmap columns
-const spCollapsed = new Set();   // node _ids collapsed in species tree
+const spCollapsed = new Set();   // stable species-tree node keys collapsed in species tree
 let colTriFill = "#ffffff";      // fill colour for collapsed triangles
 // pre-computed metadata per species: {genes, families, hgs}
 const spMeta = (()=>{
@@ -1500,19 +2334,20 @@ let hmCustomGroups = [];     // bulk selections: [{type:"class"|"family", key, l
 let hmColOrderOverride = null; // drag-reorder: array of column ids overriding natural order
 let hmGroupByHG    = false;   // group columns by parent HG / family / class
 let hmGroupOrderOverride = null; // ordered array of group keys for drag-reorder of groups
+let hmFlipped      = false;   // transpose: species become columns, HG/OGs become rows
 let hmOGIndex      = null;   // lazy: {og_name → {hgId,family,cls,total,species_counts}}
 let hmGeneIndex    = null;   // lazy: {gene_id → og_name}
 let hmSearchIndex  = null;   // lazy: [{label,type,cls,fam,hg_id}] for global search
 let hmBatchSelection = new Set(); // search dropdown items staged for bulk add
-let hmCustomBarExpanded = true;   // whether the custom-selection chip row is visible
+let hmCustomBarExpanded = false;   // whether the custom-selection chip row is visible
 let hmShowSpLogos = false;        // show species images in cladogram
 
 function hmToggleCustomBar(){
   hmCustomBarExpanded = !hmCustomBarExpanded;
   const wrap = document.getElementById("hm-custom-chips-wrap");
-  const btn  = document.getElementById("hm-custom-toggle");
-  if(wrap) wrap.style.display = hmCustomBarExpanded ? "flex" : "none";
-  if(btn)  btn.textContent   = hmCustomBarExpanded ? "\u25BC" : "\u25B6";
+  const arrow = document.getElementById("hm-custom-toggle");
+  if(wrap) wrap.style.display = hmCustomBarExpanded ? "block" : "none";
+  if(arrow) arrow.innerHTML   = hmCustomBarExpanded ? "&#9660;" : "&#9654;";
 }
 function hmToggleSpLogos(){
   hmShowSpLogos = !hmShowSpLogos;
@@ -1534,6 +2369,20 @@ function hmToggleGroupByHG(){
   drawHeatmap();
 }
 
+function hmToggleFlip(){
+  hmFlipped = !hmFlipped;
+  const tp = document.getElementById("tree-panel");
+  if(tp) tp.style.display = hmFlipped ? "none" : "";
+  const btn = document.getElementById("btn-hm-flip");
+  if(btn){
+    btn.style.background  = hmFlipped ? "#e8f0fe" : "#fff";
+    btn.style.color       = hmFlipped ? "#1a56c4" : "#555";
+    btn.style.borderColor = hmFlipped ? "#1a56c4" : "#888";
+    btn.style.fontWeight  = hmFlipped ? "600" : "";
+  }
+  drawHeatmap();
+}
+
 function getEffectiveCustomOGs(){
   const all=new Set(hmCustomOGs);
   hmCustomGroups.forEach(g=>g.ogs.forEach(og=>all.add(og)));
@@ -1548,6 +2397,7 @@ function getSpeciesPfx(geneId){
 }
 
 function switchTab(name) {
+  if (name==="align" && !HAVE_ALIGNMENTS) return;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab===name));
   document.querySelectorAll(".tab-pane").forEach(p => p.classList.toggle("active", p.id==="pane-"+name));
   const tc  = document.getElementById("tree-count");
@@ -1565,9 +2415,2318 @@ function switchTab(name) {
     tc.style.display = "none"; pfx.style.display = "none";
     hb.style.display = "none"; cr.textContent = "";
     drawFamilyTable();
+  } else if (name==="architectures") {
+    tc.style.display = "none"; pfx.style.display = "none";
+    hb.style.display = "none"; cr.textContent = "";
+    if (!_architectureSidebarBuilt) { renderArchitectureFamilySidebar(""); _architectureSidebarBuilt = true; }
+    else renderArchitectureFamilySidebar(document.getElementById('arch-family-search')?.value || "");
+    if (!architectureCurrentFamily && _architectureFamilyCount()) selectArchitectureFamily(_loadArchitectureData().families[0]);
+    else { renderArchitectureList(); renderArchitectureDetail(); }
+  } else if (name==="align") {
+    tc.style.display = "none"; pfx.style.display = "none";
+    hb.style.display = "none"; cr.textContent = "";
+    if (!_alnSidebarBuilt) { renderAlnSidebar(""); _alnSidebarBuilt = true; }
+    if (!currentAlnId && TREE_INDEX.length) selectAlignment(TREE_INDEX[0].id);
   } else {
     tc.style.display = "none"; pfx.style.display = "";
     drawHeatmap(); // drawCladogram() is called at the end of drawHeatmap()
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOMAIN ARCHITECTURE VIEWER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _architectureSidebarBuilt = false;
+let _architectureDataLoaded = false;
+let _architectureData = null;
+let _architectureFamilyIndex = new Map();
+let architectureCurrentFamily = null;
+let architectureCurrentIndex = null;
+let architectureCurrentDomain = null;
+let architectureShowSingletons = false;
+
+function _archEmptyCatalog() {
+  return {families:[], domains:[], species:[], hgs:[], entries:[]};
+}
+
+function _loadArchitectureData() {
+  if (_architectureDataLoaded) return _architectureData;
+  _architectureDataLoaded = true;
+  const tel = document.getElementById('architecture-data');
+  if (!tel) { _architectureData = _archEmptyCatalog(); return _architectureData; }
+  let payload = {};
+  try { payload = JSON.parse(tel.textContent || '{}'); } catch (_) { payload = {}; }
+  if (!payload.gz) {
+    _architectureData = _archEmptyCatalog();
+    return _architectureData;
+  }
+  try {
+    _architectureData = JSON.parse(_decompressGz(payload.gz));
+  } catch (err) {
+    console.error('Failed to load architecture catalog', err);
+    _architectureData = _archEmptyCatalog();
+  }
+  _architectureFamilyIndex = new Map((_architectureData.families || []).map((f, i) => [f, i]));
+  return _architectureData;
+}
+
+function _architectureFamilyCount() {
+  return (_loadArchitectureData().families || []).length;
+}
+
+function _architectureFamilyEntry(family) {
+  const data = _loadArchitectureData();
+  const idx = _architectureFamilyIndex.get(family);
+  if (idx == null) return null;
+  const domains = data.domains || [];
+  const species = data.species || [];
+  const hgs = data.hgs || [];
+  const archs = (data.entries?.[idx] || []).map(rec => ({
+    key: rec[0] || [],
+    count: Number(rec[1] || 0),
+    species: (rec[2] || []).map(i => species[i] || '').filter(Boolean),
+    hgs: (rec[3] || []).map(row => {
+      const hg = hgs[row[0]] || '';
+      const nArch = Number(row[1] || 0);
+      const nTotal = Number(row[2] || 0);
+      const pct = nTotal > 0 ? (100 * nArch / nTotal) : 0;
+      return {hg, nArch, nTotal, pct};
+    }).filter(rec => rec.hg),
+    consensus: (rec[4] || []).map(hit => ({
+      start: Number(hit[0] || 0),
+      end: Number(hit[1] || 0),
+      name: domains[hit[2]] || '',
+    })),
+    labels: (rec[0] || []).map(i => domains[i] || '').filter(Boolean),
+  }));
+  return {family, architectures: archs};
+}
+
+function _architectureVisibleArchitectures(entry) {
+  const archs = entry?.architectures || [];
+  return architectureShowSingletons ? archs : archs.filter(rec => rec.count > 1);
+}
+
+function _architectureFilteredArchitectures(entry) {
+  const visible = _architectureVisibleArchitectures(entry);
+  if (!architectureCurrentDomain) return [];
+  return visible.filter(rec => (rec.labels || []).includes(architectureCurrentDomain));
+}
+
+function _architectureDomainGraph(entry) {
+  const archs = _architectureVisibleArchitectures(entry);
+  const nodeCounts = new Map();
+  const edgeCounts = new Map();
+  for (const arch of archs) {
+    const uniq = [...new Set((arch.labels || []).filter(Boolean))];
+    for (const label of uniq) {
+      nodeCounts.set(label, (nodeCounts.get(label) || 0) + arch.count);
+    }
+    for (let i = 0; i < uniq.length; i++) {
+      for (let j = i + 1; j < uniq.length; j++) {
+        const a = uniq[i];
+        const b = uniq[j];
+        const key = a < b ? `${a}\t${b}` : `${b}\t${a}`;
+        edgeCounts.set(key, (edgeCounts.get(key) || 0) + arch.count);
+      }
+    }
+  }
+  const nodes = [...nodeCounts.entries()]
+    .map(([id, count]) => ({id, count}))
+    .sort((a, b) => (b.count - a.count) || a.id.localeCompare(b.id));
+  const nodeIndex = new Map(nodes.map((node, idx) => [node.id, idx]));
+  const links = [...edgeCounts.entries()]
+    .map(([key, count]) => {
+      const [source, target] = key.split('\t');
+      return {source, target, count};
+    })
+    .filter(link => nodeIndex.has(link.source) && nodeIndex.has(link.target))
+    .sort((a, b) => (b.count - a.count) || a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
+  return {nodes, links, totalArchitectures: archs.length};
+}
+
+function _architectureDefaultDomain(entry) {
+  const graph = _architectureDomainGraph(entry);
+  return graph.nodes.length ? graph.nodes[0].id : null;
+}
+
+function _archSeriesText(labels) {
+  return (labels && labels.length) ? labels.join(' \u2192 ') : 'No domains';
+}
+
+function _consecutiveRuns(items, keyFn) {
+  const out = [];
+  for (const item of (items || [])) {
+    const key = keyFn(item);
+    const prev = out[out.length - 1];
+    if (prev && prev.key === key) prev.items.push(item);
+    else out.push({key, items:[item]});
+  }
+  return out;
+}
+
+function _archStackChipHtml(label, count) {
+  const bg = _proteinColor((label || '') + '');
+  if ((count || 1) <= 1) {
+    return `<span class="arch-domain-chip" style="background:${bg}">${_proteinEsc(label || 'domain')}</span>`;
+  }
+  const shift = 7;
+  const depth = Math.max(0, (count || 1) - 1);
+  const copies = Array.from({length: depth}, (_, idx) => {
+    const left = (depth - idx) * shift;
+    return `<span class="arch-domain-chip-copy" style="left:${left}px"><span class="arch-domain-chip" style="background:${bg}">${_proteinEsc(label || 'domain')}</span></span>`;
+  }).join('');
+  return `<span class="arch-domain-stack" style="padding-right:${depth * shift}px">${copies}<span class="arch-domain-chip arch-domain-chip-front" style="background:${bg}">${_proteinEsc(label || 'domain')}</span></span>`;
+}
+
+function _archSeriesChipHtml(labels) {
+  if (!labels || !labels.length) {
+    return '<span class="arch-domain-chip empty">No domains</span>';
+  }
+  return _consecutiveRuns(labels, label => label).map((run, idx) => {
+    const chip = _archStackChipHtml(run.key, run.items.length);
+    if (idx === 0) return chip;
+    return `<span class="arch-domain-link"></span>${chip}`;
+  }).join('');
+}
+
+function _archPctColor(pct) {
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  const hue = (p / 100) * 120;
+  return `hsl(${hue}, 68%, 58%)`;
+}
+
+function _archSvg(consensus, labels) {
+  const W = 980, H = 82, left = 90, right = 24, plotW = W - left - right;
+  const rowY = 36, rowH = 18, lineY = rowY + rowH / 2;
+  const scale = (v) => left + (Math.max(0, Math.min(1000, v || 0)) / 1000) * plotW;
+  const parts = [];
+  parts.push(`<svg class="arch-svg" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">`);
+  parts.push(`<text x="${left - 10}" y="${rowY + 6}" text-anchor="end" class="arch-row-label">Consensus</text>`);
+  parts.push(`<line x1="${left}" y1="${lineY}" x2="${left + plotW}" y2="${lineY}" class="arch-connector"/>`);
+  for (const hit of consensus) {
+    const x = scale(hit.start);
+    const w = Math.max(8, scale(hit.end) - x);
+    const color = _proteinColor((hit.name || '') + '');
+    const label = _proteinEsc(hit.name || 'domain');
+    parts.push(`<g>`);
+    parts.push(`<title>${label}: ${hit.start / 10}% - ${hit.end / 10}%</title>`);
+    parts.push(`<rect class="arch-domain-box" x="${x.toFixed(1)}" y="${rowY}" width="${w.toFixed(1)}" height="${rowH}" rx="1" ry="1" fill="${color}"/>`);
+    if (w > 72) {
+      parts.push(`<text x="${(x + w / 2).toFixed(1)}" y="${rowY + 12}" text-anchor="middle" class="arch-domain-label">${label}</text>`);
+    } else {
+      const lx = Math.max(left + 4, Math.min(left + plotW - 4, x + w / 2));
+      parts.push(`<text x="${lx.toFixed(1)}" y="${rowY - 8}" text-anchor="middle" class="arch-domain-label above">${label}</text>`);
+    }
+    parts.push(`</g>`);
+  }
+  parts.push(`</svg>`);
+  return parts.join('');
+}
+
+function renderArchitectureFamilySidebar(query="") {
+  const list = document.getElementById('arch-family-list');
+  const count = document.getElementById('arch-family-count');
+  if (!list || !count) return;
+  if (!HAVE_ARCHITECTURES) {
+    count.textContent = 'No exact-hit architectures available';
+    list.innerHTML = '';
+    return;
+  }
+  const data = _loadArchitectureData();
+  const families = data.families || [];
+  const q = (query || '').trim().toLowerCase();
+  const matches = q ? families.filter(f => f.toLowerCase().includes(q)) : families;
+  count.textContent = `${matches.length} families`;
+  list.innerHTML = matches.map(fam => {
+    const entry = _architectureFamilyEntry(fam);
+    const nArch = (entry?.architectures || []).length;
+    const famToken = encodeURIComponent(fam);
+    return `<div class="arch-item ${fam===architectureCurrentFamily?'active':''}" data-family="${_proteinEsc(famToken)}" onclick="selectArchitectureFamily(decodeURIComponent(this.dataset.family || ''))"><span>${_proteinEsc(fam)}</span><span class="arch-badge">${nArch} arch${nArch===1?'':'s'}</span></div>`;
+  }).join('');
+}
+
+function selectArchitectureFamily(family) {
+  architectureCurrentFamily = family;
+  architectureCurrentIndex = null;
+  const entry = _architectureFamilyEntry(family);
+  architectureCurrentDomain = _architectureDefaultDomain(entry);
+  renderArchitectureFamilySidebar(document.getElementById('arch-family-search')?.value || '');
+  renderArchitectureList();
+  renderArchitectureDetail();
+}
+
+function renderArchitectureList() {
+  const list = document.getElementById('arch-arch-list');
+  const count = document.getElementById('arch-arch-count');
+  if (!list || !count) return;
+  if (!HAVE_ARCHITECTURES || !architectureCurrentFamily) {
+    count.textContent = 'Select a family';
+    list.innerHTML = '';
+    return;
+  }
+  const entry = _architectureFamilyEntry(architectureCurrentFamily);
+  if (!architectureCurrentDomain) {
+    count.textContent = `Click a PFAM node to list architectures${!architectureShowSingletons ? ' (singletons hidden)' : ''}`;
+    list.innerHTML = '';
+    architectureCurrentIndex = null;
+    return;
+  }
+  const archs = _architectureFilteredArchitectures(entry);
+  const domainTotal = archs.reduce((sum, rec) => sum + (rec.count || 0), 0);
+  count.textContent = `${archs.length} architectures containing ${architectureCurrentDomain} across ${domainTotal} proteins${!architectureShowSingletons ? ' (singletons hidden)' : ''}`;
+  list.innerHTML = archs.map((rec, idx) => {
+    const series = _archSeriesChipHtml(rec.labels);
+    const active = architectureCurrentIndex === idx;
+    const pct = domainTotal > 0 ? (100 * rec.count / domainTotal) : 0;
+    const pctTxt = `${pct.toFixed(pct >= 10 ? 0 : 1)}%`;
+    const badgeBg = _archPctColor(pct);
+    return `
+      <div class="arch-item ${active?'active':''}" onclick="selectArchitecture(${idx})">
+        <div class="arch-item-main" title="${_proteinEsc(_archSeriesText(rec.labels))}">
+          <div class="arch-chip-list">${series}</div>
+        </div>
+        <span class="arch-badge" style="background:${badgeBg};border-color:rgba(20,20,20,.28);color:#102030;font-weight:700" title="${rec.count} proteins, ${pctTxt} of proteins carrying ${_proteinEsc(architectureCurrentDomain)}">${rec.count} · ${pctTxt}</span>
+      </div>`;
+  }).join('');
+  if (archs.length && (architectureCurrentIndex == null || architectureCurrentIndex >= archs.length)) {
+    architectureCurrentIndex = 0;
+  }
+}
+
+function selectArchitecture(idx) {
+  architectureCurrentIndex = idx;
+  renderArchitectureDetail();
+  renderArchitectureList();
+}
+
+function selectArchitectureDomain(label) {
+  const domain = label || null;
+  architectureCurrentDomain = (architectureCurrentDomain === domain) ? null : domain;
+  architectureCurrentIndex = null;
+  renderArchitectureList();
+  renderArchitectureDetail();
+}
+
+function _architectureTreeRecForHg(hgId) {
+  return TREE_INDEX.find(rec => rec.id === hgId || rec.hg === hgId) || null;
+}
+
+function architectureOpenCountsForHg(hgId) {
+  const rec = _architectureTreeRecForHg(hgId);
+  const hgRec = HG_DATA.find(rec2 => rec2.id === hgId || rec2.hg === hgId) || null;
+  const family = rec?.family || hgRec?.family || null;
+  if (family) famGoToFamily(family);
+}
+
+function showArchitectureHgPopup(ev, hgId) {
+  const rec = _architectureTreeRecForHg(hgId);
+  showHmOpenPopup(
+    ev,
+    hgId,
+    () => architectureOpenCountsForHg(hgId),
+    () => hmOpenAlignmentForHG(rec?.id || hgId),
+    'Show Counts',
+    'Show Alignment'
+  );
+}
+
+function renderArchitectureDetail() {
+  const empty = document.getElementById('arch-empty');
+  const view = document.getElementById('arch-view');
+  const summary = document.getElementById('arch-summary');
+  const networkWrap = document.getElementById('arch-network');
+  const detailEmpty = document.getElementById('arch-detail-empty');
+  const detailWrap = document.getElementById('arch-detail');
+  const svgWrap = document.getElementById('arch-svg-wrap');
+  const hgWrap = document.getElementById('arch-hgs');
+  if (!empty || !view || !summary || !networkWrap || !detailEmpty || !detailWrap || !svgWrap || !hgWrap) return;
+  if (!HAVE_ARCHITECTURES || !architectureCurrentFamily) {
+    empty.style.display = 'flex';
+    view.style.display = 'none';
+    return;
+  }
+  const entry = _architectureFamilyEntry(architectureCurrentFamily);
+  const visibleArchs = _architectureVisibleArchitectures(entry);
+  const graph = _architectureDomainGraph(entry);
+  const archs = _architectureFilteredArchitectures(entry);
+  const arch = archs[architectureCurrentIndex ?? 0];
+  if (!arch) {
+    architectureCurrentIndex = null;
+  }
+  empty.style.display = 'none';
+  view.style.display = 'block';
+  summary.innerHTML = [
+    `<div class="arch-summary-chip"><strong>${_proteinEsc(architectureCurrentFamily)}</strong></div>`,
+    `<div class="arch-summary-chip">PFAM domains: <strong>${graph.nodes.length}</strong></div>`,
+    `<div class="arch-summary-chip">Co-occurrence edges: <strong>${graph.links.length}</strong></div>`,
+    `<div class="arch-summary-chip">Architectures: <strong>${visibleArchs.length}</strong></div>`,
+    architectureCurrentDomain ? `<div class="arch-summary-chip">Selected PFAM: <strong>${_proteinEsc(architectureCurrentDomain)}</strong></div>` : '',
+  ].join('');
+  renderArchitectureNetwork(networkWrap, graph);
+  if (!arch) {
+    detailEmpty.style.display = 'block';
+    detailWrap.style.display = 'none';
+    return;
+  }
+  detailEmpty.style.display = 'none';
+  detailWrap.style.display = 'block';
+  summary.innerHTML = [
+    `<div class="arch-summary-chip"><strong>${_proteinEsc(architectureCurrentFamily)}</strong></div>`,
+    architectureCurrentDomain ? `<div class="arch-summary-chip">Selected PFAM: <strong>${_proteinEsc(architectureCurrentDomain)}</strong></div>` : '',
+    `<div class="arch-summary-chip">Architecture: <strong>${_proteinEsc(_archSeriesText(arch.labels))}</strong></div>`,
+    `<div class="arch-summary-chip">Proteins: <strong>${arch.count}</strong></div>`,
+    `<div class="arch-summary-chip">Species: <strong>${arch.species.length}</strong></div>`,
+    `<div class="arch-summary-chip">HGs: <strong>${arch.hgs.length}</strong></div>`,
+  ].join('');
+  svgWrap.innerHTML = _archSvg(arch.consensus, arch.labels);
+  hgWrap.innerHTML = arch.hgs.map(rec => {
+    const pct = `${rec.pct.toFixed(rec.pct >= 10 ? 0 : 1)}%`;
+    const archShare = arch.count > 0 ? (100 * rec.nArch / arch.count) : 0;
+    const archShareTxt = `${archShare.toFixed(archShare >= 10 ? 0 : 1)}%`;
+    const pctBg = _archPctColor(rec.pct);
+    const hgToken = encodeURIComponent(rec.hg);
+    return `
+      <div class="arch-hg-row" data-hg="${_proteinEsc(hgToken)}" onclick="showArchitectureHgPopup(event, decodeURIComponent(this.dataset.hg || ''))">
+        <div class="arch-hg-main">
+          <div class="arch-hg-title">${_proteinEsc(rec.hg)}</div>
+          <div class="arch-hg-meta">Within HG: ${rec.nArch} / ${rec.nTotal} proteins · Of architecture: ${rec.nArch} / ${arch.count} proteins</div>
+        </div>
+        <div class="arch-hg-badges">
+          <div class="arch-badge" style="background:${pctBg};border-color:rgba(20,20,20,.28);color:#102030;font-weight:700" title="Share within this HG">${pct}</div>
+          <div class="arch-share-badge" title="Share of this architecture found in the HG">${archShareTxt}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderArchitectureNetwork(container, graph) {
+  if (!container) return;
+  container.innerHTML = '';
+  const width = Math.max(480, container.clientWidth || 960);
+  const height = Math.max(340, Math.min(620, 220 + Math.sqrt(Math.max(1, graph.nodes.length)) * 54));
+  const svg = d3.select(container)
+    .append('svg')
+    .attr('class', 'arch-net-svg')
+    .attr('viewBox', `0 0 ${width} ${height}`)
+    .attr('width', '100%')
+    .attr('height', height);
+  if (!graph.nodes.length) {
+    svg.append('text')
+      .attr('x', width / 2)
+      .attr('y', height / 2)
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#7b8794')
+      .attr('font-size', 13)
+      .text('No PFAM co-occurrence data available for this family');
+    return;
+  }
+  const nodeMax = d3.max(graph.nodes, d => d.count) || 1;
+  const edgeMax = d3.max(graph.links, d => d.count) || 1;
+  const rScale = d3.scaleSqrt().domain([1, nodeMax]).range([9, 30]);
+  const wScale = d3.scaleSqrt().domain([1, edgeMax]).range([1.2, 6]);
+  const nodes = graph.nodes.map(node => ({...node}));
+  const links = graph.links.map(link => ({...link}));
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(link => Math.max(42, 170 - wScale(link.count) * 18)).strength(0.34))
+    .force('charge', d3.forceManyBody().strength(d => -180 - rScale(d.count) * 24))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('x', d3.forceX(width / 2).strength(0.03))
+    .force('y', d3.forceY(height / 2).strength(0.03))
+    .force('collide', d3.forceCollide().radius(d => rScale(d.count) + 34));
+  for (let i = 0; i < 280; i++) sim.tick();
+  sim.stop();
+  const pad = 28;
+  const extents = nodes.map(d => ({
+    minX: d.x - rScale(d.count),
+    maxX: d.x + rScale(d.count) + 8 + Math.max(24, String(d.id || '').length * 7),
+    minY: d.y - rScale(d.count) - 14,
+    maxY: d.y + rScale(d.count) + 14,
+  }));
+  const minX = d3.min(extents, d => d.minX) ?? 0;
+  const maxX = d3.max(extents, d => d.maxX) ?? width;
+  const minY = d3.min(extents, d => d.minY) ?? 0;
+  const maxY = d3.max(extents, d => d.maxY) ?? height;
+  const spanW = Math.max(1, maxX - minX);
+  const spanH = Math.max(1, maxY - minY);
+  const fitScale = Math.min((width - pad * 2) / spanW, (height - pad * 2) / spanH, 1.25);
+  const tx = (width - spanW * fitScale) / 2 - minX * fitScale;
+  const ty = (height - spanH * fitScale) / 2 - minY * fitScale;
+  const baseTransform = d3.zoomIdentity.translate(tx, ty).scale(fitScale);
+  const viewport = svg.append('g').attr('transform', baseTransform.toString());
+  const plot = viewport.append('g');
+  plot.append('g')
+    .selectAll('line')
+    .data(links)
+    .enter()
+    .append('line')
+    .attr('class', 'arch-net-link')
+    .attr('stroke-width', d => wScale(d.count))
+    .attr('x1', d => d.source.x)
+    .attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x)
+    .attr('y2', d => d.target.y)
+    .append('title')
+    .text(d => `${d.source.id} + ${d.target.id}: ${d.count} proteins`);
+  const nodeG = plot.append('g')
+    .selectAll('g')
+    .data(nodes)
+    .enter()
+    .append('g')
+    .attr('transform', d => `translate(${d.x},${d.y})`)
+    .style('cursor', 'pointer')
+    .on('click', (event, d) => selectArchitectureDomain(d.id));
+  nodeG.append('circle')
+    .attr('class', d => `arch-net-node${architectureCurrentDomain === d.id ? ' active' : ''}`)
+    .attr('r', d => rScale(d.count))
+    .attr('fill', d => _proteinColor(d.id + ''))
+    .append('title')
+    .text(d => `${d.id}: ${d.count} proteins`);
+  nodeG.append('text')
+    .attr('class', 'arch-net-label')
+    .attr('x', d => rScale(d.count) + 6)
+    .attr('y', 4)
+    .text(d => d.id);
+  const zoom = d3.zoom()
+    .scaleExtent([0.45, 4])
+    .on('zoom', event => {
+      viewport.attr('transform', event.transform.toString());
+    });
+  svg.call(zoom).call(zoom.transform, baseTransform);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROTEIN DOMAIN VIEWER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _proteinSidebarBuilt = false;
+let _proteinDomainDataLoaded = false;
+let _proteinDomainData = null;
+let _proteinDomainIndex = new Map();
+const _treeDetailCache = new Map();
+let proteinCurrentGene = null;
+
+function _proteinEmptyCatalog() {
+  return {genes:[], lengths:[], tracks:[], families:[], names:[], pfams:[]};
+}
+
+function _proteinEsc(text) {
+  return String(text == null ? '' : text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function _loadProteinDomainData() {
+  if (_proteinDomainDataLoaded) return _proteinDomainData;
+  _proteinDomainDataLoaded = true;
+  const tel = document.getElementById('protein-domain-data');
+  if (!tel) { _proteinDomainData = _proteinEmptyCatalog(); return _proteinDomainData; }
+  let payload = {};
+  try { payload = JSON.parse(tel.textContent || '{}'); } catch (_) { payload = {}; }
+  if (!payload.gz) {
+    _proteinDomainData = _proteinEmptyCatalog();
+    return _proteinDomainData;
+  }
+  try {
+    _proteinDomainData = JSON.parse(_decompressGz(payload.gz));
+  } catch (err) {
+    console.error('Failed to load protein-domain catalog', err);
+    _proteinDomainData = _proteinEmptyCatalog();
+  }
+  _proteinDomainIndex = new Map((_proteinDomainData.genes || []).map((g, i) => [g, i]));
+  return _proteinDomainData;
+}
+
+function _proteinGeneCount() {
+  return (_loadProteinDomainData().genes || []).length;
+}
+
+function _proteinEntry(gid) {
+  const data = _loadProteinDomainData();
+  const idx = _proteinDomainIndex.get(gid);
+  if (idx == null) return null;
+  const families = data.families || [];
+  const names = data.names || [];
+  const pfams = data.pfams || [];
+  const tracks = (data.tracks?.[idx] || []).map(rec => ({
+    family: families[rec[0]] || '',
+    rangeStart: Number.isFinite(+rec[1]) ? +rec[1] : null,
+    rangeEnd: Number.isFinite(+rec[2]) ? +rec[2] : null,
+    hits: (rec[3] || []).map(hit => ({
+      start: Number.isFinite(+hit[0]) ? +hit[0] : null,
+      end: Number.isFinite(+hit[1]) ? +hit[1] : null,
+      name: names[hit[2]] || '',
+      pfam: pfams[hit[3]] || '',
+    })),
+  }));
+  return {
+    gene: gid,
+    length: Number.isFinite(+data.lengths?.[idx]) && +data.lengths[idx] > 0 ? +data.lengths[idx] : null,
+    tracks,
+  };
+}
+
+function _proteinTracksForFamily(entry, family) {
+  if (!entry || !entry.tracks || !entry.tracks.length) return [];
+  const fam = (family || '').trim();
+  if (!fam) return entry.tracks.slice();
+  const matched = entry.tracks.filter(track => track.family === fam);
+  if (matched.length) return matched;
+  return entry.tracks.length === 1 ? entry.tracks.slice() : [];
+}
+
+function _proteinColor(key) {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = ((hash * 131) + key.charCodeAt(i)) % 360;
+  return `hsl(${hash},62%,60%)`;
+}
+
+function _proteinRulerTickStep(total) {
+  if (total <= 300) return 25;
+  if (total <= 800) return 50;
+  if (total <= 2000) return 100;
+  if (total <= 5000) return 200;
+  return 500;
+}
+
+function _proteinDomainLegendHtml(track) {
+  const seen = new Set();
+  const items = [];
+  for (const hit of (track?.hits || [])) {
+    const key = `${hit.pfam || ''}\t${hit.name || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      name: hit.name || 'domain',
+      pfam: hit.pfam || '',
+      color: _proteinColor((hit.pfam || hit.name || track.family || '') + ''),
+    });
+  }
+  if (!items.length) return '';
+  return `<div class="prot-domain-legend">${items.map(item => (
+    `<span class="prot-domain-chip"><span class="prot-domain-chip-swatch" style="background:${item.color}"></span>${_proteinEsc(item.name)}${item.pfam ? ` <span style="color:#6f8090">(${_proteinEsc(item.pfam)})</span>` : ''}</span>`
+  )).join('')}</div>`;
+}
+
+function _proteinTrackSvg(length, track, opts={}) {
+  const sortedHits = [...(track.hits || [])]
+    .filter(hit => hit.start != null && hit.end != null)
+    .sort((a, b) => (a.start - b.start) || (a.end - b.end) || String(a.name || '').localeCompare(String(b.name || '')));
+  const maxHitEnd = sortedHits.reduce((m, h) => Math.max(m, h.end || 0), 0);
+  const total = Math.max(length || 0, track.rangeEnd || 0, maxHitEnd || 0, 1);
+  const hitSpanStart = sortedHits.length ? Math.min(...sortedHits.map(h => h.start || total)) : null;
+  const hitSpanEnd = sortedHits.length ? Math.max(...sortedHits.map(h => h.end || 0)) : null;
+  const focusToPhylogeny = !!opts.focusToPhylogeny;
+  const displayStart = focusToPhylogeny
+    ? Math.max(1, Math.min(total, track.rangeStart || hitSpanStart || 1))
+    : 1;
+  const displayEnd = focusToPhylogeny
+    ? Math.max(displayStart, Math.min(total, track.rangeEnd || hitSpanEnd || total))
+    : total;
+  const displaySpan = Math.max(1, displayEnd - displayStart + 1);
+  const compact = !!opts.compact;
+  const W = compact ? 720 : 980, left = compact ? 148 : 120, right = compact ? 22 : 24, plotW = W - left - right;
+  const phyloY = 18, phyloH = 16;
+  const hitSpanY = 48, hitSpanH = 12;
+  const hitTop = 76, hitH = 18, laneGap = 7;
+  const scale = (v) => {
+    const clamped = Math.max(displayStart, Math.min(displayEnd, v || displayStart));
+    if (displaySpan <= 1) return left;
+    return left + ((clamped - displayStart) / (displaySpan - 1)) * plotW;
+  };
+  const rangeStart = track.rangeStart || displayStart;
+  const rangeEnd = track.rangeEnd || displayEnd;
+  const rangeX = scale(rangeStart);
+  const rangeW = Math.max(8, scale(rangeEnd) - rangeX);
+  const tickStep = _proteinRulerTickStep(displaySpan);
+  const mediumStep = tickStep < 50 ? tickStep * 2 : 50;
+  const majorStep = tickStep > 100 ? tickStep : (displaySpan >= 100 ? 100 : tickStep * 2);
+  const laneEnds = [];
+  const laidOutHits = sortedHits.map(hit => {
+    let lane = 0;
+    while (lane < laneEnds.length && hit.start <= laneEnds[lane]) lane += 1;
+    laneEnds[lane] = hit.end;
+    return {...hit, lane};
+  });
+  const laneCount = Math.max(1, laneEnds.length);
+  const hitBandH = laneCount * hitH + Math.max(0, laneCount - 1) * laneGap;
+  const rulerY = hitTop + hitBandH + 30;
+  const H = rulerY + 38;
+  const labelX = compact ? 18 : 14;
+  const parts = [];
+  parts.push(`<svg class="prot-track-svg${compact ? ' compact' : ''}" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">`);
+  parts.push(`<text x="${labelX}" y="${phyloY + 11}" class="prot-row-label">Phylogeny span</text>`);
+  parts.push(`<text x="${labelX}" y="${hitSpanY + 9}" class="prot-row-label">Hit span</text>`);
+  parts.push(`<text x="${labelX}" y="${hitTop + 12}" class="prot-row-label">Exact hits</text>`);
+  parts.push(`<text x="${labelX}" y="${rulerY + 4}" class="prot-row-label">${focusToPhylogeny ? 'Phylogeny window' : 'Protein'}</text>`);
+  parts.push(`<rect x="${left}" y="${phyloY + 4}" width="${plotW}" height="8" fill="#edf2f7"/>`);
+  parts.push(`<rect x="${left}" y="${hitSpanY + 3}" width="${plotW}" height="6" fill="#f2f5f8"/>`);
+  parts.push(`<rect x="${left}" y="${hitTop + 5}" width="${plotW}" height="${Math.max(8, hitBandH - 10)}" fill="#f3f6f9"/>`);
+  parts.push(`<line x1="${left}" y1="${rulerY}" x2="${left + plotW}" y2="${rulerY}" stroke="#7f8f9f" stroke-width="2"/>`);
+  parts.push(`<line x1="${scale(displayStart).toFixed(1)}" y1="${rulerY}" x2="${scale(displayStart).toFixed(1)}" y2="${rulerY + 12}" class="prot-ruler-tick major"/>`);
+  parts.push(`<text x="${scale(displayStart).toFixed(1)}" y="${rulerY + 26}" text-anchor="middle" class="prot-ruler-label">${displayStart}</text>`);
+  const tickBegin = Math.ceil(displayStart / tickStep) * tickStep;
+  for (let pos = tickBegin; pos < displayEnd; pos += tickStep) {
+    if (pos <= displayStart) continue;
+    const isMajor = majorStep > 0 && pos % majorStep === 0;
+    const isMedium = !isMajor && mediumStep > 0 && pos % mediumStep === 0;
+    const tickH = isMajor ? 12 : (isMedium ? 8 : 5);
+    parts.push(`<line x1="${scale(pos).toFixed(1)}" y1="${rulerY}" x2="${scale(pos).toFixed(1)}" y2="${(rulerY + tickH).toFixed(1)}" class="prot-ruler-tick${isMajor ? ' major' : ''}"/>`);
+    if (isMajor) {
+      parts.push(`<text x="${scale(pos).toFixed(1)}" y="${rulerY + 26}" text-anchor="middle" class="prot-ruler-label">${pos}</text>`);
+    }
+  }
+  parts.push(`<line x1="${scale(displayEnd).toFixed(1)}" y1="${rulerY}" x2="${scale(displayEnd).toFixed(1)}" y2="${rulerY + 12}" class="prot-ruler-tick major"/>`);
+  if (displayEnd > displayStart) {
+    parts.push(`<text x="${scale(displayEnd).toFixed(1)}" y="${rulerY + 26}" text-anchor="middle" class="prot-ruler-label">${displayEnd}</text>`);
+  }
+  parts.push(`<g class="prot-span-group">`);
+  parts.push(`<rect class="prot-phylo-span" x="${rangeX.toFixed(1)}" y="${phyloY}" width="${rangeW.toFixed(1)}" height="${phyloH}" rx="1" ry="1"/>`);
+  if (hitSpanStart != null && hitSpanEnd != null) {
+    const p1 = scale(rangeStart);
+    const p2 = scale(rangeEnd);
+    parts.push(`<line x1="${p1.toFixed(1)}" y1="${phyloY + phyloH}" x2="${p1.toFixed(1)}" y2="${rulerY}" class="prot-span-guide"/>`);
+    parts.push(`<line x1="${p2.toFixed(1)}" y1="${phyloY + phyloH}" x2="${p2.toFixed(1)}" y2="${rulerY}" class="prot-span-guide"/>`);
+    parts.push(`<text x="${p1.toFixed(1)}" y="${rulerY - 20}" text-anchor="middle" class="prot-span-coord">${rangeStart}</text>`);
+    parts.push(`<text x="${p2.toFixed(1)}" y="${rulerY - 20}" text-anchor="middle" class="prot-span-coord">${rangeEnd}</text>`);
+  }
+  parts.push(`</g>`);
+  if (hitSpanStart != null && hitSpanEnd != null) {
+    const hitSpanX = scale(hitSpanStart);
+    const hitSpanW = Math.max(8, scale(hitSpanEnd) - hitSpanX);
+    const h1 = scale(hitSpanStart);
+    const h2 = scale(hitSpanEnd);
+    parts.push(`<g class="prot-span-group">`);
+    parts.push(`<rect class="prot-hit-span" x="${hitSpanX.toFixed(1)}" y="${hitSpanY}" width="${hitSpanW.toFixed(1)}" height="${hitSpanH}" rx="1" ry="1"/>`);
+    parts.push(`<line x1="${h1.toFixed(1)}" y1="${hitSpanY + hitSpanH}" x2="${h1.toFixed(1)}" y2="${rulerY}" class="prot-span-guide"/>`);
+    parts.push(`<line x1="${h2.toFixed(1)}" y1="${hitSpanY + hitSpanH}" x2="${h2.toFixed(1)}" y2="${rulerY}" class="prot-span-guide"/>`);
+    parts.push(`<text x="${h1.toFixed(1)}" y="${rulerY - 8}" text-anchor="middle" class="prot-span-coord">${hitSpanStart}</text>`);
+    parts.push(`<text x="${h2.toFixed(1)}" y="${rulerY - 8}" text-anchor="middle" class="prot-span-coord">${hitSpanEnd}</text>`);
+    parts.push(`</g>`);
+  }
+  for (const hit of laidOutHits) {
+    const x = scale(hit.start);
+    const w = Math.max(8, scale(hit.end) - x);
+    const color = _proteinColor((hit.pfam || hit.name || track.family) + '');
+    const label = _proteinEsc(hit.name || hit.pfam || 'domain');
+    const pfam = _proteinEsc(hit.pfam || '');
+    const x2 = x + w;
+    const y = hitTop + hit.lane * (hitH + laneGap);
+    parts.push(`<g class="prot-hit-group">`);
+    parts.push(`<title>${label}${pfam ? ` (${pfam})` : ''}: ${hit.start}-${hit.end}</title>`);
+    parts.push(`<line x1="${x.toFixed(1)}" y1="${(y + hitH).toFixed(1)}" x2="${x.toFixed(1)}" y2="${rulerY}" class="prot-hit-guide"/>`);
+    parts.push(`<line x1="${x2.toFixed(1)}" y1="${(y + hitH).toFixed(1)}" x2="${x2.toFixed(1)}" y2="${rulerY}" class="prot-hit-guide"/>`);
+    parts.push(`<rect class="prot-hit-box" x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${hitH}" rx="1" ry="1" fill="${color}"/>`);
+    if (w > 72) {
+      parts.push(`<text x="${(x + w / 2).toFixed(1)}" y="${y + 12}" text-anchor="middle" font-size="10" fill="#102030" font-weight="700">${label}</text>`);
+    } else {
+      parts.push(`<text x="${(x2 + 8).toFixed(1)}" y="${y + 12}" text-anchor="start" class="prot-hit-hover-label">${label}</text>`);
+    }
+    parts.push(`<text x="${x.toFixed(1)}" y="${rulerY - 8}" text-anchor="middle" class="prot-hit-coord">${hit.start}</text>`);
+    parts.push(`<text x="${x2.toFixed(1)}" y="${rulerY - 8}" text-anchor="middle" class="prot-hit-coord">${hit.end}</text>`);
+    parts.push(`</g>`);
+  }
+  parts.push(`<text x="${left + plotW + 10}" y="${phyloY + 12}" class="prot-ruler-label">${rangeStart}-${rangeEnd}</text>`);
+  if (hitSpanStart != null && hitSpanEnd != null) {
+    parts.push(`<text x="${left + plotW + 10}" y="${hitSpanY + 10}" class="prot-ruler-label">${hitSpanStart}-${hitSpanEnd}</text>`);
+  }
+  parts.push(`<text x="${left + plotW + 10}" y="${rulerY + 4}" class="prot-ruler-label">${focusToPhylogeny ? `${displayStart}-${displayEnd} aa window` : `${total} aa`}</text>`);
+  parts.push(`</svg>`);
+  return parts.join('');
+}
+
+function _proteinPopupHtml(gid, opts={}) {
+  const entry = _proteinEntry(gid);
+  const tracksForPopup = _proteinTracksForFamily(entry, opts.family);
+  if (!entry || !tracksForPopup.length) return '';
+  const hitCount = tracksForPopup.reduce((n, t) => n + t.hits.length, 0);
+  const tracks = tracksForPopup.slice(0, 3).map(track => {
+    const phyloRangeTxt = (track.rangeStart != null && track.rangeEnd != null)
+      ? `${track.rangeStart}-${track.rangeEnd}`
+      : 'NA';
+    const hitStarts = track.hits.map(hit => hit.start).filter(v => v != null);
+    const hitEnds = track.hits.map(hit => hit.end).filter(v => v != null);
+    const hitRangeTxt = (hitStarts.length && hitEnds.length)
+      ? `${Math.min(...hitStarts)}-${Math.max(...hitEnds)}`
+      : 'NA';
+    return `
+      <div class="prot-track" style="margin-bottom:8px;padding:8px 10px 10px">
+        <div class="prot-track-head" style="margin-bottom:6px">
+          <div class="prot-track-title">${_proteinEsc(track.family)}</div>
+          <div class="prot-track-meta">Hit span: ${hitRangeTxt} · phylogeny span: ${phyloRangeTxt}</div>
+        </div>
+        <div class="prot-svg-wrap compact">${_proteinTrackSvg(entry.length, track, {focusToPhylogeny:true, compact:true})}</div>
+        ${_proteinDomainLegendHtml(track)}
+      </div>`;
+  }).join('');
+  const hiddenCount = tracksForPopup.length > 3 ? tracksForPopup.length - 3 : 0;
+  return `
+    <div style="width:min(760px,calc(100vw - 56px));max-width:min(760px,calc(100vw - 56px))">
+      <div class="tt-name">${_proteinEsc(entry.gene)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <span class="prot-summary-chip">Protein length: <strong>${entry.length || 'NA'} aa</strong></span>
+        <span class="prot-summary-chip">Family tracks: <strong>${tracksForPopup.length}</strong></span>
+        <span class="prot-summary-chip">Exact hits: <strong>${hitCount}</strong></span>
+      </div>
+      <div class="prot-legend-popup" style="display:flex;flex-wrap:wrap;gap:10px;margin:0 0 8px">
+        <div class="prot-legend-item"><span class="prot-legend-swatch phylo"></span><span>Phylogeny span</span></div>
+        <div class="prot-legend-item"><span class="prot-legend-swatch hitspan"></span><span>Hit span</span></div>
+        <div class="prot-legend-item"><span class="prot-legend-swatch hit"></span><span>Exact hits</span></div>
+      </div>
+      ${tracks}
+      ${hiddenCount ? `<div style="font-size:10px;color:#7f8c8d">+ ${hiddenCount} additional family track${hiddenCount===1?'':'s'}</div>` : ''}
+    </div>`;
+}
+
+function renderProteinSidebar(query="") {
+  const list = document.getElementById('prot-list');
+  const count = document.getElementById('prot-count');
+  if (!list || !count) return;
+  if (!HAVE_PROTEIN_DOMAINS) {
+    count.textContent = 'No exact domain-hit data available';
+    list.innerHTML = '';
+    return;
+  }
+  const genes = _loadProteinDomainData().genes || [];
+  const q = (query || '').trim().toLowerCase();
+  const matches = q ? genes.filter(g => g.toLowerCase().includes(q)) : genes;
+  const shown = matches.slice(0, 250);
+  count.textContent = `${matches.length} proteins${matches.length > shown.length ? ` (showing first ${shown.length})` : ''}`;
+  list.innerHTML = shown.map(gid => {
+    const idx = _proteinDomainIndex.get(gid);
+    const nTracks = ((_proteinDomainData.tracks || [])[idx] || []).length;
+    const gidToken = encodeURIComponent(gid);
+    return `<div class="prot-item ${gid===proteinCurrentGene?'active':''}" data-gene="${_proteinEsc(gidToken)}" onclick="selectProteinDomainGene(decodeURIComponent(this.dataset.gene || ''))"><span>${_proteinEsc(gid)}</span><span class="prot-badge">${nTracks} track${nTracks===1?'':'s'}</span></div>`;
+  }).join('');
+}
+
+function selectProteinDomainGene(gid) {
+  proteinCurrentGene = gid;
+  renderProteinSidebar(document.getElementById('prot-search')?.value || '');
+  renderProteinDomainView();
+}
+
+function renderProteinDomainView() {
+  const empty = document.getElementById('prot-empty');
+  const view = document.getElementById('prot-view');
+  const summary = document.getElementById('prot-summary');
+  const legend = document.getElementById('prot-legend');
+  const tracksWrap = document.getElementById('prot-tracks');
+  if (!empty || !view || !summary || !legend || !tracksWrap) return;
+  if (!HAVE_PROTEIN_DOMAINS || !proteinCurrentGene) {
+    empty.style.display = 'flex';
+    view.style.display = 'none';
+    return;
+  }
+  const entry = _proteinEntry(proteinCurrentGene);
+  if (!entry) {
+    empty.style.display = 'flex';
+    view.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  view.style.display = 'block';
+  const hitCount = entry.tracks.reduce((n, t) => n + t.hits.length, 0);
+  summary.innerHTML = [
+    `<div class="prot-summary-chip"><strong>${_proteinEsc(entry.gene)}</strong></div>`,
+    `<div class="prot-summary-chip">Protein length: <strong>${entry.length || 'NA'} aa</strong></div>`,
+    `<div class="prot-summary-chip">Family tracks: <strong>${entry.tracks.length}</strong></div>`,
+    `<div class="prot-summary-chip">Exact hits: <strong>${hitCount}</strong></div>`,
+  ].join('');
+  legend.innerHTML = [
+    `<div class="prot-legend-item"><span class="prot-legend-swatch phylo"></span><span>Phylogeny span: expanded range used downstream in alignments and trees</span></div>`,
+    `<div class="prot-legend-item"><span class="prot-legend-swatch hitspan"></span><span>Hit span: min-to-max range covered by the exact hits</span></div>`,
+    `<div class="prot-legend-item"><span class="prot-legend-swatch hit"></span><span>Exact hits: individual PFAM domain matches</span></div>`,
+    `<div class="prot-legend-item"><span class="prot-legend-swatch guide"></span><span>Dashed guides connect hit boundaries to the protein ruler; hover a hit to show its coordinates</span></div>`,
+  ].join('');
+  tracksWrap.innerHTML = entry.tracks.map(track => {
+    const phyloRangeTxt = (track.rangeStart != null && track.rangeEnd != null)
+      ? `${track.rangeStart}-${track.rangeEnd}`
+      : 'NA';
+    const hitStarts = track.hits.map(hit => hit.start).filter(v => v != null);
+    const hitEnds = track.hits.map(hit => hit.end).filter(v => v != null);
+    const hitRangeTxt = (hitStarts.length && hitEnds.length)
+      ? `${Math.min(...hitStarts)}-${Math.max(...hitEnds)}`
+      : 'NA';
+    const chips = track.hits.map(hit => {
+      const label = _proteinEsc(hit.name || 'domain');
+      const pfam = _proteinEsc(hit.pfam || '');
+      const loc = `${hit.start || '?'}-${hit.end || '?'}`;
+      return `<span class="prot-hit-chip">${label}${pfam ? ` (${pfam})` : ''} <span style="color:#7f8c8d">${loc}</span></span>`;
+    }).join('');
+    return `
+      <div class="prot-track">
+        <div class="prot-track-head">
+          <div class="prot-track-title">${_proteinEsc(track.family)}</div>
+          <div class="prot-track-meta">Hit span: ${hitRangeTxt} · phylogeny span: ${phyloRangeTxt} · exact hits: ${track.hits.length}</div>
+        </div>
+        <div class="prot-svg-wrap">${_proteinTrackSvg(entry.length, track)}</div>
+        <div class="prot-hits">${chips || '<span class="prot-hit-chip">No exact hits recorded</span>'}</div>
+      </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALIGNMENT VIEWER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let currentAlnId   = null;
+let _alnSidebarBuilt = false;
+let alnSeqs        = [];
+let alnShowCons    = false;
+let alnCellW       = 9;
+let alnCellH       = 14;
+let _alnRawFasta   = null;
+let alnOgMap       = {};
+let alnTreeOrder   = [];
+let alnTreeDict    = null;
+let alnTreeW       = 80;
+let alnUseBrLen    = false;
+let _alnRows       = [];
+let alnSpFilters   = [];   // committed species filter tags
+let alnUseGeneRax  = false;
+let _alnTreeDataCache = null;  // full treedata object for current HG
+let alnGeneMeta     = {};
+let alnRangeData    = {};
+let alnHiddenOGs    = new Set();
+let alnCollapsedOGs = new Set();
+let alnShowSeqId    = true;
+let alnShowRefCol   = false;
+let alnShowSpeciesCol = true;
+let alnShowMrcaCol  = true;
+let alnShowRangeCol = true;
+let alnShowSeqPanel = true;
+let alnNameW        = 220;
+let alnRefColW      = 100;
+let alnSpeciesColW  = 110;
+let alnMrcaColW     = 120;
+let alnRangeColW    = 96;
+let alnDomainChipScale = 1.0;
+let alnMetaColOrder = ['ref', 'species', 'mrca', 'range', 'id'];
+let _alnSyncingScroll = false;
+
+const AA_COLORS = {
+  A:'#C8C8C8',V:'#C8C8C8',I:'#C8C8C8',L:'#C8C8C8',M:'#C8C8C8',
+  F:'#FFAAAA',W:'#FFAAAA',Y:'#FFAAAA',
+  K:'#6699FF',R:'#6699FF',H:'#88CCEE',
+  D:'#FF4444',E:'#FF4444',
+  S:'#88CC88',T:'#88CC88',N:'#88CC88',Q:'#88CC88',
+  C:'#FFEE44', P:'#EEAAEE', G:'#EEEEEE', '-':'','.':''
+};
+
+const _alnOgPalette = [
+  '#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f',
+  '#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac',
+  '#af7aa1','#86bcb6','#d4a6c8','#8cd17d','#499894'
+];
+
+function parseFasta(text) {
+  const seqs = [];
+  let name = null, buf = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('>')) {
+      if (name !== null) seqs.push({name, seq: buf.join('')});
+      name = line.slice(1).trim();
+      buf = [];
+    } else { buf.push(line.trim()); }
+  }
+  if (name !== null) seqs.push({name, seq: buf.join('')});
+  return seqs;
+}
+
+function _decompressGz(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const inflated = pako.inflate(bytes);
+  return new TextDecoder().decode(inflated);
+}
+
+function _loadEmbeddedJson(id) {
+  if (_treeDetailCache.has(id)) return _treeDetailCache.get(id);
+  const el = document.getElementById(id);
+  if (!el) return null;
+  try {
+    let parsed = JSON.parse(el.textContent);
+    if (parsed && typeof parsed === 'object' && Object.prototype.hasOwnProperty.call(parsed, 'gz')) {
+      parsed = parsed.gz ? JSON.parse(_decompressGz(parsed.gz)) : null;
+    }
+    _treeDetailCache.set(id, parsed);
+    return parsed;
+  } catch (e) {
+    _treeDetailCache.set(id, null);
+    return null;
+  }
+}
+
+function _alnDfsLeaves(node) {
+  if (node.leaf) return [node.gene_id || node.name || ''];
+  const out = [];
+  for (const c of (node.children || [])) out.push(..._alnDfsLeaves(c));
+  return out;
+}
+
+function _alnLoadTreeData(id) {
+  alnOgMap = {}; alnTreeOrder = []; alnTreeDict = null; alnGeneMeta = {}; alnRangeData = {};
+  _alnTreeDataCache = loadDetail(id);
+  if (!_alnTreeDataCache) return;
+  _alnApplyTreeSource();
+}
+function _alnApplyTreeSource() {
+  alnOgMap = {}; alnTreeOrder = []; alnTreeDict = null; alnGeneMeta = {}; alnRangeData = {};
+  if (!_alnTreeDataCache) return;
+  const td = _alnTreeDataCache;
+  const tree = alnUseGeneRax ? (td.tree || td.prev_tree) : (td.prev_tree || td.tree);
+  const ogs  = alnUseGeneRax ? (td.ogs  || td.prev_ogs)  : (td.prev_ogs  || td.ogs);
+  const meta = alnUseGeneRax ? (td.meta || td.prev_meta || {}) : (td.prev_meta || td.meta || {});
+  if (tree) { alnTreeDict = tree; alnTreeOrder = _alnDfsLeaves(tree); }
+  if (meta) alnGeneMeta = meta;
+  if (td.range) alnRangeData = td.range;
+  if (ogs) {
+    for (const [og, genes] of Object.entries(ogs))
+      for (const g of genes) alnOgMap[g] = og;
+  }
+}
+
+function _alnReorderByTree(seqs) {
+  if (!alnTreeOrder.length) return seqs;
+  const byGene = {};
+  for (const s of seqs) byGene[s.name.split(/\s/)[0]] = s;
+  const ordered = [];
+  for (const gid of alnTreeOrder) if (byGene[gid]) ordered.push(byGene[gid]);
+  const inTree = new Set(alnTreeOrder);
+  for (const s of seqs) if (!inTree.has(s.name.split(/\s/)[0])) ordered.push(s);
+  return ordered;
+}
+
+function _alnFitText(ctx, text, maxPx) {
+  if (maxPx <= 0) return '';
+  if (ctx.measureText(text).width <= maxPx) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (ctx.measureText(text.slice(0, mid) + '\u2026').width <= maxPx) lo = mid; else hi = mid - 1;
+  }
+  return lo > 0 ? text.slice(0, lo) + '\u2026' : '';
+}
+
+function _alnGetOgColor(og) {
+  const ogs = Object.keys(alnOgMap).length ? [...new Set(Object.values(alnOgMap))].sort() : [];
+  const idx = ogs.indexOf(og);
+  return idx >= 0 ? _alnOgPalette[idx % _alnOgPalette.length] : '#ccc';
+}
+
+function _alnColumnDefs() {
+  return {
+    ref: {
+      key: 'ref',
+      label: 'Ref',
+      width: alnShowRefCol ? alnRefColW : 0,
+      minWidth: 40,
+      resizerId: 'aln-ref-resize-bar',
+    },
+    species: {
+      key: 'species',
+      label: 'Species',
+      width: alnShowSpeciesCol ? alnSpeciesColW : 0,
+      minWidth: 50,
+      resizerId: 'aln-species-resize-bar',
+    },
+    mrca: {
+      key: 'mrca',
+      label: 'MRCA',
+      width: alnShowMrcaCol ? alnMrcaColW : 0,
+      minWidth: 50,
+      resizerId: 'aln-mrca-resize-bar',
+    },
+    range: {
+      key: 'range',
+      label: 'Domain Architecture',
+      width: alnShowRangeCol ? alnRangeColW : 0,
+      minWidth: 70,
+      resizerId: 'aln-range-resize-bar',
+    },
+    id: {
+      key: 'id',
+      label: 'ID',
+      width: alnShowSeqId ? alnNameW : 0,
+      minWidth: 60,
+      resizerId: 'aln-resize-bar',
+    },
+  };
+}
+
+function _alnLayoutMetrics() {
+  const treeW = alnTreeDict ? alnTreeW : 0;
+  const ogW = Object.keys(alnOgMap).length ? 14 : 0;
+  const defs = _alnColumnDefs();
+  const metaCols = [];
+  const byKey = {};
+  let relX = 0;
+  for (const key of alnMetaColOrder) {
+    const def = defs[key];
+    if (!def || def.width <= 0) continue;
+    const col = {
+      ...def,
+      relX0: relX,
+      relX1: relX + def.width,
+      x0: treeW + ogW + relX,
+      x1: treeW + ogW + relX + def.width,
+    };
+    metaCols.push(col);
+    byKey[key] = col;
+    relX += def.width;
+  }
+  return {
+    treeW,
+    ogW,
+    metaCols,
+    byKey,
+    metaW: relX,
+    leftW: treeW + ogW + relX,
+  };
+}
+
+function _alnMoveMetaColumn(srcKey, dstKey, placeAfter) {
+  if (!srcKey || !dstKey || srcKey === dstKey) return;
+  const order = alnMetaColOrder.filter(k => k !== srcKey);
+  let dstIdx = order.indexOf(dstKey);
+  if (dstIdx < 0) return;
+  if (placeAfter) dstIdx += 1;
+  order.splice(dstIdx, 0, srcKey);
+  alnMetaColOrder = order;
+  _alnApplyViewerWidths();
+  if (alnSeqs.length) renderAlignment();
+}
+
+function _alnRangeMeta(gid) {
+  if (!gid) return null;
+  const proteinEntry = _proteinEntry(gid);
+  const currentFamily = (TREE_INDEX.find(rec => rec.id === currentAlnId)?.family) || null;
+  const familyTrack = proteinEntry?.tracks?.find(track => track.family === currentFamily)
+    || (proteinEntry?.tracks?.length === 1 ? proteinEntry.tracks[0] : null);
+  const meta = (GENE_META[gid] || {});
+  const lenRaw = proteinEntry?.length ?? meta.length;
+  const len = Number.isFinite(+lenRaw) ? +lenRaw : null;
+  const span = alnRangeData[gid];
+  let start = null, end = null;
+  let hits = [];
+  if (familyTrack) {
+    start = Number.isFinite(+familyTrack.rangeStart) ? +familyTrack.rangeStart : null;
+    end = Number.isFinite(+familyTrack.rangeEnd) ? +familyTrack.rangeEnd : null;
+    hits = (familyTrack.hits || [])
+      .filter(hit => hit.start != null && hit.end != null)
+      .map(hit => ({
+        start: +hit.start,
+        end: +hit.end,
+        name: hit.name || '',
+        pfam: hit.pfam || '',
+      }));
+  }
+  if (Array.isArray(span) && span.length >= 2) {
+    if (start == null) start = Number.isFinite(+span[0]) ? +span[0] : null;
+    if (end == null) end = Number.isFinite(+span[1]) ? +span[1] : null;
+  }
+  if (len != null) {
+    if (start != null) start = Math.max(1, Math.min(len, start));
+    if (end != null) end = Math.max(1, Math.min(len, end));
+  }
+  if (start != null && end != null && start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+  if (len == null && start == null && end == null) return null;
+  return {length: len, start, end, hits, family: familyTrack?.family || currentFamily || ''};
+}
+
+function _alnDrawRangeCell(ctx, x0, y0, w, h, gid, rowBg) {
+  const meta = _alnRangeMeta(gid);
+  if (!meta || w <= 10) return;
+  const padX = 8;
+  const barW = Math.max(6, w - padX * 2);
+  const baseChipH = Math.max(4, Math.min(7, Math.floor(h * 0.30)));
+  const chipH = Math.max(3, Math.min(h - 4, Math.round(baseChipH * alnDomainChipScale)));
+  const midY = Math.round(y0 + h / 2) + 0.5;
+  const chipY = Math.round(midY - chipH / 2) + 0.5;
+  const barX = x0 + padX;
+  const start = meta.start != null ? meta.start : (meta.hits.length ? Math.min(...meta.hits.map(hit => hit.start)) : 1);
+  const end = meta.end != null ? meta.end : (meta.hits.length ? Math.max(...meta.hits.map(hit => hit.end)) : start);
+  const span = Math.max(1, end - start + 1);
+  const scale = (v) => barX + ((Math.max(start, Math.min(end, v)) - start) / Math.max(1, span - 1)) * barW;
+  ctx.fillStyle = rowBg || '#edf1f4';
+  ctx.fillRect(x0, y0, w, h);
+  ctx.strokeStyle = '#9aa5b1';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(barX, midY);
+  ctx.lineTo(barX + barW, midY);
+  ctx.stroke();
+  const hits = (meta.hits || []).slice().sort((a, b) => (a.start - b.start) || (a.end - b.end));
+  for (const hit of hits) {
+    const x1 = scale(hit.start);
+    const x2 = scale(hit.end);
+    const chipW = Math.max(6, x2 - x1);
+    const rr = Math.min(3, chipH / 2);
+    ctx.fillStyle = _proteinColor((hit.pfam || hit.name || meta.family || '') + '');
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x1, chipY, chipW, chipH, rr);
+    } else {
+      ctx.rect(x1, chipY, chipW, chipH);
+    }
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(17,17,17,.72)';
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x1 + 0.5, chipY + 0.5, Math.max(1, chipW - 1), Math.max(1, chipH - 1), rr);
+    } else {
+      ctx.rect(x1 + 0.5, chipY + 0.5, Math.max(1, chipW - 1), Math.max(1, chipH - 1));
+    }
+    ctx.stroke();
+  }
+}
+
+function _alnColTooltip(row, key) {
+  if (!row || row.isCons || row.isCollapsed) return '';
+  if (key !== 'range') return '';
+  const meta = _alnRangeMeta(row.gid);
+  if (!meta) return '';
+  if (meta.hits && meta.hits.length && meta.start != null && meta.end != null) {
+    return `Domain architecture: ${meta.start}-${meta.end} / ${meta.length || '?'} aa`;
+  }
+  if (meta.length != null && meta.start != null && meta.end != null) {
+    return `Range: ${meta.start}-${meta.end} / ${meta.length} aa`;
+  }
+  if (meta.length != null) return `Protein length: ${meta.length} aa`;
+  if (meta.start != null && meta.end != null) return `Range: ${meta.start}-${meta.end}`;
+  return '';
+}
+
+function _alnLayoutTree(treeDict, gidY, treeW, useBrLen) {
+  if (!treeDict || !Object.keys(gidY).length) return null;
+
+  if (!useBrLen) {
+    // cladogram: leaves aligned to right edge, internal nodes by depth
+    function maxDepth(n, d) {
+      if (n.leaf) return d;
+      let mx = d;
+      for (const c of (n.children || [])) mx = Math.max(mx, maxDepth(c, d + 1));
+      return mx;
+    }
+    const md = maxDepth(treeDict, 0) || 1;
+    const xScale = (treeW - 4) / md;
+    const lines = [];
+    function lay(node, depth) {
+      if (node.leaf) {
+        const gid = node.gene_id || node.name || '';
+        const y = gidY[gid];
+        if (y === undefined) return null;
+        return {x: treeW - 2, y};
+      }
+      const childCoords = [];
+      for (const c of (node.children || [])) {
+        const cc = lay(c, depth + 1);
+        if (cc) childCoords.push(cc);
+      }
+      if (!childCoords.length) return null;
+      const x = 2 + depth * xScale;
+      const y = (childCoords[0].y + childCoords[childCoords.length - 1].y) / 2;
+      lines.push({x1: x, y1: childCoords[0].y, x2: x, y2: childCoords[childCoords.length - 1].y});
+      for (const cc of childCoords) lines.push({x1: x, y1: cc.y, x2: cc.x, y2: cc.y});
+      return {x, y};
+    }
+    lay(treeDict, 0);
+    return lines;
+  } else {
+    // phylogram: x proportional to root-to-tip distance
+    function maxRootDist(n, d) {
+      const dd = d + (n.dist || 0);
+      if (n.leaf) return dd;
+      let mx = dd;
+      for (const c of (n.children || [])) mx = Math.max(mx, maxRootDist(c, dd));
+      return mx;
+    }
+    const maxD = maxRootDist(treeDict, 0) || 1;
+    const xScale = (treeW - 4) / maxD;
+    const lines = [];
+    function lay(node, rootDist) {
+      const dist = rootDist + (node.dist || 0);
+      const x = 2 + dist * xScale;
+      if (node.leaf) {
+        const gid = node.gene_id || node.name || '';
+        const y = gidY[gid];
+        if (y === undefined) return null;
+        return {x, y};
+      }
+      const childCoords = [];
+      for (const c of (node.children || [])) {
+        const cc = lay(c, dist);
+        if (cc) childCoords.push(cc);
+      }
+      if (!childCoords.length) return null;
+      const y = (childCoords[0].y + childCoords[childCoords.length - 1].y) / 2;
+      lines.push({x1: x, y1: childCoords[0].y, x2: x, y2: childCoords[childCoords.length - 1].y});
+      for (const cc of childCoords) lines.push({x1: x, y1: cc.y, x2: cc.x, y2: cc.y});
+      return {x, y};
+    }
+    lay(treeDict, 0);
+    return lines;
+  }
+}
+
+// --- species filter ---
+function _alnResolveSpFilter() {
+  if (!alnSpFilters.length) return null;
+  const union = new Set();
+  for (const q of alnSpFilters) {
+    const lq = q.toLowerCase();
+    ALL_SPECIES.forEach(s => { if (s.toLowerCase().includes(lq)) union.add(s); });
+  }
+  return union.size ? union : null;
+}
+
+function _alnFilteredSeqs() {
+  let seqs = alnSeqs;
+  const spSet = _alnResolveSpFilter();
+  if (spSet) {
+    seqs = seqs.filter(s => {
+      const gid = s.name.split(/\s/)[0];
+      const sp = gid.split('_')[0];
+      return spSet.has(sp);
+    });
+  }
+  if (alnHiddenOGs.size) {
+    seqs = seqs.filter(s => {
+      const og = alnOgMap[s.name.split(/\s/)[0]] || '';
+      return !alnHiddenOGs.has(og);
+    });
+  }
+  return seqs;
+}
+
+function _alnAddSpFilter(query) {
+  query = (query || '').trim();
+  if (!query || alnSpFilters.includes(query)) return;
+  alnSpFilters.push(query);
+  const inp = document.getElementById('aln-seq-filter');
+  if (inp) inp.value = '';
+  _alnRenderSpTags();
+  renderAlignment();
+}
+
+function _alnRemoveSpFilter(i) {
+  alnSpFilters.splice(i, 1);
+  _alnRenderSpTags();
+  renderAlignment();
+}
+
+function _alnClearSpFilters() {
+  alnSpFilters = [];
+  const inp = document.getElementById('aln-seq-filter');
+  if (inp) inp.value = '';
+  _alnRenderSpTags();
+  renderAlignment();
+}
+
+function _alnRenderSpTags() {
+  const el = document.getElementById('aln-sp-tags');
+  if (!el) return;
+  el.innerHTML = '';
+  alnSpFilters.forEach((q, i) => {
+    const chip = document.createElement('span');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:2px;padding:1px 6px;background:#e0ecf8;color:#1a56c4;border-radius:3px;font-size:10px;margin-right:3px;';
+    chip.textContent = q + ' ';
+    const x = document.createElement('span');
+    x.textContent = '\u00d7';
+    x.style.cssText = 'cursor:pointer;font-weight:bold;margin-left:2px;';
+    x.onclick = () => _alnRemoveSpFilter(i);
+    chip.appendChild(x);
+    el.appendChild(chip);
+  });
+  if (alnSpFilters.length) {
+    const clr = document.createElement('span');
+    clr.textContent = '\u2715';
+    clr.title = 'Clear all';
+    clr.style.cssText = 'cursor:pointer;color:#888;font-size:10px;margin-left:2px;';
+    clr.onclick = _alnClearSpFilters;
+    el.appendChild(clr);
+  }
+}
+
+function _alnSpFilterKey(ev) {
+  if (ev.key === 'Enter') { _alnAddSpFilter(ev.target.value); ev.preventDefault(); }
+}
+
+function selectAlignment(id) {
+  if (!HAVE_ALIGNMENTS) return;
+  currentAlnId = id;
+  alnHiddenOGs.clear(); alnCollapsedOGs.clear();
+  document.querySelectorAll('#aln-list .hg-item').forEach(el =>
+    el.classList.toggle('selected', el.dataset.id === id));
+  const viewer = document.getElementById('aln-viewer');
+  const empty  = document.getElementById('aln-empty');
+  const info   = document.getElementById('aln-info');
+  viewer.style.display  = 'grid';
+  empty.style.display   = 'none';
+  info.textContent = 'Loading\u2026';
+  const el = document.getElementById('alndata-' + id);
+  if (!el) { info.textContent = 'No alignment data for ' + id; return; }
+  const obj = JSON.parse(el.textContent);
+  if (!obj.gz) { info.textContent = 'Alignment not available'; return; }
+  let fasta;
+  try { fasta = _decompressGz(obj.gz); }
+  catch(e) { info.textContent = 'Decompression error: ' + e.message; return; }
+  _alnRawFasta = fasta;
+  alnSeqs = parseFasta(fasta);
+  _alnLoadTreeData(id);
+  // show source toggle only when both GeneRax and IQ-TREE data exist
+  const srcBtn = document.getElementById('btn-aln-src');
+  if (srcBtn) {
+    const hasBoth = _alnTreeDataCache && _alnTreeDataCache.tree && _alnTreeDataCache.prev_tree;
+    srcBtn.style.display = hasBoth ? '' : 'none';
+  }
+  alnSeqs = _alnReorderByTree(alnSeqs);
+  renderAlignment();
+}
+
+function _alnConsensus(seqs) {
+  if (!seqs.length) return {seq: '', conservation: []};
+  const len = seqs[0].seq.length;
+  let cons = '';
+  const conservation = [];
+  for (let c = 0; c < len; c++) {
+    const freq = {};
+    let total = 0;
+    for (const s of seqs) {
+      const aa = (s.seq[c]||'-').toUpperCase();
+      if (aa !== '-' && aa !== '.') { freq[aa] = (freq[aa]||0)+1; total++; }
+    }
+    const entries = Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+    if (!entries.length) { cons += '-'; conservation.push(0); continue; }
+    const top = entries[0];
+    const frac = total > 0 ? top[1] / total : 0;
+    conservation.push(frac);
+    if (frac >= 0.8) cons += top[0];
+    else if (frac >= 0.5) cons += top[0].toLowerCase();
+    else cons += '.';
+  }
+  return {seq: cons, conservation};
+}
+
+function renderAlignment() {
+  if (!alnSeqs.length) return;
+  const seqs = _alnFilteredSeqs();
+  const consObj = alnShowCons ? _alnConsensus(seqs) : null;
+  const cons = consObj ? consObj.seq : null;
+  const conservation = consObj ? consObj.conservation : null;
+  const nCols = (seqs[0]?.seq.length) || 0;
+  alnCellH = Math.round(alnCellW * 1.6);
+  const cW = alnCellW, cH = alnCellH;
+  const dims = _alnLayoutMetrics();
+  const ogBandW = dims.ogW;
+  const treeW = dims.treeW;
+  const consBarH = alnShowCons ? 20 : 0;
+  const rulerH = 24 + consBarH;
+  const totalW = nCols * cW;
+  const ogMrca = {};
+  for (const s of seqs) {
+    const gid = s.name.split(/\s/)[0];
+    const og = alnOgMap[gid] || '';
+    if (!og) continue;
+    if (!ogMrca[og]) ogMrca[og] = new Set();
+    const sp = getSpeciesPfx(gid);
+    if (sp) ogMrca[og].add(sp);
+  }
+  Object.keys(ogMrca).forEach(og => { ogMrca[og] = spMRCAName(ogMrca[og]) || ''; });
+
+  _alnRows = [];
+  if (cons) _alnRows.push({name:'Consensus', seq: cons, isCons: true, og:'', ogColor:''});
+  const _seenColl = new Set();
+  for (const s of seqs) {
+    const gid = s.name.split(/\s/)[0];
+    const og = alnOgMap[gid] || '';
+    const ogColor = og ? _alnGetOgColor(og) : '';
+    if (og && alnCollapsedOGs.has(og)) {
+      if (!_seenColl.has(og)) {
+        _seenColl.add(og);
+        const ogCount = seqs.filter(ss => (alnOgMap[ss.name.split(/\s/)[0]] || '') === og).length;
+        _alnRows.push({name: og, seq: '', isCons: false, isCollapsed: true, og, ogColor, ogCount, species:'', speciesLabel:'', mrca: ogMrca[og] || '', gid:''});
+      }
+      continue;
+    }
+    const sp = getSpeciesPfx(gid);
+    _alnRows.push({...s, gid, og, ogColor, species: sp || '', speciesLabel: (SPECIES_INFO[sp] || sp || ''), mrca: og ? (ogMrca[og] || '') : ''});
+  }
+  const rows = _alnRows;
+  const totalH = rows.length * cH;
+
+  const dpr = window.devicePixelRatio || 1;
+
+  // --- Ruler + conservation bar ---
+  const rulerCanvas = document.getElementById('aln-ruler');
+  if (alnShowSeqPanel) {
+    rulerCanvas.width  = totalW * dpr;
+    rulerCanvas.height = rulerH * dpr;
+    rulerCanvas.style.width  = totalW + 'px';
+    rulerCanvas.style.height = rulerH + 'px';
+    rulerCanvas.style.transform = '';
+    const rCtx = rulerCanvas.getContext('2d');
+    rCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    rCtx.clearRect(0, 0, totalW, rulerH);
+    rCtx.font = '9px monospace';
+    rCtx.textAlign = 'right';
+    const step = cW < 6 ? 50 : cW < 9 ? 20 : 10;
+    for (let c = 0; c < nCols; c++) {
+      if ((c+1) % step === 0) {
+        const x = c * cW + cW;
+        rCtx.fillStyle = '#aaa'; rCtx.fillRect(x - 0.5, 18, 1, 6);
+        rCtx.fillStyle = '#666'; rCtx.fillText(String(c+1), x + 1, 16);
+      }
+    }
+    if (conservation && consBarH > 0) {
+      const barTop = 24;
+      const barH = consBarH - 2;
+      for (let c = 0; c < nCols; c++) {
+        const v = conservation[c] || 0;
+        const h = v * barH;
+        if (h < 0.5) continue;
+        const x = c * cW;
+        const r = Math.round(180 - v * 130);
+        const g = Math.round(180 - v * 100);
+        const b = Math.round(200 + v * 55);
+        rCtx.fillStyle = `rgb(${r},${g},${b})`;
+        rCtx.fillRect(x, barTop + barH - h, cW - (cW > 3 ? 1 : 0), h);
+      }
+    }
+  } else {
+    rulerCanvas.width = 1;
+    rulerCanvas.height = 1;
+    rulerCanvas.style.width = '1px';
+    rulerCanvas.style.height = '1px';
+  }
+
+  // --- Left panel: tree + OG band + names ---
+  const namesCanvas = document.getElementById('aln-names-canvas');
+  const leftW = dims.leftW;
+  namesCanvas.width  = leftW * dpr;
+  namesCanvas.height = totalH * dpr;
+  namesCanvas.style.width  = dims.leftW + 'px';
+  namesCanvas.style.height = totalH + 'px';
+  namesCanvas.style.transform = '';
+  const nCtx = namesCanvas.getContext('2d');
+  nCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  nCtx.clearRect(0, 0, dims.leftW, totalH);
+  const fontSize = Math.max(8, Math.min(cH - 2, 12));
+  nCtx.textBaseline = 'middle';
+
+  // draw cladogram/phylogram
+  if (treeW > 0 && alnTreeDict) {
+    const gidY = {};
+    const _collOgY = {};
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      if (row.isCollapsed) {
+        _collOgY[row.og] = r * cH + cH / 2;
+      } else if (!row.isCons) {
+        const gid = row.name.split(/\s/)[0];
+        gidY[gid] = r * cH + cH / 2;
+      }
+    }
+    // assign collapsed-OG genes to their collapsed row Y so branches still render
+    for (const s of seqs) {
+      const gid = s.name.split(/\s/)[0];
+      const og = alnOgMap[gid] || '';
+      if (og && alnCollapsedOGs.has(og) && _collOgY[og] !== undefined) gidY[gid] = _collOgY[og];
+    }
+    const lines = _alnLayoutTree(alnTreeDict, gidY, treeW, alnUseBrLen);
+    if (lines) {
+      nCtx.strokeStyle = '#333';
+      nCtx.lineWidth = 1;
+      for (const l of lines) {
+        nCtx.beginPath();
+        nCtx.moveTo(l.x1, l.y1);
+        nCtx.lineTo(l.x2, l.y2);
+        nCtx.stroke();
+      }
+    }
+  }
+
+  // draw OG band + names per row
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    const y0 = r * cH;
+
+    if (row.isCollapsed) {
+      // collapsed OG: full-width colored bar with label
+      nCtx.fillStyle = row.ogColor || '#bbb';
+      nCtx.globalAlpha = 0.45;
+      nCtx.fillRect(treeW, y0, ogBandW + dims.metaW, cH);
+      nCtx.globalAlpha = 1;
+      nCtx.strokeStyle = '#555';
+      nCtx.lineWidth = 1;
+      nCtx.strokeRect(treeW + 0.5, y0 + 0.5, ogBandW + dims.metaW - 1, cH - 1);
+      nCtx.font = `bold ${fontSize}px monospace`;
+      for (const col of dims.metaCols) {
+        if (col.key === 'mrca' && row.mrca) {
+          nCtx.fillStyle = '#333';
+          nCtx.textAlign = 'right';
+          nCtx.fillText(_alnFitText(nCtx, row.mrca, col.width - 8), col.x1 - 4, y0 + cH / 2);
+        } else if (col.key === 'id') {
+          nCtx.fillStyle = '#222';
+          nCtx.textAlign = 'right';
+          nCtx.fillText(_alnFitText(nCtx, `\u25B6 ${row.name} (${row.ogCount})`, col.width - 8), col.x1 - 4, y0 + cH / 2);
+        }
+      }
+      continue;
+    }
+
+    // OG color band with black border
+    if (ogBandW) {
+      if (row.ogColor) {
+        nCtx.fillStyle = row.ogColor;
+        nCtx.globalAlpha = 0.35;
+        nCtx.fillRect(treeW, y0, ogBandW, cH);
+        nCtx.globalAlpha = 1;
+      }
+    }
+    // name background + text
+    const metaX0 = treeW + ogBandW;
+    const totalNameW = dims.metaW;
+    nCtx.font = `${fontSize}px monospace`;
+    nCtx.textAlign = 'right';
+    if (row.isCons) {
+      nCtx.fillStyle = '#1a6b8a';
+      nCtx.fillRect(metaX0, y0, totalNameW, cH);
+      nCtx.fillStyle = '#fff';
+      const idCol = dims.byKey.id;
+      if (idCol) nCtx.fillText(_alnFitText(nCtx, 'Consensus', idCol.width - 8), idCol.x1 - 4, y0 + cH / 2);
+    } else {
+      if (r % 2 === (cons ? 1 : 0)) {
+        nCtx.fillStyle = '#f7f7f7';
+        nCtx.fillRect(metaX0, y0, totalNameW, cH);
+      }
+      const gid = row.gid || row.name.split(/\s/)[0];
+      const activeMeta = alnGeneMeta[gid] || {};
+      const globalMeta = GENE_META[gid] || {};
+      const isRefSeq = !!globalMeta.is_reference_gene || !!REFNAME_MAP[gid];
+      const refName = activeMeta.ref_ortholog || globalMeta.ref_ortholog || REFNAME_MAP[gid] || '';
+      for (const col of dims.metaCols) {
+        if (col.key === 'ref' && refName) {
+          nCtx.fillStyle = isRefSeq ? '#cc0000' : '#777';
+          nCtx.fillText(_alnFitText(nCtx, refName, col.width - 8), col.x1 - 4, y0 + cH / 2);
+        } else if (col.key === 'species' && row.speciesLabel) {
+          nCtx.fillStyle = row.species ? spColor(row.species) : '#555';
+          nCtx.fillText(_alnFitText(nCtx, row.speciesLabel, col.width - 8), col.x1 - 4, y0 + cH / 2);
+        } else if (col.key === 'mrca' && row.mrca) {
+          nCtx.fillStyle = '#555';
+          nCtx.fillText(_alnFitText(nCtx, row.mrca, col.width - 8), col.x1 - 4, y0 + cH / 2);
+        } else if (col.key === 'range') {
+          _alnDrawRangeCell(nCtx, col.x0, y0, col.width, cH, gid, r % 2 === (cons ? 1 : 0) ? '#eceff2' : '#edf1f4');
+        } else if (col.key === 'id') {
+          nCtx.fillStyle = isRefSeq ? '#cc0000' : '#333';
+          nCtx.fillText(_alnFitText(nCtx, row.name, col.width - 8), col.x1 - 4, y0 + cH / 2);
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < dims.metaCols.length - 1; i++) {
+    const sepX = dims.metaCols[i].x1 + 0.5;
+    nCtx.strokeStyle = '#ddd'; nCtx.lineWidth = 1;
+    nCtx.beginPath(); nCtx.moveTo(sepX, 0); nCtx.lineTo(sepX, totalH); nCtx.stroke();
+  }
+
+  // OG group borders: draw merged boxes (left/right/top/bottom per OG run)
+  if (ogBandW) {
+    nCtx.strokeStyle = '#000';
+    nCtx.lineWidth = 1;
+    let runStart = -1, runOg = '';
+    for (let r = 0; r <= rows.length; r++) {
+      const og = r < rows.length ? rows[r].og : '';
+      if (og !== runOg || r === rows.length) {
+        if (runOg && runStart >= 0) {
+          const y1 = runStart * cH;
+          const y2 = r * cH;
+          nCtx.strokeRect(treeW + 0.5, y1 + 0.5, ogBandW - 1, y2 - y1 - 1);
+        }
+        runStart = r;
+        runOg = og;
+      }
+    }
+  }
+
+  // OG separator lines on names canvas
+  nCtx.strokeStyle = '#000';
+  nCtx.lineWidth = 1;
+  for (let r = 1; r < rows.length; r++) {
+    if ((rows[r].og || rows[r-1].og) && rows[r].og !== rows[r-1].og) {
+      const y = r * cH + 0.5;
+      nCtx.beginPath(); nCtx.moveTo(0, y); nCtx.lineTo(dims.leftW, y); nCtx.stroke();
+    }
+  }
+
+  // --- Sequences ---
+  const seqCanvas = document.getElementById('aln-seq-canvas');
+  const seqWrap   = document.getElementById('aln-seq-wrap');
+  if (alnShowSeqPanel) {
+    seqCanvas.width  = totalW * dpr;
+    seqCanvas.height = totalH * dpr;
+    seqCanvas.style.width  = totalW + 'px';
+    seqCanvas.style.height = totalH + 'px';
+    const sCtx = seqCanvas.getContext('2d');
+    sCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sCtx.clearRect(0, 0, totalW, totalH);
+    const showLetters = cW >= 9;
+    if (showLetters) {
+      sCtx.font = `bold ${Math.max(8, cW - 1)}px monospace`;
+      sCtx.textAlign = 'center';
+      sCtx.textBaseline = 'middle';
+    }
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      const y0 = r * cH;
+      const isConsRow = row.isCons;
+
+      if (row.isCollapsed) {
+        sCtx.fillStyle = row.ogColor || '#bbb';
+        sCtx.globalAlpha = 0.18;
+        sCtx.fillRect(0, y0, totalW, cH);
+        sCtx.globalAlpha = 1;
+        sCtx.strokeStyle = '#aaa';
+        sCtx.lineWidth = 0.5;
+        sCtx.beginPath(); sCtx.moveTo(0, y0); sCtx.lineTo(totalW, y0); sCtx.stroke();
+        sCtx.beginPath(); sCtx.moveTo(0, y0 + cH - 0.5); sCtx.lineTo(totalW, y0 + cH - 0.5); sCtx.stroke();
+        sCtx.font = `bold ${Math.max(10, cH - 2)}px sans-serif`;
+        sCtx.fillStyle = '#444';
+        sCtx.textAlign = 'center';
+        sCtx.textBaseline = 'middle';
+        sCtx.fillText(`${row.name} \u00b7 ${row.ogCount} sequences`, totalW / 2, y0 + cH / 2);
+        continue;
+      }
+
+      for (let c = 0; c < nCols; c++) {
+        const aa = (row.seq[c] || '-').toUpperCase();
+        const x = c * cW;
+        let bg = AA_COLORS[aa];
+        if (!bg && aa !== '-' && aa !== '.') bg = '#e0e0e0';
+        if (isConsRow) {
+          sCtx.fillStyle = bg || '#ddf0ff'; sCtx.fillRect(x, y0, cW, cH);
+        } else {
+          if (r % 2 === (cons ? 1 : 0)) { sCtx.fillStyle = '#f7f7f7'; sCtx.fillRect(x, y0, cW, cH); }
+          if (bg) { sCtx.fillStyle = bg; sCtx.fillRect(x, y0, cW, cH); }
+        }
+        if (showLetters && aa !== '-' && aa !== '.') {
+          sCtx.fillStyle = isConsRow ? '#000' : '#222';
+          sCtx.fillText(aa, x + cW / 2, y0 + cH / 2);
+        }
+      }
+    }
+    sCtx.strokeStyle = '#000';
+    sCtx.lineWidth = 1;
+    for (let r = 1; r < rows.length; r++) {
+      if ((rows[r].og || rows[r-1].og) && rows[r].og !== rows[r-1].og) {
+        const y = r * cH + 0.5;
+        sCtx.beginPath(); sCtx.moveTo(0, y); sCtx.lineTo(totalW, y); sCtx.stroke();
+      }
+    }
+  } else {
+    seqCanvas.width = 1;
+    seqCanvas.height = 1;
+    seqCanvas.style.width = '1px';
+    seqCanvas.style.height = '1px';
+  }
+
+  const info = document.getElementById('aln-info');
+  const ogInfo = Object.keys(alnOgMap).length ? ` \u00b7 ${[...new Set(Object.values(alnOgMap))].length} OGs` : '';
+  info.textContent = `${seqs.length} seqs \u00d7 ${nCols} cols${ogInfo}${alnShowSeqPanel ? '' : ' \u00b7 alignment hidden'}`;
+
+  const viewer = document.getElementById('aln-viewer');
+  _alnApplyViewerWidths();
+  viewer.style.gridTemplateRows = `${alnShowSeqPanel ? rulerH : 0}px 1fr`;
+
+  if (alnShowSeqPanel) {
+    seqWrap.scrollLeft = 0; seqWrap.scrollTop = 0;
+    syncAlnScroll(seqWrap);
+  }
+  _alnUpdateCollapseAllBtn();
+}
+
+function syncAlnScroll(seqWrap) {
+  if (!alnShowSeqPanel) return;
+  const ruler = document.getElementById('aln-ruler');
+  const rulerWrap = document.getElementById('aln-ruler-wrap');
+  const namesWrap = document.getElementById('aln-names-wrap');
+  if (ruler) ruler.style.transform = `translateX(-${seqWrap.scrollLeft}px)`;
+  if (_alnSyncingScroll) return;
+  _alnSyncingScroll = true;
+  if (rulerWrap) rulerWrap.scrollLeft = seqWrap.scrollLeft;
+  if (namesWrap) namesWrap.scrollTop = seqWrap.scrollTop;
+  _alnSyncingScroll = false;
+}
+
+function _alnSyncFromNamesWrap(namesWrap) {
+  if (!alnShowSeqPanel || _alnSyncingScroll) return;
+  const seqWrap = document.getElementById('aln-seq-wrap');
+  if (!seqWrap || !namesWrap) return;
+  _alnSyncingScroll = true;
+  seqWrap.scrollTop = namesWrap.scrollTop;
+  const rulerWrap = document.getElementById('aln-ruler-wrap');
+  if (rulerWrap) rulerWrap.scrollLeft = seqWrap.scrollLeft;
+  _alnSyncingScroll = false;
+}
+
+function _alnHandleNameHover(ev) {
+  const canvas = document.getElementById('aln-names-canvas');
+  if (!canvas || !_alnRows.length) { _alnHideTip(); return; }
+  const rect = canvas.getBoundingClientRect();
+  const y = ev.clientY - rect.top;
+  const cH = alnCellH;
+  const dims = _alnLayoutMetrics();
+  const x = ev.clientX - rect.left;
+  const r = Math.floor(y / cH);
+  if (r < 0 || r >= _alnRows.length) { _alnHideTip(); return; }
+  const row = _alnRows[r];
+  if (row.isCollapsed) {
+    _alnShowTip(ev, `${row.og} \u00b7 ${row.ogCount} seqs (collapsed)`);
+  } else if (x >= dims.treeW && x < dims.treeW + dims.ogW && row.og) {
+    _alnShowTip(ev, row.og);
+  } else {
+    let shown = false;
+    for (const col of dims.metaCols) {
+      if (x < col.x0 || x >= col.x1) continue;
+      if (!row.isCons && col.key === 'id') {
+        _alnShowTip(ev, `Click to copy: ${row.name.split(/\s/)[0]}`);
+        shown = true;
+      } else if (!row.isCons && !row.isCollapsed && col.key === 'range') {
+        const popup = _proteinPopupHtml(row.gid, {
+          family: (TREE_INDEX.find(rec => rec.id === currentAlnId)?.family) || ''
+        });
+        if (popup) {
+          _alnShowTip(ev, popup);
+          shown = true;
+        } else {
+          const tip = _alnColTooltip(row, col.key);
+          if (tip) {
+            _alnShowTip(ev, tip);
+            shown = true;
+          }
+        }
+      } else {
+        const tip = _alnColTooltip(row, col.key);
+        if (tip) {
+          _alnShowTip(ev, tip);
+          shown = true;
+        }
+      }
+      break;
+    }
+    if (!shown) _alnHideTip();
+  }
+}
+
+function _alnShowTip(ev, text) {
+  let tip = document.getElementById('aln-tooltip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'aln-tooltip';
+    tip.style.cssText = 'position:fixed;padding:6px 8px;background:rgba(255,255,255,.97);color:#222;font-size:11px;border-radius:5px;border:1px solid #bbb;box-shadow:0 2px 8px rgba(0,0,0,.15);pointer-events:none;z-index:9999;white-space:normal;max-width:min(820px,calc(100vw - 32px));';
+    document.body.appendChild(tip);
+  }
+  if (typeof text === 'string' && text.indexOf('<') >= 0) tip.innerHTML = text;
+  else tip.textContent = text;
+  tip.style.display = 'block';
+  const left = Math.min(ev.clientX + 12, window.innerWidth - tip.offsetWidth - 8);
+  const top = Math.min(Math.max(8, ev.clientY - 8), window.innerHeight - tip.offsetHeight - 8);
+  tip.style.left = Math.max(8, left) + 'px';
+  tip.style.top  = Math.max(8, top) + 'px';
+}
+
+function _alnHideTip() {
+  const tip = document.getElementById('aln-tooltip');
+  if (tip) tip.style.display = 'none';
+}
+
+function _copyTextToClipboard(txt) {
+  if (navigator.clipboard) return navigator.clipboard.writeText(txt).catch(()=>{});
+  return new Promise(resolve=>{
+    const ta=document.createElement('textarea');
+    ta.value=txt;
+    ta.style.position='fixed';
+    ta.style.opacity='0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(_) {}
+    document.body.removeChild(ta);
+    resolve();
+  });
+}
+
+function _alnHandleNameClick(ev) {
+  const canvas = document.getElementById('aln-names-canvas');
+  if (!canvas || !_alnRows.length) return;
+  const rect = canvas.getBoundingClientRect();
+  const y = ev.clientY - rect.top;
+  const cH = alnCellH;
+  const dims = _alnLayoutMetrics();
+  const x = ev.clientX - rect.left;
+  const r = Math.floor(y / cH);
+  if (r < 0 || r >= _alnRows.length) return;
+  const row = _alnRows[r];
+  const onOgBand = x >= dims.treeW && x < dims.treeW + dims.ogW;
+  const idCol = dims.byKey.id;
+  if (!row.isCons && !row.isCollapsed && idCol && x >= idCol.x0 && x < idCol.x1) {
+    const gid=row.gid || row.name.split(/\s/)[0];
+    _copyTextToClipboard(gid).then(()=>_alnShowTip(ev, `Copied: ${gid}`));
+    setTimeout(_alnHideTip, 900);
+    return;
+  }
+  if ((onOgBand || row.isCollapsed) && row.og) _alnShowOgPopup(ev, row.og);
+}
+
+function _alnHandleSeqClick(ev) {
+  if (!_alnRows.length) return;
+  const seqWrap = document.getElementById('aln-seq-wrap');
+  const canvas = document.getElementById('aln-seq-canvas');
+  if (!seqWrap || !canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const y = ev.clientY - rect.top;
+  const cH = alnCellH;
+  const r = Math.floor(y / cH);
+  if (r < 0 || r >= _alnRows.length) return;
+  const row = _alnRows[r];
+  if (row.isCollapsed && row.og) _alnShowOgPopup(ev, row.og);
+}
+
+function _alnShowOgPopup(ev, og) {
+  let popup = document.getElementById('aln-og-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'aln-og-popup';
+    popup.style.cssText = 'position:fixed;background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:0 3px 10px rgba(0,0,0,.2);z-index:9999;min-width:170px;';
+    document.body.appendChild(popup);
+    document.addEventListener('mousedown', e => {
+      if (!document.getElementById('aln-og-popup')?.contains(e.target))
+        _alnCloseOgPopup();
+    }, true);
+  }
+  const isCollapsed = alnCollapsedOGs.has(og);
+  const isHidden    = alnHiddenOGs.has(og);
+  const hasState    = alnHiddenOGs.size > 0 || alnCollapsedOGs.size > 0;
+  const esc = og.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const btnStyle = 'display:block;width:100%;margin-top:5px;padding:4px 8px;font-size:11px;border:1px solid #ccc;border-radius:4px;background:#f8f8f8;cursor:pointer;text-align:left;';
+  let html = `<div style="font-weight:700;color:#333;margin-bottom:4px;font-size:12px">${og}</div>`;
+  html += `<button style="${btnStyle}" onclick="_alnOgToggleCollapse('${esc}')">` +
+          (isCollapsed ? '\u25BC Expand' : '\u25B6 Collapse') + '</button>';
+  html += `<button style="${btnStyle}" onclick="_alnOgIsolate('${esc}')">&#9654; Show only this OG</button>`;
+  if (isHidden)
+    html += `<button style="${btnStyle}" onclick="_alnOgShow('${esc}')">&#128065; Show this OG</button>`;
+  else
+    html += `<button style="${btnStyle}" onclick="_alnOgHide('${esc}')">&#10006; Hide this OG</button>`;
+  if (hasState)
+    html += `<button style="${btnStyle}color:#2980b9;border-color:#2980b9;" onclick="_alnOgShowAll()">&#8635; Show all OGs</button>`;
+  popup.innerHTML = html;
+  popup.style.display = 'block';
+  popup.style.left = Math.min(ev.clientX + 8, window.innerWidth - 185) + 'px';
+  popup.style.top  = (ev.clientY - 8) + 'px';
+}
+
+function _alnCloseOgPopup() {
+  const p = document.getElementById('aln-og-popup');
+  if (p) p.style.display = 'none';
+}
+
+function _alnOgToggleCollapse(og) {
+  _alnCloseOgPopup();
+  if (alnCollapsedOGs.has(og)) alnCollapsedOGs.delete(og);
+  else { alnCollapsedOGs.add(og); alnHiddenOGs.delete(og); }
+  renderAlignment();
+}
+
+function _alnOgIsolate(og) {
+  _alnCloseOgPopup();
+  alnHiddenOGs.clear(); alnCollapsedOGs.clear();
+  const allOGs = [...new Set(Object.values(alnOgMap))];
+  allOGs.forEach(o => { if (o !== og) alnHiddenOGs.add(o); });
+  renderAlignment();
+}
+
+function _alnOgHide(og) {
+  _alnCloseOgPopup();
+  alnHiddenOGs.add(og); alnCollapsedOGs.delete(og);
+  renderAlignment();
+}
+
+function _alnOgShow(og) {
+  _alnCloseOgPopup();
+  alnHiddenOGs.delete(og);
+  renderAlignment();
+}
+
+function _alnOgShowAll() {
+  _alnCloseOgPopup();
+  alnHiddenOGs.clear(); alnCollapsedOGs.clear();
+  renderAlignment();
+}
+
+function _alnRenderCorner(){
+  const corner=document.getElementById('aln-corner');
+  if(!corner) return;
+  const dims=_alnLayoutMetrics();
+  corner.style.width=dims.leftW+'px';
+  corner.style.minWidth=dims.leftW+'px';
+  const labels=[];
+  if(dims.treeW>0) labels.push({left:0,width:dims.treeW,label:'Gene Tree'});
+  if(dims.ogW>0) labels.push({left:dims.treeW,width:dims.ogW,label:'OG'});
+  dims.metaCols.forEach(col=>labels.push({left:col.x0,width:col.width,label:col.label,key:col.key}));
+  corner.innerHTML = '';
+  for (const rec of labels) {
+    const el = document.createElement('div');
+    el.className = `aln-col-header${rec.key ? ' drag' : ''}`;
+    el.style.left = `${rec.left}px`;
+    el.style.width = `${Math.max(0, rec.width)}px`;
+    el.textContent = rec.label;
+    el.title = rec.label;
+    if (rec.key) {
+      el.dataset.alnCol = rec.key;
+      el.draggable = true;
+    }
+    corner.appendChild(el);
+  }
+}
+
+function _alnProxyWheel(ev) {
+  const seqWrap = document.getElementById('aln-seq-wrap');
+  if (!alnShowSeqPanel || !seqWrap) return;
+  const dx = Number(ev.deltaX) || 0;
+  const dy = Number(ev.deltaY) || 0;
+  if (!dx && !dy) return;
+  if (Math.abs(dy) >= Math.abs(dx)) seqWrap.scrollTop += dy;
+  else seqWrap.scrollLeft += dx;
+  syncAlnScroll(seqWrap);
+  ev.preventDefault();
+}
+
+(function(){
+  const bind = id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('wheel', _alnProxyWheel, {passive:false});
+  };
+  bind('aln-corner');
+  bind('aln-ruler-wrap');
+  bind('aln-names-wrap');
+})();
+
+function _alnApplyViewerWidths(){
+  const viewer = document.getElementById('aln-viewer');
+  if(!viewer) return;
+  const dims = _alnLayoutMetrics();
+  const seqVisible = !!alnShowSeqPanel;
+  viewer.style.gridTemplateColumns = `${dims.leftW}px ${seqVisible ? '5px' : '0px'} ${seqVisible ? '1fr' : '0px'}`;
+  _alnRenderCorner();
+  const rulerWrap = document.getElementById('aln-ruler-wrap');
+  const seqWrap = document.getElementById('aln-seq-wrap');
+  const mainBar = document.getElementById('aln-resize-bar');
+  if (rulerWrap) rulerWrap.style.display = seqVisible ? '' : 'none';
+  if (seqWrap) seqWrap.style.display = seqVisible ? '' : 'none';
+  if (mainBar) mainBar.style.display = seqVisible ? '' : 'none';
+  const treeBar = document.getElementById('aln-tree-resize-bar');
+  const refBar = document.getElementById('aln-ref-resize-bar');
+  const speciesBar = document.getElementById('aln-species-resize-bar');
+  const mrcaBar = document.getElementById('aln-mrca-resize-bar');
+  const rangeBar = document.getElementById('aln-range-resize-bar');
+  if (treeBar) {
+    treeBar.style.display = alnTreeDict ? 'block' : 'none';
+    treeBar.style.left = dims.treeW + 'px';
+  }
+  if (refBar) {
+    refBar.style.display = dims.byKey.ref ? 'block' : 'none';
+    refBar.style.left = dims.byKey.ref ? dims.byKey.ref.x1 + 'px' : '0px';
+  }
+  if (speciesBar) {
+    speciesBar.style.display = dims.byKey.species ? 'block' : 'none';
+    speciesBar.style.left = dims.byKey.species ? dims.byKey.species.x1 + 'px' : '0px';
+  }
+  if (mrcaBar) {
+    mrcaBar.style.display = dims.byKey.mrca ? 'block' : 'none';
+    mrcaBar.style.left = dims.byKey.mrca ? dims.byKey.mrca.x1 + 'px' : '0px';
+  }
+  if (rangeBar) {
+    rangeBar.style.display = dims.byKey.range ? 'block' : 'none';
+    rangeBar.style.left = dims.byKey.range ? dims.byKey.range.x1 + 'px' : '0px';
+  }
+}
+
+(function(){
+  let _drag = null, _startX = 0, _startW = 0;
+  document.addEventListener('mousedown', ev => {
+    const id = ev.target.id;
+    if (id !== 'aln-resize-bar' && id !== 'aln-tree-resize-bar' && id !== 'aln-ref-resize-bar' && id !== 'aln-species-resize-bar' && id !== 'aln-mrca-resize-bar' && id !== 'aln-range-resize-bar') return;
+    _drag = id; _startX = ev.clientX;
+    _startW =
+      id === 'aln-resize-bar' ? alnNameW :
+      id === 'aln-tree-resize-bar' ? alnTreeW :
+      id === 'aln-ref-resize-bar' ? alnRefColW :
+      id === 'aln-species-resize-bar' ? alnSpeciesColW :
+      id === 'aln-mrca-resize-bar' ? alnMrcaColW :
+      alnRangeColW;
+    ev.target.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    ev.preventDefault();
+  });
+  document.addEventListener('mousemove', ev => {
+    if (!_drag) return;
+    const delta = ev.clientX - _startX;
+    if (_drag === 'aln-resize-bar') {
+      alnNameW = Math.max(60, _startW + delta);
+    } else if (_drag === 'aln-tree-resize-bar') {
+      alnTreeW = Math.max(0, _startW + delta);
+    } else if (_drag === 'aln-ref-resize-bar') {
+      alnRefColW = Math.max(40, _startW + delta);
+    } else if (_drag === 'aln-species-resize-bar') {
+      alnSpeciesColW = Math.max(50, _startW + delta);
+    } else if (_drag === 'aln-mrca-resize-bar') {
+      alnMrcaColW = Math.max(50, _startW + delta);
+    } else {
+      alnRangeColW = Math.max(70, _startW + delta);
+    }
+    _alnApplyViewerWidths();
+  });
+  document.addEventListener('mouseup', ev => {
+    if (!_drag) return;
+    const bar = document.getElementById(_drag);
+    if (bar) bar.classList.remove('dragging');
+    _drag = null;
+    document.body.style.cursor = '';
+    if (alnSeqs.length) renderAlignment();
+  });
+})();
+
+(function(){
+  const corner = document.getElementById('aln-corner');
+  if (!corner) return;
+  let dragKey = null;
+  function headerTarget(node){
+    return node && typeof node.closest === 'function' ? node.closest('[data-aln-col]') : null;
+  }
+  corner.addEventListener('dragstart', ev => {
+    const target = headerTarget(ev.target);
+    if (!target) return;
+    dragKey = target.dataset.alnCol || null;
+    if (ev.dataTransfer) {
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.setData('text/plain', dragKey || '');
+    }
+    target.style.opacity = '0.55';
+  });
+  corner.addEventListener('dragover', ev => {
+    const target = headerTarget(ev.target);
+    if (!dragKey || !target || target.dataset.alnCol === dragKey) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+  });
+  corner.addEventListener('drop', ev => {
+    const target = headerTarget(ev.target);
+    if (!dragKey || !target) return;
+    const dstKey = target.dataset.alnCol || '';
+    if (!dstKey || dstKey === dragKey) return;
+    ev.preventDefault();
+    const rect = target.getBoundingClientRect();
+    const placeAfter = ev.clientX > rect.left + rect.width / 2;
+    _alnMoveMetaColumn(dragKey, dstKey, placeAfter);
+  });
+  corner.addEventListener('dragend', ev => {
+    const target = headerTarget(ev.target);
+    if (target) target.style.opacity = '';
+    dragKey = null;
+  });
+})();
+
+function alnToggleSeqId() {
+  alnShowSeqId = !alnShowSeqId;
+  const btn = document.getElementById('btn-aln-seqid');
+  if (btn) { btn.style.background = alnShowSeqId?'#e8f0fe':'#fff'; btn.style.color = alnShowSeqId?'#1a56c4':'#555'; btn.style.borderColor = alnShowSeqId?'#1a56c4':'#888'; btn.style.fontWeight = alnShowSeqId?'600':''; }
+  renderAlignment();
+}
+function alnToggleRefCol() {
+  alnShowRefCol = !alnShowRefCol;
+  const btn = document.getElementById('btn-aln-ref');
+  if (btn) { btn.style.background = alnShowRefCol?'#e8f0fe':'#fff'; btn.style.color = alnShowRefCol?'#1a56c4':'#555'; btn.style.borderColor = alnShowRefCol?'#1a56c4':'#888'; btn.style.fontWeight = alnShowRefCol?'600':''; }
+  renderAlignment();
+}
+function alnToggleSpeciesCol() {
+  alnShowSpeciesCol = !alnShowSpeciesCol;
+  const btn = document.getElementById('btn-aln-species');
+  if (btn) { btn.style.background = alnShowSpeciesCol?'#e8f0fe':'#fff'; btn.style.color = alnShowSpeciesCol?'#1a56c4':'#555'; btn.style.borderColor = alnShowSpeciesCol?'#1a56c4':'#888'; btn.style.fontWeight = alnShowSpeciesCol?'600':''; }
+  renderAlignment();
+}
+function alnToggleMrcaCol() {
+  alnShowMrcaCol = !alnShowMrcaCol;
+  const btn = document.getElementById('btn-aln-mrca');
+  if (btn) { btn.style.background = alnShowMrcaCol?'#e8f0fe':'#fff'; btn.style.color = alnShowMrcaCol?'#1a56c4':'#555'; btn.style.borderColor = alnShowMrcaCol?'#1a56c4':'#888'; btn.style.fontWeight = alnShowMrcaCol?'600':''; }
+  renderAlignment();
+}
+function alnToggleRangeCol() {
+  alnShowRangeCol = !alnShowRangeCol;
+  const btn = document.getElementById('btn-aln-range');
+  if (btn) { btn.style.background = alnShowRangeCol?'#e8f0fe':'#fff'; btn.style.color = alnShowRangeCol?'#1a56c4':'#555'; btn.style.borderColor = alnShowRangeCol?'#1a56c4':'#888'; btn.style.fontWeight = alnShowRangeCol?'600':''; }
+  renderAlignment();
+}
+function alnSetDomainChipScale(value) {
+  const v = Math.max(0.6, Math.min(2.2, Number(value) || 1));
+  alnDomainChipScale = v;
+  const out = document.getElementById('aln-domain-chip-val');
+  if (out) out.textContent = v.toFixed(1);
+  if (alnSeqs.length) renderAlignment();
+}
+function alnToggleSeqPanel() {
+  alnShowSeqPanel = !alnShowSeqPanel;
+  const btn = document.getElementById('btn-aln-seqpanel');
+  if (btn) {
+    btn.style.background = alnShowSeqPanel ? '#e8f0fe' : '#fff';
+    btn.style.color = alnShowSeqPanel ? '#1a56c4' : '#555';
+    btn.style.borderColor = alnShowSeqPanel ? '#1a56c4' : '#888';
+    btn.style.fontWeight = alnShowSeqPanel ? '600' : '';
+  }
+  renderAlignment();
+}
+
+function _alnUpdateCollapseAllBtn() {
+  const btn = document.getElementById('btn-aln-collapse-ogs');
+  if (!btn) return;
+  const allOGs = [...new Set(Object.values(alnOgMap))];
+  const active = allOGs.length > 0 && allOGs.every(og => alnCollapsedOGs.has(og));
+  btn.style.background  = active ? '#e8f0fe' : '#fff';
+  btn.style.color       = active ? '#1a56c4' : '#555';
+  btn.style.borderColor = active ? '#1a56c4' : '#888';
+  btn.style.fontWeight  = active ? '600' : '';
+}
+
+function alnToggleCollapseAllOGs() {
+  const allOGs = [...new Set(Object.values(alnOgMap))];
+  if (!allOGs.length) return;
+  const allCollapsed = allOGs.every(og => alnCollapsedOGs.has(og));
+  alnCollapsedOGs.clear();
+  if (!allCollapsed) { allOGs.forEach(og => alnCollapsedOGs.add(og)); alnHiddenOGs.clear(); }
+  _alnUpdateCollapseAllBtn();
+  renderAlignment();
+}
+
+function alnToggleConsensus() {
+  alnShowCons = !alnShowCons;
+  const btn = document.getElementById('btn-aln-cons');
+  if (btn) {
+    btn.style.background  = alnShowCons ? '#e8f0fe' : '#fff';
+    btn.style.color       = alnShowCons ? '#1a56c4' : '#555';
+    btn.style.borderColor = alnShowCons ? '#1a56c4' : '#888';
+    btn.style.fontWeight  = alnShowCons ? '600' : '';
+  }
+  renderAlignment();
+}
+
+function alnToggleBrLen() {
+  alnUseBrLen = !alnUseBrLen;
+  const btn = document.getElementById('btn-aln-brlen');
+  if (btn) {
+    btn.style.background  = alnUseBrLen ? '#e8f0fe' : '#fff';
+    btn.style.color       = alnUseBrLen ? '#1a56c4' : '#555';
+    btn.style.borderColor = alnUseBrLen ? '#1a56c4' : '#888';
+    btn.style.fontWeight  = alnUseBrLen ? '600' : '';
+  }
+  renderAlignment();
+}
+
+function alnDownload() {
+  if (!_alnRawFasta || !currentAlnId) return;
+  const blob = new Blob([_alnRawFasta], {type:'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = currentAlnId + '.aln.fasta';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function alnToggleSource() {
+  alnUseGeneRax = !alnUseGeneRax;
+  const btn = document.getElementById('btn-aln-src');
+  if (btn) {
+    btn.textContent = alnUseGeneRax ? 'GeneRax' : 'IQ-TREE';
+    btn.style.background  = alnUseGeneRax ? '#e8f0fe' : '#fff';
+    btn.style.color       = alnUseGeneRax ? '#1a56c4' : '#555';
+    btn.style.borderColor = alnUseGeneRax ? '#1a56c4' : '#888';
+    btn.style.fontWeight  = alnUseGeneRax ? '600' : '';
+  }
+  _alnApplyTreeSource();
+  if (alnSeqs.length) {
+    alnSeqs = _alnReorderByTree(alnSeqs);
+    renderAlignment();
+  }
+}
+
+function alnDownloadPng() {
+  if (!currentAlnId) return;
+  const ruler = document.getElementById('aln-ruler');
+  const names = document.getElementById('aln-names-canvas');
+  const seqs  = document.getElementById('aln-seq-canvas');
+  if (!ruler || !names || !seqs) return;
+  const leftW = names.width, topH = ruler.height;
+  const totalW = leftW + seqs.width, totalH = topH + seqs.height;
+  const out = document.createElement('canvas');
+  out.width = totalW; out.height = totalH;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, totalW, totalH);
+  ctx.drawImage(ruler, leftW, 0);
+  ctx.drawImage(names, 0, topH);
+  ctx.drawImage(seqs, leftW, topH);
+  out.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = currentAlnId + '.alignment.png';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+}
+
+function renderAlnSidebar(query) {
+  const q = (query || '').toLowerCase().trim();
+  const list = document.getElementById('aln-list');
+  if (!list) return;
+  // group by family (reuse TREE_INDEX which has family/id fields)
+  const byFam = {};
+  for (const rec of TREE_INDEX) {
+    const fam = rec.family || '?';
+    if (!byFam[fam]) byFam[fam] = [];
+    byFam[fam].push(rec);
+  }
+  let html = '';
+  for (const [fam, recs] of Object.entries(byFam).sort((a,b)=>a[0].localeCompare(b[0]))) {
+    const filtered = q ? recs.filter(r => r.id.toLowerCase().includes(q) || fam.toLowerCase().includes(q) || (r.og_names||[]).some(o => o.toLowerCase().includes(q))) : recs;
+    if (!filtered.length) continue;
+    filtered.sort((a,b)=>{ const na=parseInt((a.id).match(/\d+/)?.[0]||'0',10), nb=parseInt((b.id).match(/\d+/)?.[0]||'0',10); return na-nb; });
+    const open = !q && Object.keys(byFam).length > 1 ? '' : ' open';
+    html += `<div class="fam-header${open ? ' open' : ''}" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">` +
+            `<span class="fam-arrow">&#9658;</span>${fam} <span style="color:#999;font-weight:400">(${filtered.length})</span></div>` +
+            `<div class="fam-body${open ? ' open' : ''}">`;
+    for (const rec of filtered) {
+      const sel = rec.id === currentAlnId ? ' selected' : '';
+      const hasAln = !!document.getElementById('alndata-' + rec.id);
+      const badge = hasAln ? '' : '<span style="font-size:9px;color:#aaa;margin-left:4px">no aln</span>';
+      html += `<div class="hg-item${sel}" data-id="${rec.id}" onclick="selectAlignment('${rec.id}')">` +
+              `<div class="hg-name">${rec.id}${badge}</div>` +
+              `<div class="hg-meta">${rec.n_ogs||0} OGs · ${rec.species?.length||0} sps</div></div>`;
+    }
+    html += '</div>';
+  }
+  list.innerHTML = html || '<div style="padding:12px;color:#aaa;font-size:11px">No results</div>';
+  // open first family if only one and query active
+  if (q) {
+    list.querySelectorAll('.fam-header').forEach(h => { h.classList.add('open'); h.nextElementSibling.classList.add('open'); });
   }
 }
 
@@ -1798,15 +4957,19 @@ function showTip(event, d) {
       if (meta.ref_support) {
         html += '<div class="tt-row"><span>Reference support</span><strong>'+meta.ref_support+'</strong></div>';
       }
-      const domains = DOMAIN_DATA[gid] || [];
-      if (domains.length) {
-        html += '<div class="tt-row"><span>Domain hits</span><strong>'+domains.length+'</strong></div>';
-        html += '<div style="margin-top:4px;font-size:10px;color:#666;line-height:1.45">'
-          + domains.map(dom =>
-              '<div><span style="color:#2c3e50;font-weight:600">'+dom.name
-              +'</span> <span style="color:#7f8c8d">'+dom.start+'-'+dom.end+'</span></div>'
-            ).join("")
-          + '</div>';
+      const proteinPopup = _proteinPopupHtml(gid, {family: currentIndex?.family || ''});
+      if (proteinPopup) html += '<div style="margin-top:8px">'+proteinPopup+'</div>';
+      else {
+        const domains = DOMAIN_DATA[gid] || [];
+        if (domains.length) {
+          html += '<div class="tt-row"><span>Domain hits</span><strong>'+domains.length+'</strong></div>';
+          html += '<div style="margin-top:4px;font-size:10px;color:#666;line-height:1.45">'
+            + domains.map(dom =>
+                '<div><span style="color:#2c3e50;font-weight:600">'+dom.name
+                +'</span> <span style="color:#7f8c8d">'+dom.start+'-'+dom.end+'</span></div>'
+              ).join("")
+            + '</div>';
+        }
       }
     } else {
       const nL = d._children ? countDescLeaves(d._children) : d.leaves().length;
@@ -1945,7 +5108,9 @@ function collectLeafGenes(children) {
   function hide(){ pop.style.display="none"; _key=null; _drawFn=null; }
   document.getElementById("cap-expand").addEventListener("click",()=>{
     if(!_key) return; const k=_key, fn=_drawFn; hide();
-    cladoCollapsed.delete(k); fn();
+    cladoCollapsed.delete(k);
+    spCollapsed.delete(k);
+    fn(); drawSpeciesTree();
     if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
   });
   document.getElementById("cap-rename").addEventListener("click",()=>{
@@ -1976,15 +5141,24 @@ function collectLeafGenes(children) {
 // ── Species-tree node action popup (collapse / flip) ────────────────────────
 (function(){
   const pop=document.getElementById("sptree-node-popup");
-  let _n=null, _nodeId=null, _spId=null;
-  function hide(){ pop.style.display="none"; _n=null; }
+  let _n=null, _nodeKey=null, _spId=null;
+  function hide(){ pop.style.display="none"; _n=null; _nodeKey=null; _spId=null; }
   document.getElementById("snp-collapse").addEventListener("click",()=>{
-    if(_nodeId===null) return; hide();
-    spCollapsed.add(_nodeId); drawSpeciesTree();
+    if(_nodeKey===null||!_n) return;
+    const nodeKey=_nodeKey;
+    const nodeName=_n.name||"";
+    hide();
+    spCollapsed.add(nodeKey);
+    cladoCollapsed.add(nodeKey);
+    if(nodeName&&!cladoNames.has(nodeKey)) cladoNames.set(nodeKey, nodeName);
+    drawSpeciesTree(); drawCladogram();
+    if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
   });
   document.getElementById("snp-flip").addEventListener("click",()=>{
-    if(_spId===null) return; hide();
-    const orig=spNodeById.get(_spId);
+    if(_spId===null) return;
+    const spId=_spId;
+    hide();
+    const orig=spNodeById.get(spId);
     if(orig&&orig.children) orig.children.reverse();
     recomputeSpeciesOrder();
     drawSpeciesTree(); drawCladogram();
@@ -1993,8 +5167,8 @@ function collectLeafGenes(children) {
   document.addEventListener("click",(ev)=>{ if(!pop.contains(ev.target)) hide(); });
   window.showSpNodeActionPopup=function(ev, n){
     ev.stopPropagation(); hideTip();
-    _n=n; _nodeId=n._id; _spId=n._spId;
-    document.getElementById("snp-title").textContent=n.name||(n._id);
+    _n=n; _nodeKey=spTreeNodeKey(n); _spId=n._spId;
+    document.getElementById("snp-title").textContent=n.name||(_nodeKey);
     pop.style.display="flex";
     const x=Math.min(ev.clientX+4,window.innerWidth-pop.offsetWidth-8);
     const y=Math.min(ev.clientY+4,window.innerHeight-pop.offsetHeight-8);
@@ -2115,6 +5289,20 @@ function recomputeSpeciesOrder(){
   for(const s of dataSpecies){ if(!speciesOrder.includes(s)) speciesOrder.push(s); }
 }
 
+function _avgSpeciesColor(speciesList){
+  const rgbs=(speciesList||[]).map(sp=>_cssToRgb(spColor(sp))).filter(Boolean);
+  if(!rgbs.length) return colTriFill;
+  return _rgbToHex(d3.mean(rgbs,c=>c[0]), d3.mean(rgbs,c=>c[1]), d3.mean(rgbs,c=>c[2]));
+}
+
+function _collapsedCladeFill(node, leafGetter){
+  const key=spTreeNodeKey(node);
+  const custom=cladoColors.get(key);
+  if(custom) return custom;
+  const leaves=(typeof leafGetter==="function" ? leafGetter(node) : []).filter(Boolean);
+  return _avgSpeciesColor(leaves);
+}
+
 // If no heatmap data but we have POSSVM trees, fall back to tree view
 const hasHeatmapData = FAMILY_DATA.length > 0 || HG_DATA.length > 0;
 
@@ -2131,11 +5319,31 @@ const hasHeatmapData = FAMILY_DATA.length > 0 || HG_DATA.length > 0;
   ALL_SPECIES.forEach(sp=>{ const o=document.createElement("option"); o.value=sp; o.textContent=sp; sel.appendChild(o); });
 })();
 
-const cladoCollapsed  = new Set();   // stable node keys of collapsed cladogram nodes
+const cladoCollapsed  = new Set();   // stable species-tree node keys collapsed in cladograms
 const cladoNames      = new Map();   // key → custom display name (user-editable)
 const cladoColors     = new Map();   // key → custom fill color override
 // map: clade label → sorted array of species (updated by drawCladogram, read by drawHeatmap)
 const hmCollapsedBands = [];  // [{species:[...], label}] — reset on each drawCladogram call
+
+(function seedSpeciesGroupCollapses(){
+  if(!SP_TREE_DATA||!Object.keys(SPECIES_GROUPS).length) return;
+  const treeLeaves = new Set(spNodeLeaves(SP_TREE_DATA));
+  const groups = {};
+  Object.entries(SPECIES_GROUPS).forEach(([sp, grp])=>{
+    if(!grp||!treeLeaves.has(sp)) return;
+    (groups[grp]||(groups[grp]=[])).push(sp);
+  });
+  Object.entries(groups).forEach(([grp, sps])=>{
+    const uniq = [...new Set(sps)];
+    if(uniq.length < 2) return;
+    const node = findSpMrcaForSpecies(SP_TREE_DATA, new Set(uniq));
+    if(!node||node===SP_TREE_DATA||!node.children||node.children.length<2) return;
+    const key = spTreeNodeKey(node);
+    spCollapsed.add(key);
+    cladoCollapsed.add(key);
+    if(!cladoNames.has(key)) cladoNames.set(key, grp);
+  });
+})();
 
 function drawCladogram() {
   hmCollapsedBands.length = 0;  // reset collapsed-clade shading bands
@@ -2169,8 +5377,6 @@ function drawCladogram() {
   function assignY(n){ if(!n.children){n._y=leafY[n.name]||0;return n._y;} const ys=n.children.map(assignY); n._y=d3.mean(ys);return n._y; }
   function assignX(n,d=0){ n._d=d; if(n.children) n.children.forEach(c=>assignX(c,d+1)); }
   function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
-  // stable key for a node: sorted leaf names (survives re-renders)
-  function nodeKey(n){ return flat(n).filter(x=>!x.children).map(x=>x.name).sort().join(","); }
   // y-range of all leaves in a subtree
   function yRange(n){ const ys=flat(n).filter(x=>!x.children).map(x=>leafY[x.name]||0); return [d3.min(ys),d3.max(ys)]; }
 
@@ -2182,7 +5388,7 @@ function drawCladogram() {
   // ── branches (skip into collapsed subtrees) ──────────────────────────────
   function drawB(n){
     if(!n.children) return;
-    if(cladoCollapsed.has(nodeKey(n))) return;
+    if(cladoCollapsed.has(spTreeNodeKey(n))) return;
     const ys=n.children.map(c=>c._y);
     svg.append("line").attr("x1",sx(n._d)).attr("x2",sx(n._d)).attr("y1",d3.min(ys)).attr("y2",d3.max(ys)).attr("stroke","#aaa");
     n.children.forEach(c=>{
@@ -2195,15 +5401,15 @@ function drawCladogram() {
   // ── collapsed triangles ───────────────────────────────────────────────────
   function drawCollapsedTriangles(n){
     if(!n.children) return;
-    const key=nodeKey(n);
+    const key=spTreeNodeKey(n);
     if(cladoCollapsed.has(key)){
       const [y0,y1]=yRange(n);
       const displayName=cladoNames.get(key)||(n.name||"clade");
       // collect leaf species for heatmap shading
       function getLeafSp(nd){ return nd.children?nd.children.flatMap(getLeafSp):[nd.name]; }
       hmCollapsedBands.push({species:getLeafSp(n),label:displayName});
-      const triColor=cladoColors.get(key)||"#ffffff";
-      const redraw=()=>{ drawCladogram(); };
+      const triColor=_collapsedCladeFill(n, getLeafSp);
+      const redraw=()=>{ drawCladogram(); drawSpeciesTree(); };
       svg.append("polygon")
         .attr("points",`${sx(n._d)},${n._y} ${sx(maxD)},${y0} ${sx(maxD)},${y1}`)
         .attr("fill",triColor).attr("stroke","#222").attr("stroke-width",1.2)
@@ -2228,7 +5434,7 @@ function drawCladogram() {
   // ── interactive internal nodes (click=collapse, shift+click=heatmap split) ─
   function drawCladoNodes(n){
     if(!n.children) return;
-    const key=nodeKey(n);
+    const key=spTreeNodeKey(n);
     if(cladoCollapsed.has(key)) return;
     const nodeLabel = n.name || "(unnamed)";
     const cleavesSet = new Set(flat(n).filter(x=>!x.children).map(x=>x.name));
@@ -2250,7 +5456,7 @@ function drawCladogram() {
           else { hmSplitSets.push(cleavesSet); hmSplitLabels.push(nodeLabel); }
           updateHmSplitBar(); drawHeatmap(); // drawCladogram called at end of drawHeatmap
         } else {
-          cladoCollapsed.add(key); drawCladogram();
+          cladoCollapsed.add(key); spCollapsed.add(key); drawCladogram(); drawSpeciesTree();
           if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
         }
       });
@@ -2297,6 +5503,81 @@ function clearHmSplits() {
   drawHeatmap();
 }
 
+(function(){
+  const pop=document.getElementById("hm-open-popup");
+  const title=document.getElementById("hm-open-popup-title");
+  const treeBtn=document.getElementById("hm-open-tree");
+  const alignBtnEl=document.getElementById("hm-open-align");
+  let _onTree=null, _onAlign=null;
+  function hide(){ pop.style.display="none"; _onTree=null; _onAlign=null; }
+  treeBtn.addEventListener("click",()=>{ const fn=_onTree; hide(); if(fn) fn(); });
+  alignBtnEl.addEventListener("click",()=>{ const fn=_onAlign; hide(); if(fn) fn(); });
+  document.addEventListener("click",(ev)=>{ if(pop.style.display==="block"&&!pop.contains(ev.target)) hide(); });
+  window.showHmOpenPopup=function(ev,label,onTree,onAlign,treeLabel,alignLabel){
+    ev.stopPropagation();
+    hideTip();
+    _onTree=onTree; _onAlign=onAlign;
+    title.textContent=label||"Open in";
+    treeBtn.textContent = treeLabel || 'Show Tree';
+    alignBtnEl.textContent = alignLabel || 'Show Alignment';
+    treeBtn.style.display = typeof onTree === "function" ? "" : "none";
+    if(alignBtnEl) alignBtnEl.style.display=(HAVE_ALIGNMENTS && typeof onAlign==="function") ? "" : "none";
+    pop.style.display="block";
+    const x=Math.min(ev.clientX+8,window.innerWidth-pop.offsetWidth-8);
+    const y=Math.min(ev.clientY+8,window.innerHeight-pop.offsetHeight-8);
+    pop.style.left=Math.max(4,x)+"px";
+    pop.style.top=Math.max(4,y)+"px";
+  };
+})();
+
+function hmOpenTreeForHG(tRec, sp){
+  if(!tRec) return;
+  hmFocusGids=null;
+  switchTab("trees");
+  selectTree(tRec);
+  renderSidebar("");
+  if(sp){
+    hlQueries=[sp];
+    rebuildHlSet();
+    setTimeout(focusHighlighted,60);
+  }
+}
+
+function hmOpenTreeForOG(treeRec, ogId, sp){
+  if(!treeRec) return;
+  const det=loadDetail(treeRec.id);
+  const ogGids=(det&&det.ogs&&det.ogs[ogId])||[];
+  const targetGids=sp?ogGids.filter(g=>getSpeciesPfx(g)===sp):ogGids;
+  switchTab("trees");
+  selectTree(treeRec);
+  renderSidebar("");
+  if(targetGids.length){
+    hmFocusGids=new Set(targetGids);
+    hideNonHl=true;
+    const chk=document.getElementById("chk-hide-nonhl"); if(chk) chk.checked=true;
+  }
+  setTimeout(focusHighlighted,80);
+}
+
+function hmOpenAlignmentForHG(alnId){
+  if(!HAVE_ALIGNMENTS) return;
+  if(!alnId) return;
+  switchTab("align");
+  selectAlignment(alnId);
+}
+
+function hmOpenAlignmentForOG(treeRec, ogId){
+  if(!HAVE_ALIGNMENTS) return;
+  if(!treeRec) return;
+  switchTab("align");
+  selectAlignment(treeRec.id);
+  const allOGs=[...new Set(Object.values(alnOgMap))];
+  alnHiddenOGs.clear();
+  alnCollapsedOGs.clear();
+  allOGs.forEach(og=>{ if(og!==ogId) alnCollapsedOGs.add(og); });
+  renderAlignment();
+}
+
 function drawSpeciesTree() {
   const wrap = document.getElementById("sp-tree-wrap");
   wrap.innerHTML = "";
@@ -2311,7 +5592,7 @@ function drawSpeciesTree() {
   const inPhylo = new Set(ALL_SPECIES);
   const tipColor = n => inPhylo.has(n.name) ? spColor(n.name) : "#bbb";
 
-  // groupColors is global (computed once at startup from SPECIES_GROUPS + spColor)
+  // groupColors is recomputed whenever species colors change
 
   // ── helpers ──────────────────────────────────────────────────────────
   function clone(n){ return JSON.parse(JSON.stringify(n)); }
@@ -2325,6 +5606,11 @@ function drawSpeciesTree() {
   function countLeaves(n){ return n.children?n.children.reduce((s,c)=>s+countLeaves(c),0):1; }
   function getLeaves(n){ return n.children?n.children.flatMap(getLeaves):[n]; }
   function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
+  function avgTipColor(leaves){
+    const rgbs=leaves.map(l=>_cssToRgb(tipColor(l))).filter(Boolean);
+    if(!rgbs.length) return colTriFill;
+    return _rgbToHex(d3.mean(rgbs,c=>c[0]), d3.mean(rgbs,c=>c[1]), d3.mean(rgbs,c=>c[2]));
+  }
 
   const tree = prune(clone(SP_TREE_DATA));
   SP_TREE_PRUNED = tree;
@@ -2341,7 +5627,7 @@ function drawSpeciesTree() {
 
   // ── layout: assign _y accounting for collapsed blocks ─────────────────
   function layout(n, yStart){
-    if(spCollapsed.has(n._id)){
+    if(spCollapsed.has(spTreeNodeKey(n))){
       n._colH = countLeaves(n)*rowH;
       n._colY0 = yStart;
       n._y = yStart + n._colH/2;
@@ -2376,39 +5662,54 @@ function drawSpeciesTree() {
   function drawCollapsed(n){
     if(!n.children) return;
     if(n._isCol){
-      const x0=sx(n._d), x1=sx(maxD);
+      const x0=sx(n._d), xTip=sx(maxD), x1=xTip-8;
       const y0=n._colY0, y1=n._colY0+n._colH, yM=n._y;
       const leaves=getLeaves(n);
       // horizontal branch from parent edge to apex already drawn; draw triangle
+      const cladoKey = spTreeNodeKey(n);
+      const displayName = cladoNames.get(cladoKey)||(n.name||"clade");
+      const triFill = _collapsedCladeFill(n, node => getLeaves(node).map(l => l.name));
+      const expandNode = ()=>{ spCollapsed.delete(cladoKey); cladoCollapsed.delete(cladoKey); drawSpeciesTree(); drawCladogram(); if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap(); };
       svg.append("polygon")
         .attr("points",`${x0},${yM} ${x1},${y0} ${x1},${y1}`)
-        .attr("fill",colTriFill).attr("stroke","#222").attr("stroke-width",1)
+        .attr("fill",triFill).attr("stroke","#222").attr("stroke-width",1)
         .style("cursor","pointer")
-        .on("click",()=>{ spCollapsed.delete(n._id); drawSpeciesTree(); })
-        .on("mouseover",ev=>showTip(ev,'<div class="tt-name">'+n.name+'</div><div style="font-size:9px;color:#aaa">click to expand</div>'))
+        .on("click",expandNode)
+        .on("mouseover",ev=>showTip(ev,'<div class="tt-name">'+displayName+'</div><div style="font-size:9px;color:#aaa">click to expand</div>'))
         .on("mousemove",moveTip).on("mouseout",hideTip);
       // small circle at apex for easy uncollapse
       svg.append("circle")
         .attr("cx",x0).attr("cy",yM).attr("r",5)
         .attr("fill","#f5f5f5").attr("stroke","#555").attr("stroke-width",1.2)
         .style("cursor","pointer")
-        .on("click",()=>{ spCollapsed.delete(n._id); drawSpeciesTree(); })
-        .on("mouseover",ev=>showTip(ev,(n.name?'<div class="tt-name">'+n.name+'</div>':'')+'<div style="font-size:9px;color:#aaa">click to expand</div>'))
+        .on("click",expandNode)
+        .on("mouseover",ev=>showTip(ev,'<div class="tt-name">'+displayName+'</div><div style="font-size:9px;color:#aaa">click to expand</div>'))
         .on("mousemove",moveTip).on("mouseout",hideTip);
       // node name badge at apex
-      if(n.name){
+      if(displayName){
         svg.append("text").attr("x",x0+4).attr("y",yM-3)
           .attr("font-size",8).attr("fill","#5a7090").attr("font-style","italic")
-          .text(n.name+" ["+leaves.length+"]");
+          .text(displayName+" ["+leaves.length+"]");
       }
-      // species names at triangle base
+      // species names at triangle base — same layout as drawLeaves
       const nameH=n._colH/leaves.length;
+      const imgW=24, imgH=18, imgGap=4;
       leaves.forEach((l,i)=>{
         const ly=n._colY0+i*nameH+nameH/2;
         const tc=tipColor(l);
-        svg.append("circle").attr("cx",x1+4).attr("cy",ly).attr("r",3)
-          .attr("fill",tc);
-        svg.append("text").attr("x",x1+10).attr("y",ly).attr("dy","0.35em")
+        const imgSrc=SPECIES_IMAGES[l.name]||"";
+        const showImg=imgSrc&&nameH>=14;
+        const textX=xTip+10+(showImg?imgW+imgGap:0);
+        svg.append("circle").attr("cx",xTip).attr("cy",ly).attr("r",5)
+          .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.8);
+        if(showImg){
+          svg.append("image")
+            .attr("x",xTip+10).attr("y",ly-imgH/2)
+            .attr("width",imgW).attr("height",imgH)
+            .attr("href",imgSrc)
+            .attr("preserveAspectRatio","xMidYMid meet");
+        }
+        svg.append("text").attr("x",textX).attr("y",ly).attr("dy","0.35em")
           .attr("font-size",Math.max(7,Math.min(11,nameH-2)))
           .attr("fill",tc).attr("font-family","monospace").text(l.name);
       });
@@ -2503,8 +5804,7 @@ function drawSpeciesTree() {
           ev.stopPropagation();
           openColorPicker(spColor(n.name),c=>{
             SP_COLORS[n.name]=c;
-            drawSpeciesTree();
-            if(rootNode) renderTree(false);
+            refreshSpeciesColorViews();
           });
         });
       const imgSrc=SPECIES_IMAGES[n.name]||"";
@@ -2582,6 +5882,10 @@ function hmSetSort(sps){
   drawHeatmap();
 }
 
+function hmIsNoAnnotationRec(d){
+  return !!(d&&typeof d.id==="string"&&d.id.startsWith("(no annotation)"));
+}
+
 function drawHeatmap() {
   const prefix = document.getElementById("prefixSelect").value;
   const back   = document.getElementById("hm-back");
@@ -2625,11 +5929,14 @@ function drawHeatmap() {
         if(ev.shiftKey){ hmExpandHGToOGs([d.id]); return; }
         hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap(); return;
       }
-      // cell click: open gene tree for this HG with species highlighted
       const tRec=TREE_INDEX.find(t=>t.id===d.id)||TREE_INDEX.find(t=>t.family===d.family&&t.hg===d.hg);
       if(!tRec) return;
-      switchTab("trees"); selectTree(tRec); renderSidebar("");
-      if(d.species_counts[sp]){ hlQueries=[sp]; rebuildHlSet(); setTimeout(focusHighlighted,60); }
+      showHmOpenPopup(
+        ev,
+        (d.hg||d.id)+" · "+sp,
+        ()=>hmOpenTreeForHG(tRec, d.species_counts[sp]?sp:null),
+        ()=>hmOpenAlignmentForHG(tRec.id)
+      );
     };
 
   } else if(hmViewMode==="og") { // og
@@ -2647,19 +5954,14 @@ function drawHeatmap() {
     back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG); expandBtn.style.display="none";
     colLabel=d=>d.id+" ["+d.total+"]";
     // third arg 'sp': species clicked (from cell), undefined for column-header click
-    clickHandler=(_ev,_d,sp)=>{
+    clickHandler=(ev,_d,sp)=>{
       if(!treeRec) return;
-      // resolve gene IDs directly from detail.ogs before selectTree resets state
-      const det=loadDetail(treeRec.id);
-      const ogGids=(det&&det.ogs&&det.ogs[_d.id])||[];
-      const targetGids=sp?ogGids.filter(g=>getSpeciesPfx(g)===sp):ogGids;
-      switchTab("trees"); selectTree(treeRec); renderSidebar("");
-      if(targetGids.length){
-        hmFocusGids=new Set(targetGids);
-        hideNonHl=true;
-        const chk=document.getElementById("chk-hide-nonhl"); if(chk) chk.checked=true;
-      }
-      setTimeout(focusHighlighted,80);
+      showHmOpenPopup(
+        ev,
+        _d.id+(sp?" · "+sp:""),
+        ()=>hmOpenTreeForOG(treeRec, _d.id, sp),
+        ()=>hmOpenAlignmentForOG(treeRec, _d.id)
+      );
     };
 
   } else { // custom
@@ -2679,19 +5981,15 @@ function drawHeatmap() {
     back.style.display="none"; expandBtn.style.display="none";
     crumb.textContent="Custom selection ("+effOGs.length+" OG"+(effOGs.length!==1?"s":"")+")";
     colLabel=d=>d.id;
-    clickHandler=(_ev,d,sp)=>{
+    clickHandler=(ev,d,sp)=>{
       const tRec=hmOGIndex[d.id]?TREE_INDEX.find(t=>t.id===hmOGIndex[d.id].hgId):null;
       if(!tRec) return;
-      const det=loadDetail(tRec.id);
-      const ogGids=(det&&det.ogs&&det.ogs[d.id])||[];
-      const targetGids=sp?ogGids.filter(g=>getSpeciesPfx(g)===sp):ogGids;
-      switchTab("trees"); selectTree(tRec); renderSidebar("");
-      if(targetGids.length){
-        hmFocusGids=new Set(targetGids);
-        hideNonHl=true;
-        const chk=document.getElementById("chk-hide-nonhl"); if(chk) chk.checked=true;
-      }
-      setTimeout(focusHighlighted,80);
+      showHmOpenPopup(
+        ev,
+        d.id+(sp?" · "+sp:""),
+        ()=>hmOpenTreeForOG(tRec, d.id, sp),
+        ()=>hmOpenAlignmentForOG(tRec, d.id)
+      );
     };
   }
 
@@ -2787,6 +6085,148 @@ function drawHeatmap() {
     hmOrder.filter(s=>!spSplitGroup.has(s)).forEach(s=>grouped.push(s));
     hmOrder = grouped;
   }
+
+  // ── FLIPPED MODE: species as columns, HG/OGs as rows ─────────────────
+  if(hmFlipped){
+    const tp=document.getElementById("tree-panel"); if(tp) tp.style.display="none";
+    const cW=18, cH=14;
+    const colLabelMaxCharsF=Math.round(hmColFontSize*3.5);
+    const colLabelTruncF=d=>{ const s=colLabel(d)||""; return s.length>colLabelMaxCharsF?s.slice(0,colLabelMaxCharsF-1)+"\u2026":s; };
+    const maxHGLen=data.reduce((m,d)=>Math.max(m,(colLabelTruncF(d)||"").length),0);
+    const ROW_LABEL_W_F=Math.max(110,Math.min(240,maxHGLen*hmColFontSize*0.65+16))+(hmGrpMeta.length>1?HM_GROUP_H:0);
+    const SP_TREE_H=64;
+    const maxSpLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
+    const SP_LABEL_H=Math.ceil(maxSpLen*hmColFontSize*0.62)+8;
+    const hmTM_F=SP_TREE_H+SP_LABEL_H+HM_GROUP_H;
+    hmTopActual=hmTM_F;
+    const nRows_F=data.length, nCols_F=hmOrder.length;
+    const CELLS_BOTTOM_F=nRows_F*cH+hmTM_F;
+    const BAR_LEFT=nCols_F*cW+ROW_LABEL_W_F+8;
+    const BAR_W_MAX=50;
+    const svgW_F=BAR_LEFT+BAR_W_MAX+32;
+    const svgH_F=CELLS_BOTTOM_F+40;
+    const panel=document.getElementById("heatmap-panel");
+    const svg=d3.select(panel).html("").append("svg").attr("width",svgW_F).attr("height",svgH_F);
+    if(!data.length){ svg.append("text").attr("x",40).attr("y",hmTM_F+30).attr("fill","#999").text("No data."); return; }
+
+    // ── z-score per row ──
+    const zMat_F=data.map(rec=>{ const v=hmOrder.map(s=>rec.species_counts[s]||0); const m=d3.mean(v),sd=d3.deviation(v)||1; return v.map(x=>(x-m)/sd); });
+    const zAll_F=zMat_F.flat();
+    const zMax_F=Math.max(Math.abs(d3.min(zAll_F)||0),Math.abs(d3.max(zAll_F)||0),0.01);
+    const zColor_F=d3.scaleDiverging().domain([zMax_F,0,-zMax_F]).interpolator(d3.interpolateRdBu);
+    const maxAbs_F=d3.max(data.flatMap(rec=>hmOrder.map(s=>rec.species_counts[s]||0)))||1;
+    const absColor_F=d3.scaleSequential().domain([0,maxAbs_F]).interpolator(d3.interpolateBlues);
+    const color_F=hmColorMode==="absolute"?absColor_F:zColor_F;
+
+    // ── horizontal species tree ──
+    (function(){
+      function clF(n){ return JSON.parse(JSON.stringify(n)); }
+      function prF(n){ if(!n.children) return hmOrder.includes(n.name)?n:null; const k=n.children.map(prF).filter(Boolean); if(!k.length) return null; if(k.length===1) return k[0]; n.children=k; return n; }
+      const htree=prF(clF(SP_TREE_DATA)); if(!htree) return;
+      const leafX={}; hmOrder.forEach((sp,ci)=>{ leafX[sp]=ROW_LABEL_W_F+ci*cW+cW/2; });
+      function aX(n){ if(!n.children){n._lx=leafX[n.name]||0;return n._lx;} const xs=n.children.map(aX); n._lx=d3.mean(xs);return n._lx; }
+      function aD(n,d=0){ n._d=d; if(n.children) n.children.forEach(c=>aD(c,d+1)); }
+      function flatF(n){ return [n].concat(n.children?n.children.flatMap(flatF):[]); }
+      function nkF(n){ return spTreeNodeKey(n); }
+      aX(htree); aD(htree);
+      const maxDF=d3.max(flatF(htree),n=>n._d)||1;
+      flatF(htree).forEach(n=>{ if(!n.children) n._d=maxDF; });
+      const syF=d=>4+(d/maxDF)*(SP_TREE_H-10);
+      // branches
+      function drawHB(n){ if(!n.children||cladoCollapsed.has(nkF(n))) return; const xs=n.children.map(c=>c._lx); svg.append("line").attr("x1",d3.min(xs)).attr("x2",d3.max(xs)).attr("y1",syF(n._d)).attr("y2",syF(n._d)).attr("stroke","#bbb").attr("stroke-width",1); n.children.forEach(c=>{ svg.append("line").attr("x1",c._lx).attr("x2",c._lx).attr("y1",syF(n._d)).attr("y2",syF(c._d)).attr("stroke","#bbb").attr("stroke-width",1); drawHB(c); }); }
+      drawHB(htree);
+      // interactive nodes
+      function drawHN(n){ if(!n.children) return; const key=nkF(n); if(cladoCollapsed.has(key)) return; const clvs=new Set(flatF(n).filter(x=>!x.children).map(x=>x.name)); const si=hmSplitSets.findIndex(s=>s.size===clvs.size&&[...clvs].every(v=>s.has(v))); const isSpl=si>=0; const lbl=n.name||(clvs.size+" spp."); svg.append("circle").attr("cx",n._lx).attr("cy",syF(n._d)).attr("r",4).attr("fill",isSpl?hmSplitColors[si%hmSplitColors.length]:"#fff").attr("stroke",isSpl?hmSplitLineColors[si%hmSplitLineColors.length]:"#aaa").attr("stroke-width",isSpl?2:1).style("cursor","pointer").on("mouseover",ev=>showTip(ev,lbl+'<div style="font-size:9px;color:#aaa">click=collapse &nbsp;·&nbsp; shift+click=split</div>')).on("mousemove",moveTip).on("mouseout",hideTip).on("click",(ev)=>{ hideTip(); if(ev.shiftKey){ ev.stopPropagation(); if(isSpl){hmSplitSets.splice(si,1);hmSplitLabels.splice(si,1);}else{hmSplitSets.push(clvs);hmSplitLabels.push(lbl);} updateHmSplitBar(); drawHeatmap(); } else { cladoCollapsed.add(key); spCollapsed.add(key); drawHeatmap(); } }); n.children.forEach(drawHN); }
+      drawHN(htree);
+      // logos
+      if(hmShowSpLogos){ hmOrder.forEach(sp=>{ const src=SPECIES_IMAGES[sp]; if(!src) return; svg.append("image").attr("x",leafX[sp]-6).attr("y",SP_TREE_H-13).attr("width",12).attr("height",12).attr("href",src).attr("preserveAspectRatio","xMidYMid meet"); }); }
+      // species column labels (below tree, rotated)
+      hmOrder.forEach((sp,ci)=>{ svg.append("text").attr("transform",`translate(${ROW_LABEL_W_F+ci*cW+cW/2},${SP_TREE_H+SP_LABEL_H-4}) rotate(-90)`).attr("text-anchor","start").attr("font-size",hmColFontSize).attr("fill","#333").text(sp); });
+    })();
+
+    // ── column split bands (species split groups become vertical bands) ──
+    if(nSplitGroups>0){
+      hmOrder.forEach((sp,ci)=>{ const gi=spSplitGroup.get(sp); if(gi===undefined) return; svg.append("rect").attr("x",ci*cW+ROW_LABEL_W_F).attr("y",hmTM_F).attr("width",cW).attr("height",nRows_F*cH).attr("fill",bandFillColors[gi%bandFillColors.length]).attr("pointer-events","none"); });
+      for(let ci=1;ci<nCols_F;ci++){ const pg=spSplitGroup.get(hmOrder[ci-1]),cg=spSplitGroup.get(hmOrder[ci]); if(pg!==cg) svg.append("line").attr("x1",ci*cW+ROW_LABEL_W_F).attr("x2",ci*cW+ROW_LABEL_W_F).attr("y1",hmTM_F).attr("y2",CELLS_BOTTOM_F).attr("stroke","#999").attr("stroke-width",1.5).attr("stroke-dasharray","4,2"); }
+    }
+
+    // ── cells (transposed: rows=HGs, cols=species) ──
+    data.forEach((rec,ri)=>{
+      hmOrder.forEach((sp,ci)=>{
+        const count=rec.species_counts[sp]||0, z=zMat_F[ri][ci];
+        const cellX=ci*cW+ROW_LABEL_W_F, cellY=ri*cH+hmTM_F;
+        const fill=hmColorMode==="absolute"?absColor_F(count):zColor_F(z);
+        svg.append("rect").attr("class","hm-cell").attr("x",cellX).attr("y",cellY).attr("width",cW-2).attr("height",cH-2).attr("fill",count===0?"#fff":fill).style("cursor","pointer")
+          .on("mouseover",ev=>showTip(ev,'<b>'+sp+'</b><br>'+rec.id+'<br>count: <b>'+count+'</b>'+(hmColorMode==="zscore"?'<br>z: <b>'+z.toFixed(2)+'</b>':"")))
+          .on("mousemove",moveTip).on("mouseout",hideTip).on("click",ev=>clickHandler(ev,rec,sp));
+        if(count>0){ const fc=d3.color(fill); const lum=fc?(0.2126*fc.r+0.7152*fc.g+0.0722*fc.b)/255:1; svg.append("text").attr("x",cellX+(cW-2)/2).attr("y",cellY+cH/2).attr("dy","0.35em").attr("text-anchor","middle").attr("font-size",6.5).attr("fill",lum>0.45?"#222":"#eee").attr("pointer-events","none").text(count>999?"\u226b":count); }
+      });
+    });
+
+    // ── group HG horizontal separators + band labels ──
+    if(hmGrpMeta.length>1){
+      const GBW=HM_GROUP_H-2;
+      let _gdk=null,_gdt=null,_gdm=false,_gdy=0;
+      hmGrpMeta.forEach(g=>{
+        const y0=g.startIdx*cH+hmTM_F, h=g.count*cH, midY=y0+h/2;
+        const bx=ROW_LABEL_W_F-GBW-2;
+        svg.append("rect").attr("x",bx).attr("y",y0+1).attr("width",GBW).attr("height",h-2).attr("rx",3).attr("fill","#e8eef6").attr("stroke","#b0bcd0").attr("stroke-width",1).style("cursor","grab")
+          .on("mouseover",ev=>showTip(ev,"<b>"+g.key+"</b><br><span style='color:#aaa;font-size:10px'>"+g.count+" row"+(g.count!==1?"s":"")+" — drag to reorder</span>")).on("mousemove",moveTip).on("mouseout",hideTip)
+          .call(d3.drag()
+            .on("start",(ev)=>{ _gdk=g.key; _gdm=false; _gdy=ev.y; })
+            .on("drag",(ev)=>{ if(Math.abs(ev.y-_gdy)>6) _gdm=true; if(!_gdm) return; let cy=hmTM_F,tgt=hmGrpMeta.length; for(let i=0;i<hmGrpMeta.length;i++){if(ev.y<cy+hmGrpMeta[i].count*cH/2){tgt=i;break;} cy+=hmGrpMeta[i].count*cH;} _gdt=tgt; })
+            .on("end",()=>{ hideTip(); if(_gdm&&_gdk!==null&&_gdt!==null){ const ord=hmGrpMeta.map(x=>x.key); const si=ord.indexOf(_gdk); if(si>=0){ ord.splice(si,1); ord.splice(Math.max(0,Math.min(ord.length,_gdt>si?_gdt-1:_gdt)),0,_gdk); hmGroupOrderOverride=[...ord]; drawHeatmap(); } } _gdk=null;_gdt=null;_gdm=false; }));
+        // vertical label text
+        const maxC=Math.max(2,Math.floor(h/7));
+        const lbl=g.key.length>maxC?g.key.slice(0,maxC-1)+"\u2026":g.key;
+        svg.append("text").attr("x",bx+GBW/2).attr("y",midY).attr("text-anchor","middle").attr("dominant-baseline","middle").attr("transform",`rotate(-90,${bx+GBW/2},${midY})`).attr("font-size",8).attr("font-weight","600").attr("fill","#2c4a7c").attr("pointer-events","none").text(lbl);
+      });
+      hmGrpBoundaries.forEach(ri=>{ const y=ri*cH+hmTM_F; svg.append("line").attr("x1",ROW_LABEL_W_F-GBW-2).attr("x2",nCols_F*cW+ROW_LABEL_W_F).attr("y1",y).attr("y2",y).attr("stroke","#1a1a1a").attr("stroke-width",1.5).attr("pointer-events","none"); });
+    }
+
+    // ── group header band above cells (species grouping from hmSplitSets) ──
+    if(HM_GROUP_H>0 && hmGrpMeta.length<=1){
+      // no group HG active but HM_GROUP_H is 0 anyway
+    }
+
+    // ── row labels with drag (HG/OG names on left) ──
+    const _dg=svg.append("rect").attr("x",ROW_LABEL_W_F).attr("width",nCols_F*cW).attr("fill","rgba(74,144,217,0.13)").attr("stroke","#4a90d9").attr("stroke-width",1).attr("opacity",0).attr("pointer-events","none");
+    const _dm=svg.append("line").attr("x1",ROW_LABEL_W_F).attr("x2",nCols_F*cW+ROW_LABEL_W_F).attr("stroke","#4a90d9").attr("stroke-width",2.5).attr("opacity",0).attr("pointer-events","none");
+    let _di=null,_dt=null,_dmv=false,_dsy=0;
+    svg.selectAll("text.hm-row-lbl").data(data).enter().append("text").attr("class","hm-row-lbl")
+      .attr("x",ROW_LABEL_W_F-(hmGrpMeta.length>1?HM_GROUP_H:0)-4)
+      .attr("y",(d,ri)=>ri*cH+hmTM_F+cH/2)
+      .attr("dominant-baseline","middle").attr("text-anchor","end").attr("font-size",hmColFontSize).style("cursor","grab")
+      .attr("fill",d=>hmIsNoAnnotationRec(d)?"#9aa0a6":"#333")
+      .text(colLabelTruncF)
+      .call(d3.drag()
+        .on("start",(ev,d)=>{ _di=data.findIndex(r=>r.id===d.id); _dmv=false; _dsy=ev.y; _dg.attr("y",_di*cH+hmTM_F).attr("height",cH).attr("opacity",1); svg.style("cursor","grabbing"); })
+        .on("drag",(ev)=>{ if(Math.abs(ev.y-_dsy)>5) _dmv=true; if(!_dmv) return; const t=Math.max(0,Math.min(data.length,Math.round((ev.y-hmTM_F)/cH))); _dt=t; _dm.attr("y1",t*cH+hmTM_F).attr("y2",t*cH+hmTM_F).attr("opacity",1); })
+        .on("end",(ev,d)=>{ _dg.attr("opacity",0); _dm.attr("opacity",0); svg.style("cursor",""); if(!_dmv){ clickHandler(ev,d,null); } else if(_di!==null&&_dt!==null&&_dt!==_di&&_dt!==_di+1){ const nd=[...data]; const [mv]=nd.splice(_di,1); nd.splice(_dt>_di?_dt-1:_dt,0,mv); hmColOrderOverride=nd.map(r=>r.id); drawHeatmap(); } _di=null;_dt=null; }));
+
+    // ── bar chart right (per-row totals) ──
+    const rowTots=data.map(rec=>d3.sum(hmOrder.map(s=>rec.species_counts[s]||0)));
+    const maxRT=d3.max(rowTots)||1;
+    svg.append("line").attr("x1",BAR_LEFT).attr("x2",BAR_LEFT).attr("y1",hmTM_F).attr("y2",CELLS_BOTTOM_F).attr("stroke","#ccc").attr("stroke-width",0.8);
+    svg.append("text").attr("x",BAR_LEFT+2).attr("y",hmTM_F-4).attr("font-size",8).attr("fill","#aaa").text("total \u2192");
+    data.forEach((rec,ri)=>{ const t=rowTots[ri]; const bW=Math.max(t>0?1:0,(t/maxRT)*BAR_W_MAX); svg.append("rect").attr("x",BAR_LEFT).attr("y",ri*cH+hmTM_F+1).attr("width",bW).attr("height",cH-2).attr("fill","#7fb3d3").attr("opacity",0.8); if(t>0) svg.append("text").attr("x",BAR_LEFT+bW+2).attr("y",ri*cH+hmTM_F+cH/2).attr("dominant-baseline","middle").attr("font-size",6.5).attr("fill","#555").text(t>=10000?(t/1000).toFixed(0)+"k":t); });
+
+    // ── group header row above cells (for species column groups from hmGrpMeta when grouped by species-level) ──
+    if(HM_GROUP_H>0 && hmGrpMeta.length>1){
+      // already drawn group bands on left above; also draw column group header if species are grouped
+    }
+
+    // ── colorbar ──
+    const cbX_F=ROW_LABEL_W_F, cbY_F=svgH_F-20, cbW_F=80, cbH_F=8;
+    const gid_F="hmgf"+Date.now(); const df=svg.append("defs"); const gf=df.append("linearGradient").attr("id",gid_F).attr("x1","0%").attr("x2","100%");
+    for(let i=0;i<=10;i++) gf.append("stop").attr("offset",(i*10)+"%").attr("stop-color",color_F(zMax_F-i*2*zMax_F/10));
+    svg.append("rect").attr("x",cbX_F).attr("y",cbY_F).attr("width",cbW_F).attr("height",cbH_F).attr("fill","url(#"+gid_F+")").attr("rx",2);
+    ["high","mean","low"].forEach((l,i)=>svg.append("text").attr("x",cbX_F+i*cbW_F/2).attr("y",cbY_F+cbH_F+9).attr("font-size",8).attr("fill","#888").attr("text-anchor","middle").text(l));
+
+    return; // skip normal rendering; drawCladogram NOT called
+  }
+  // ── restore tree-panel visibility (normal mode) ──
+  { const tp=document.getElementById("tree-panel"); if(tp) tp.style.display=""; }
 
   const cW=18, cH=12;
   const maxNameLen=hmOrder.reduce((m,s)=>Math.max(m,s.length),0);
@@ -2966,6 +6406,7 @@ function drawHeatmap() {
     .attr("transform",(d,i)=>`translate(${i*cW+ROW_LABEL_W+cW/2},${hmTM-6-HM_GROUP_H}) rotate(-${hmColRotation})`)
     .attr("font-size",hmColFontSize).style("cursor","grab")
     .attr("text-anchor","start")
+    .attr("fill",d=>hmIsNoAnnotationRec(d)?"#9aa0a6":"#333")
     .text(colLabelTrunc)
     .call(d3.drag()
       .on("start",(event,d)=>{
@@ -3438,9 +6879,7 @@ function buildHmSearchIndex(){
 }
 
 function loadDetail(id) {
-  const el=document.getElementById("treedata-"+id);
-  if(!el)return null;
-  try{ return JSON.parse(el.textContent); }catch(e){ return null; }
+  return _loadEmbeddedJson("treedata-"+id);
 }
 
 function groupByFamily(records){
@@ -3467,6 +6906,7 @@ function renderSidebar(filter){
   for(const [fam,recs] of Object.entries(groups).sort()){
     const matching=lc?recs.filter(r=>r.hg.toLowerCase().includes(lc)||r.family.toLowerCase().includes(lc)||(r.og_names||[]).some(o=>o.toLowerCase().includes(lc))):recs;
     if(!matching.length)continue;
+    matching.sort((a,b)=>{ const na=parseInt((a.hg||a.id).match(/\d+/)?.[0]||'0',10), nb=parseInt((b.hg||b.id).match(/\d+/)?.[0]||'0',10); return na-nb; });
     total+=matching.length;
     const forceOpen=lc.length>0;
     const gDiv=document.createElement("div");
@@ -3772,12 +7212,16 @@ document.getElementById("sptree-width-slider").addEventListener("input",function
   document.getElementById("sptree-width-val").textContent=this.value;
   drawSpeciesTree();
 });
+document.getElementById("sp-palette-select").addEventListener("change",function(){
+  updateSpeciesPalettePreview(this.value);
+});
 document.getElementById("col-tri-fill").addEventListener("input",function(){
   colTriFill=this.value;
   // only gene-tree .col-tri and the species-tree view use this global colour
   document.querySelectorAll("#tree-svg .col-tri").forEach(el=>{ el.style.fill=colTriFill; });
   drawSpeciesTree();
 });
+updateSpeciesPalettePreview(document.getElementById("sp-palette-select").value);
 
 function _buildCombinedHeatmapSVG(){
   const cladoSvg=document.querySelector("#tree-panel svg");
@@ -4093,6 +7537,7 @@ function spMRCAName(speciesSet){
   if(!_spHier||!speciesSet||!speciesSet.size) return null;
   const leaves=_spHier.leaves().filter(l=>speciesSet.has(l.data.name));
   if(!leaves.length) return null;
+  if(speciesSet.size===1) return leaves[0].data.name||null;
   // find MRCA by walking paths to root
   const paths=leaves.map(l=>{ const p=[]; let n=l; while(n){p.push(n);n=n.parent;} return p; });
   const sets=paths.map(p=>new Set(p));
@@ -6543,6 +9988,15 @@ document.getElementById("tree-count").textContent =
 
 document.getElementById("btn-og-labels").classList.toggle("active-btn", showOGLabels);
 
+if (!HAVE_ALIGNMENTS) {
+  const alignBtn = document.getElementById("tab-btn-align");
+  if (alignBtn) alignBtn.style.display = "none";
+}
+if (!HAVE_ARCHITECTURES) {
+  const archBtn = document.querySelector('.tab-btn[data-tab="architectures"]');
+  if (archBtn) archBtn.style.display = "none";
+}
+
 if (hasHeatmapData || TREE_INDEX.length > 0) {
   switchTab("sptree");
 } else {
@@ -6584,6 +10038,8 @@ def parse_args(argv=None):
                    help="POSSVM refnames TSV (gene_id<TAB>name) for OG naming and tooltip annotation")
     p.add_argument("--refsps", default=None,
                    help="Comma-separated reference species filter, matching POSSVM --refsps")
+    p.add_argument("--align_dir", default=None,
+                   help="Directory with *.aln.fasta alignment files (enables the Alignments tab only when explicitly provided)")
     p.add_argument("--output", required=True, help="Output HTML file path")
     return p.parse_args(argv)
 
@@ -6605,6 +10061,7 @@ def _resolve_results_paths(args):
         ),
         "search_dir": pick(args.search_dir, "search"),
         "cluster_dir": pick(args.cluster_dir, "clusters"),
+        "align_dir": Path(args.align_dir) if args.align_dir else None,
     }
 
 
@@ -6625,9 +10082,18 @@ def _load_tree_records(possvm_dir: Path, possvm_prev_dir):
     if not possvm_dir.exists():
         print(f"WARN: {possvm_dir} does not exist – no gene trees.", file=sys.stderr)
 
-    records, all_species, gene_meta = (
+    raw_records, all_species, gene_meta = (
         load_possvm_trees(possvm_dir, source="generax") if possvm_dir.exists() else ([], [], {})
     )
+    generax_gene_meta = dict(gene_meta)
+    # Deduplicate: same possvm dir may have both .generax.tree and .treefile outputs.
+    # Keep first occurrence per id (generax files sort before treefile).
+    seen_ids: set = set()
+    records = []
+    for r in raw_records:
+        if r["id"] not in seen_ids:
+            seen_ids.add(r["id"])
+            records.append(r)
     print(f"Loaded {len(records)} gene trees, {len(all_species)} species.", file=sys.stderr)
 
     generax_ids = {r["id"] for r in records}
@@ -6645,8 +10111,12 @@ def _load_tree_records(possvm_dir: Path, possvm_prev_dir):
                 f"Loaded {len(prev_records)} prev gene trees (original IQ-TREE2).",
                 file=sys.stderr,
             )
+        else:
+            prev_gene_meta = {}
+    else:
+        prev_gene_meta = {}
 
-    return records, all_species, prev_records, gene_meta
+    return records, all_species, prev_records, gene_meta, generax_gene_meta, prev_gene_meta
 
 
 def _keep_record_for_family_info(rec: dict, family_info: dict) -> bool:
@@ -6747,18 +10217,102 @@ def _build_family_info_records(
     return family_info_records, have_generax
 
 
-def _build_lazy_scripts(records, prev_records):
-    lazy_parts = []
+def _build_aln_scripts(align_dir, records):
+    import gzip as _gzip
+    import base64 as _base64
+    if not align_dir:
+        return ""
+    parts = []
+    seen_ids = set()
+    adir = Path(align_dir) if align_dir else None
     for rec in records:
+        if rec["id"] in seen_ids:
+            continue
+        seen_ids.add(rec["id"])
+        tag_id = _html.escape(rec["id"], quote=True)
+        fasta_path = adir / f"{rec['id']}.aln.fasta" if adir else None
+        if fasta_path and fasta_path.exists():
+            raw = fasta_path.read_bytes()
+            gz  = _gzip.compress(raw, compresslevel=9)
+            b64 = _base64.b64encode(gz).decode()
+            payload = f'{{"gz":"{b64}"}}'
+        else:
+            payload = '{"gz":null}'
+        parts.append(
+            f'<script type="application/json" id="alndata-{tag_id}">'
+            + payload
+            + "</script>"
+        )
+    return "\n".join(parts)
+
+
+def _build_protein_domain_script(catalog):
+    import gzip as _gzip
+    import base64 as _base64
+
+    if not catalog.get("genes"):
+        payload = '{"gz":null}'
+    else:
+        raw = json.dumps(catalog, separators=(",", ":")).encode("utf-8")
+        gz = _gzip.compress(raw, compresslevel=9)
+        b64 = _base64.b64encode(gz).decode("ascii")
+        payload = f'{{"gz":"{b64}"}}'
+    return (
+        '<script type="application/json" id="protein-domain-data">'
+        + payload
+        + "</script>"
+    )
+
+
+def _build_architecture_script(catalog):
+    import gzip as _gzip
+    import base64 as _base64
+
+    if not catalog.get("families"):
+        payload = '{"gz":null}'
+    else:
+        raw = json.dumps(catalog, separators=(",", ":")).encode("utf-8")
+        gz = _gzip.compress(raw, compresslevel=9)
+        b64 = _base64.b64encode(gz).decode("ascii")
+        payload = f'{{"gz":"{b64}"}}'
+    return (
+        '<script type="application/json" id="architecture-data">'
+        + payload
+        + "</script>"
+    )
+
+
+def _build_lazy_scripts(records, prev_records, generax_gene_meta, prev_gene_meta, domain_spans):
+    import gzip as _gzip
+    import base64 as _base64
+    lazy_parts = []
+    seen_ids = set()
+    for rec in records:
+        if rec["id"] in seen_ids:
+            continue
+        seen_ids.add(rec["id"])
         detail = {"tree": rec["tree_dict"], "ogs": rec["ogs"]}
+        rec_genes = {g for genes in rec["ogs"].values() for g in genes}
+        if rec_genes:
+            detail["meta"] = {g: generax_gene_meta[g] for g in rec_genes if g in generax_gene_meta}
         prev = prev_records.get(rec["id"])
+        all_genes = set(rec_genes)
         if prev:
             detail["prev_tree"] = prev["tree_dict"]
             detail["prev_ogs"] = prev["ogs"]
+            prev_genes = {g for genes in prev["ogs"].values() for g in genes}
+            all_genes |= prev_genes
+            if prev_genes:
+                detail["prev_meta"] = {g: prev_gene_meta[g] for g in prev_genes if g in prev_gene_meta}
+        if all_genes:
+            detail["range"] = {g: domain_spans[g] for g in all_genes if g in domain_spans}
         tag_id = _html.escape(rec["id"], quote=True)
+        raw = json.dumps(detail, separators=(",", ":")).encode("utf-8")
+        gz = _gzip.compress(raw, compresslevel=9)
+        b64 = _base64.b64encode(gz).decode("ascii")
         lazy_parts.append(
             f'<script type="application/json" id="treedata-{tag_id}">'
-            + json.dumps(detail, separators=(",", ":"))
+            + f'{{"gz":"{b64}"}}'
             + "</script>"
         )
     return "\n".join(lazy_parts)
@@ -6780,7 +10334,7 @@ def build_report_context(args) -> dict:
         args.species_tree
     )
 
-    records, all_species, prev_records, gene_meta = _load_tree_records(possvm_dir, possvm_prev_dir)
+    records, all_species, prev_records, gene_meta, generax_gene_meta, prev_gene_meta = _load_tree_records(possvm_dir, possvm_prev_dir)
     records, prev_records, family_records, hg_records = _filter_report_inputs(
         records, prev_records, family_records, hg_records, family_info
     )
@@ -6796,15 +10350,24 @@ def build_report_context(args) -> dict:
         family_details, family_records, hg_records, records, prev_records
     )
     domain_hits = load_domain_hits(search_dir)
+    domain_spans = build_domain_spans(domain_hits)
     gene_lengths = load_gene_lengths(cluster_dir)
+    gene_to_hg, hg_sizes = load_gene_to_hg_map(cluster_dir)
+    search_gene_lengths = load_search_gene_lengths(search_dir)
+    protein_lengths = dict(gene_lengths)
+    protein_lengths.update(search_gene_lengths)
     species_info, species_groups = load_species_info(args.species_info)
     species_images = load_species_images(args.species_images)
     refname_map = load_reference_names(args.refnames, args.refsps)
     for gene_id, length in gene_lengths.items():
         gene_meta.setdefault(gene_id, {})["length"] = length
+    for gene_id, length in search_gene_lengths.items():
+        gene_meta.setdefault(gene_id, {})["length"] = length
     for gene_id, ref_name in refname_map.items():
         gene_meta.setdefault(gene_id, {})["is_reference_gene"] = True
         gene_meta[gene_id]["reference_gene_name"] = ref_name
+    protein_domain_catalog = build_exact_domain_catalog(search_dir, protein_lengths)
+    architecture_catalog = build_domain_architecture_catalog(search_dir, protein_lengths, gene_to_hg, hg_sizes)
 
     return {
         "species_order": species_order,
@@ -6819,6 +10382,7 @@ def build_report_context(args) -> dict:
         "have_generax": have_generax,
         "no_tree_genes": no_tree_genes,
         "domain_hits": domain_hits,
+        "domain_spans": domain_spans,
         "gene_meta": gene_meta,
         "refname_map": refname_map,
         "species_info": species_info,
@@ -6826,13 +10390,22 @@ def build_report_context(args) -> dict:
         "species_images": species_images,
         "records": records,
         "prev_records": prev_records,
+        "generax_gene_meta": generax_gene_meta,
+        "prev_gene_meta": prev_gene_meta,
+        "protein_domain_catalog": protein_domain_catalog,
+        "architecture_catalog": architecture_catalog,
+        "align_dir": resolved_paths["align_dir"],
+        "have_alignments": bool(args.align_dir),
     }
 
 
 def render_report_html(context: dict) -> str:
     return (
         HTML_TEMPLATE
-        .replace("%%LAZY_SCRIPTS%%", _build_lazy_scripts(context["records"], context["prev_records"]))
+        .replace("%%LAZY_SCRIPTS%%", _build_lazy_scripts(context["records"], context["prev_records"], context["generax_gene_meta"], context["prev_gene_meta"], context["domain_spans"]))
+        .replace("%%ALN_SCRIPTS%%", _build_aln_scripts(context["align_dir"], context["records"]))
+        .replace("%%PROTEIN_DOMAIN_SCRIPT%%", _build_protein_domain_script(context["protein_domain_catalog"]))
+        .replace("%%ARCHITECTURE_SCRIPT%%", _build_architecture_script(context["architecture_catalog"]))
         .replace("%%SPECIES_ORDER%%", json.dumps(context["species_order"]))
         .replace("%%TREE_DATA%%", json.dumps(context["tree_dict"]))
         .replace("%%FAMILY_DATA%%", json.dumps(context["family_records"]))
@@ -6850,6 +10423,9 @@ def render_report_html(context: dict) -> str:
         .replace("%%SPECIES_INFO_JSON%%", json.dumps(context["species_info"]))
         .replace("%%SPECIES_GROUPS_JSON%%", json.dumps(context["species_groups"]))
         .replace("%%SPECIES_IMAGES_JSON%%", json.dumps(context["species_images"]))
+        .replace("%%HAVE_ALIGNMENTS_JSON%%", json.dumps(context["have_alignments"]))
+        .replace("%%HAVE_PROTEIN_DOMAINS_JSON%%", json.dumps(bool(context["protein_domain_catalog"].get("genes"))))
+        .replace("%%HAVE_ARCHITECTURES_JSON%%", json.dumps(bool(context["architecture_catalog"].get("families"))))
     )
 
 

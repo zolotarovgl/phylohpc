@@ -70,6 +70,7 @@ process SEARCH {
 
   tuple val(pref), val(family),
         path("${pref}.${family}.domains.csv", optional: true),
+        path("${pref}.${family}.domains_ummerged.csv", optional: true),
         path("${pref}.${family}.genes.list",  optional: true),
         emit: aux
 
@@ -92,6 +93,7 @@ process SEARCH {
 
 	touch ${pref}.${family}.domains.fasta 
 	touch ${pref}.${family}.domains.csv 
+	touch ${pref}.${family}.domains_ummerged.csv
 	touch ${pref}.${family}.genes.list
   """
 }

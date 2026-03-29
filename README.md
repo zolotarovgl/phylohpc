@@ -165,6 +165,14 @@ sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf \
 
 **Outputs:** `results/search/` (domain sequences, gene lists) and `results/clusters/` (per-HG FASTA files).
 
+Simple Snakemake port for exploratory runs:
+
+```bash
+snakemake -s step1.smk --cores 4
+```
+
+By default this mirrors `step1.nf` and writes to `results/search/` and `results/clusters/`. The declared Snakemake targets are the per-family `*_cluster.tsv` files, while the per-HG FASTA files are still written into `results/clusters/` for exploration. Override `search_dir=...` and `cluster_dir=...` if you want to use a separate exploratory output root.
+
 
 ### Select HGs for downstream analysis
 
