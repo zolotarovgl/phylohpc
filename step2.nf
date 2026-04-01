@@ -167,7 +167,7 @@ process PHY {
     tuple val(id), path(aln)
 
     output:
-    tuple val(id), path("${id}.treefile"), path(aln), emit: trees
+    tuple val(id), path("${id}.treefile"), path(aln), path("${id}.log"), emit: trees
     path("${id}.ckp.gz"), optional: true, emit: ckp
 
     script:
@@ -179,6 +179,11 @@ process PHY {
         """
         echo "Using existing tree for ${id}"
         ln -sf ${existing} ${id}.treefile
+        if [[ -e ${params.OUTDIR}/gene_trees/${id}.log ]]; then
+            ln -sf ${params.OUTDIR}/gene_trees/${id}.log ${id}.log
+        else
+            printf "Using existing tree for %s\\nOriginal phylogeny log unavailable in %s\\n" "${id}" "${params.OUTDIR}/gene_trees" > ${id}.log
+        fi
         """
     }
     else if (params.TREE_METHOD == "iqtree2" && existing_ckp.exists()) {
@@ -190,7 +195,8 @@ process PHY {
             --outprefix ${id} \
             -c ${task.cpus} \
             --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL}
+            --iqtree2_model ${params.IQTREE2_MODEL} \
+            --logfile ${id}.log
         """
     }
 	    else {
@@ -201,7 +207,8 @@ process PHY {
 	            --outprefix ${id} \
             -c ${task.cpus} \
             --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL}
+            --iqtree2_model ${params.IQTREE2_MODEL} \
+            --logfile ${id}.log
         """
     }
 }
@@ -475,14 +482,14 @@ workflow {
 
         // ---------- PVM on original trees ----------
         pvm_prev_out = phy_out
-            .map { id, tree, aln -> tuple(id, tree, aln) }
+            .map { id, tree, aln, log -> tuple(id, tree, aln) }
             .combine(refnames_ch)
             | PVM_PREV
 
 
         // ---------- GeneRax ----------
         gr_input = phy_out
-            .map { id, tree, aln ->
+            .map { id, tree, aln, log ->
                 tuple(id, aln, tree)
             }
             .combine(species_tree_ch)
@@ -508,7 +515,7 @@ workflow {
     else {
 
         pvm_out = phy_out
-            .map { id, tree, aln ->
+            .map { id, tree, aln, log ->
                 tuple(id, tree, aln)
             }
             .combine(refnames_ch)

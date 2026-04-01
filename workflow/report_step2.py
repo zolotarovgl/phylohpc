@@ -20,6 +20,8 @@ Outputs
   A self-contained HTML file.
 """
 
+from __future__ import annotations
+
 import argparse
 import html as _html
 import json
@@ -96,6 +98,12 @@ def load_family_details(csv_path) -> dict:
     return details
 
 
+def _family_info_allows(prefix: str, family: str, family_info: dict | None) -> bool:
+    if not family_info:
+        return True
+    return prefix in family_info or family in family_info
+
+
 def parse_fasta_species(path) -> dict:
     """Return {species: count} from FASTA headers."""
     counts: dict = defaultdict(int)
@@ -124,12 +132,19 @@ def parse_fasta_genes(path) -> dict:
     return dict(genes)
 
 
-def load_domain_hits(search_dir: Path) -> dict:
+def load_domain_hits(search_dir: Path, family_info: dict | None = None) -> dict:
     """Return {gene_id: [{name,start,end}, ...]} from *.domains.csv files."""
     hits: dict = defaultdict(list)
     if not search_dir.is_dir():
         return {}
     for domains_file in sorted(search_dir.glob("*.domains.csv")):
+        track = domains_file.name[: -len(".domains.csv")]
+        parts = track.split(".", 1)
+        if len(parts) < 2:
+            continue
+        pref, family = parts
+        if not _family_info_allows(pref, family, family_info):
+            continue
         try:
             with open(domains_file) as fh:
                 for line in fh:
@@ -171,12 +186,19 @@ def build_domain_spans(domain_hits: dict) -> dict:
     return spans
 
 
-def load_search_gene_lengths(search_dir: Path) -> dict:
+def load_search_gene_lengths(search_dir: Path, family_info: dict | None = None) -> dict:
     """Return {gene_id: protein_length} from *.seqs.fasta.fai sidecar files."""
     lengths: dict = {}
     if not search_dir.is_dir():
         return lengths
     for fai_file in sorted(search_dir.glob("*.seqs.fasta.fai")):
+        track = fai_file.name[: -len(".seqs.fasta.fai")]
+        parts = track.split(".", 1)
+        if len(parts) < 2:
+            continue
+        pref, family = parts
+        if not _family_info_allows(pref, family, family_info):
+            continue
         try:
             with open(fai_file) as fh:
                 for line in fh:
@@ -195,7 +217,7 @@ def load_search_gene_lengths(search_dir: Path) -> dict:
     return lengths
 
 
-def load_gene_to_hg_map(cluster_dir: Path) -> tuple[dict, dict]:
+def load_gene_to_hg_map(cluster_dir: Path, family_info: dict | None = None) -> tuple[dict, dict]:
     """Return ({gene_id: hg_id}, {hg_id: size}) from cluster FASTA files."""
     gene_to_hg: dict = {}
     hg_sizes: dict = {}
@@ -203,6 +225,12 @@ def load_gene_to_hg_map(cluster_dir: Path) -> tuple[dict, dict]:
         return gene_to_hg, hg_sizes
     for fasta_file in sorted(cluster_dir.glob("*.fasta")):
         hg_id = fasta_file.stem
+        parts = hg_id.split(".", 2)
+        if len(parts) < 3:
+            continue
+        pref, family, _ = parts
+        if not _family_info_allows(pref, family, family_info):
+            continue
         size = 0
         try:
             with open(fasta_file) as fh:
@@ -220,7 +248,7 @@ def load_gene_to_hg_map(cluster_dir: Path) -> tuple[dict, dict]:
     return gene_to_hg, hg_sizes
 
 
-def build_exact_domain_catalog(search_dir: Path, gene_lengths: dict) -> dict:
+def build_exact_domain_catalog(search_dir: Path, gene_lengths: dict, family_info: dict | None = None) -> dict:
     """Return a compact per-protein catalog from *.domains_ummerged.csv and *.domains.csv."""
     if not search_dir.is_dir():
         return {
@@ -235,6 +263,12 @@ def build_exact_domain_catalog(search_dir: Path, gene_lengths: dict) -> dict:
     merged_ranges: dict = defaultdict(dict)
     for merged_file in sorted(search_dir.glob("*.domains.csv")):
         track = merged_file.name[: -len(".domains.csv")]
+        parts = track.split(".", 1)
+        if len(parts) < 2:
+            continue
+        pref, family = parts
+        if not _family_info_allows(pref, family, family_info):
+            continue
         try:
             with open(merged_file) as fh:
                 for line in fh:
@@ -272,6 +306,12 @@ def build_exact_domain_catalog(search_dir: Path, gene_lengths: dict) -> dict:
     gene_tracks: dict = defaultdict(list)
     for ummerged_file in sorted(search_dir.glob("*.domains_ummerged.csv")):
         track = ummerged_file.name[: -len(".domains_ummerged.csv")]
+        parts = track.split(".", 1)
+        if len(parts) < 2:
+            continue
+        pref, family = parts
+        if not _family_info_allows(pref, family, family_info):
+            continue
         per_gene_hits: dict = defaultdict(list)
         try:
             with open(ummerged_file) as fh:
@@ -384,7 +424,7 @@ def _normalize_architecture_hits(hits: list[dict]) -> list[dict]:
     return kept
 
 
-def build_domain_architecture_catalog(search_dir: Path, gene_lengths: dict, gene_to_hg: dict, hg_sizes: dict) -> dict:
+def build_domain_architecture_catalog(search_dir: Path, gene_lengths: dict, gene_to_hg: dict, hg_sizes: dict, family_info: dict | None = None) -> dict:
     """Return a compact family-centric catalog of exact-hit domain architectures."""
     empty = {
         "families": [],
@@ -401,6 +441,12 @@ def build_domain_architecture_catalog(search_dir: Path, gene_lengths: dict, gene
     shared_domains: dict = defaultdict(set)
     for ummerged_file in sorted(search_dir.glob("*.domains_ummerged.csv")):
         family = ummerged_file.name[: -len(".domains_ummerged.csv")]
+        parts = family.split(".", 1)
+        if len(parts) < 2:
+            continue
+        pref, fam_name = parts
+        if not _family_info_allows(pref, fam_name, family_info):
+            continue
         try:
             with open(ummerged_file) as fh:
                 for line in fh:
@@ -683,6 +729,8 @@ def build_family_records(search_dir: Path, family_info: dict) -> list:
         if len(parts) < 2:
             continue
         pref, family = parts[0], parts[1]
+        if not _family_info_allows(pref, family, family_info):
+            continue
         genes = []
         try:
             with open(genes_file) as fh:
@@ -722,6 +770,8 @@ def build_hg_records(cluster_dir: Path, family_info: dict) -> list:
         if len(parts) < 3:
             continue
         pref, family, hg_id = parts
+        if not _family_info_allows(pref, family, family_info):
+            continue
         sp_counts = parse_fasta_species(fasta_file)
         if not sp_counts:
             continue
@@ -835,12 +885,18 @@ def load_og_csv(csv_path: Path) -> tuple[dict, dict]:
     return dict(og_members), gene_meta
 
 
-def load_gene_lengths(cluster_dir: Path) -> dict:
+def load_gene_lengths(cluster_dir: Path, family_info: dict | None = None) -> dict:
     """Return {gene_id: protein_length} from cluster FASTAs."""
     lengths: dict = {}
     if not cluster_dir.is_dir():
         return lengths
     for fasta_file in sorted(cluster_dir.glob("*.fasta")):
+        parts = fasta_file.stem.split(".", 2)
+        if len(parts) < 3:
+            continue
+        pref, family, _ = parts
+        if not _family_info_allows(pref, family, family_info):
+            continue
         try:
             with open(fasta_file) as fh:
                 gene_id = None
@@ -863,7 +919,7 @@ def load_gene_lengths(cluster_dir: Path) -> dict:
     return lengths
 
 
-def load_possvm_trees(possvm_dir: Path, source: str = "generax") -> tuple[list, list, dict]:
+def load_possvm_trees(possvm_dir: Path, source: str = "generax", family_info: dict | None = None) -> tuple[list, list, dict]:
     """Return (tree_records, all_species, gene_meta).  source='generax' or 'prev'."""
     try:
         from ete3 import Tree  # type: ignore
@@ -893,6 +949,8 @@ def load_possvm_trees(possvm_dir: Path, source: str = "generax") -> tuple[list, 
             prefix, family, hg = parts[0], parts[1], stem
         else:
             prefix, family, hg = stem, "", stem
+        if not _family_info_allows(prefix, family, family_info):
+            continue
 
         try:
             t = Tree(str(nwk), format=1)
@@ -990,24 +1048,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <title>Step 2 Report</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html{height:100%;height:-webkit-fill-available}
-body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:12px;background:#f7f7f7;color:#333;display:flex;flex-direction:column}
+body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"IBM Plex Sans","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:12px;background:#f7f7f7;color:#333;display:flex;flex-direction:column}
 
 /* ── shared header bar ── */
-.top-bar{padding:8px 14px;background:#2c3e50;color:#ecf0f1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:42px}
+.top-bar{padding:8px 14px;background:linear-gradient(180deg,#334a5e 0%,#2c3e50 100%);border-bottom:2px solid #f59e0b;color:#ecf0f1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:42px}
 .top-bar h2{font-size:14px;font-weight:600;white-space:nowrap}
-.top-bar .btn{padding:3px 10px;border:1px solid #7f8c8d;border-radius:3px;background:transparent;color:#ecf0f1;cursor:pointer;font-size:11px}
+.top-bar .btn{padding:3px 10px;border:1px solid #7f8c8d;border-radius:5px;background:transparent;color:#ecf0f1;cursor:pointer;font-size:11px}
 .top-bar .btn:hover{background:#34495e}
-.top-bar select{font-size:11px;padding:2px 5px;border:1px solid #7f8c8d;border-radius:3px;background:#34495e;color:#ecf0f1}
+.top-bar select{font-size:11px;padding:2px 5px;border:1px solid #7f8c8d;border-radius:5px;background:#34495e;color:#ecf0f1}
 .top-bar label{font-size:11px;color:#bdc3c7}
 
 /* ── Tab strip ── */
 #body-wrap{display:flex;flex:1;overflow:hidden;min-height:0}
 #tab-strip{width:36px;display:flex;flex-direction:column;background:#2c3e50;gap:2px;padding-top:4px;flex-shrink:0}
-.tab-btn{writing-mode:vertical-rl;transform:rotate(180deg);padding:10px 6px;cursor:pointer;background:transparent;border:none;border-left:3px solid transparent;color:#95a5a6;font-size:11px;font-weight:600;white-space:nowrap;text-align:center}
-.tab-btn.active{color:#ecf0f1;border-left-color:#1abc9c;background:#34495e}
+.tab-btn{writing-mode:vertical-rl;transform:rotate(180deg);padding:10px 6px;cursor:pointer;background:transparent;border:none;border-left:4px solid transparent;color:#95a5a6;font-size:11px;font-weight:600;white-space:nowrap;text-align:center}
+.tab-btn.active{color:#ecf0f1;border-left-color:#f59e0b;background:#34495e}
 .tab-btn:hover:not(.active){color:#ecf0f1;background:#3d5166}
 .tab-pane{display:none;flex:1;overflow:hidden;flex-direction:column;min-height:0}
 .tab-pane.active{display:flex}
@@ -1015,8 +1075,32 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 /* ── Species tree pane ── */
 #pane-sptree{flex-direction:column}
 #sptree-controls{display:flex;align-items:center;gap:12px;padding:6px 14px;background:#f5f5f5;border-bottom:1px solid #ddd;flex-shrink:0}
-#sp-tree-wrap{flex:1;overflow:auto;background:#fff;padding:16px}
+#sptree-layout{display:flex;flex:1;min-height:0;overflow:hidden}
+#sp-tree-wrap{flex:2 1 0;overflow:auto;background:#fff;padding:16px;border-right:1px solid #ddd;min-width:0}
 #sp-tree-wrap svg{display:block}
+#sp-info-panel{flex:1 1 0;min-width:280px;max-width:38%;background:#fbfbfb;overflow:auto;padding:18px 20px;display:flex;flex-direction:column;gap:16px}
+#sp-info-panel .sp-info-empty{margin:auto 0;color:#7d8b99;line-height:1.6}
+#sp-info-panel .sp-info-image{width:100%;max-width:260px;max-height:220px;object-fit:contain;align-self:center;border-radius:8px;background:#fff;border:1px solid #e3e7eb;padding:10px}
+#sp-info-panel .sp-info-head{display:flex;flex-direction:column;gap:6px}
+#sp-info-panel .sp-info-code{font-size:22px;font-weight:700;line-height:1.1}
+#sp-info-panel .sp-info-name{font-size:14px;color:#4c5a67;font-style:italic}
+#sp-info-panel .sp-info-group{display:inline-flex;align-items:center;gap:8px;width:max-content;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:600;color:#fff}
+#sp-info-panel .sp-info-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+#sp-info-panel .sp-info-stat{background:#fff;border:1px solid #e3e7eb;border-radius:8px;padding:10px 12px}
+#sp-info-panel .sp-info-stat-label{display:block;font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:#7b8794;margin-bottom:6px}
+#sp-info-panel .sp-info-stat-value{display:block;font-size:20px;font-weight:700;color:#1f2d3a}
+#sp-info-panel .sp-info-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#sp-info-panel .sp-info-download{padding:8px 12px;border:1px solid #4a90d9;border-radius:6px;background:#f0f6ff;color:#255b8f;font-size:12px;font-weight:600;cursor:pointer}
+#sp-info-panel .sp-info-color{display:flex;align-items:center;gap:8px;font-size:11px;color:#536171}
+#sp-info-panel .sp-info-note{font-size:11px;color:#6b7785;line-height:1.5}
+#sp-info-panel .sp-info-downloads{display:flex;flex-direction:column;gap:8px}
+#sp-info-panel .sp-info-download-grid{display:flex;flex-direction:column;gap:6px}
+#sp-info-panel .sp-info-download-title{font-size:11px;font-weight:700;color:#304050}
+@media (max-width: 960px){
+  #sptree-layout{flex-direction:column}
+  #sp-tree-wrap{border-right:none;border-bottom:1px solid #ddd}
+  #sp-info-panel{max-width:none;min-height:220px}
+}
 
 /* ── Heatmap pane ── */
 #pane-heatmap{flex-direction:row}
@@ -1036,16 +1120,16 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 #pane-align{flex-direction:row}
 #aln-sidebar{flex:0 0 220px;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fff;overflow:hidden}
 #aln-sidebar-top{padding:8px;border-bottom:1px solid #eee;flex-shrink:0}
-#aln-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}
+#aln-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:5px;box-sizing:border-box}
 #aln-list{flex:1;overflow-y:auto}
 #aln-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 #pane-proteins{flex-direction:row}
 #prot-sidebar{flex:0 0 250px;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fff;overflow:hidden}
 #prot-sidebar-top{padding:8px;border-bottom:1px solid #eee;display:flex;flex-direction:column;gap:6px}
-#prot-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}
+#prot-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:5px;box-sizing:border-box}
 #prot-count{font-size:11px;color:#7f8c8d}
 #prot-list{flex:1;overflow-y:auto}
-.prot-item{padding:7px 10px;border-bottom:1px solid #f1f3f5;cursor:pointer;font-size:11px;color:#2c3e50;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.prot-item{padding:7px 10px;border-bottom:1px solid #f1f3f5;cursor:pointer;font-size:11px;color:#2c3e50;font-family:"IBM Plex Mono",monospace;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .prot-item:hover{background:#f8fbff}
 .prot-item.active{background:#eaf3ff;color:#144a75;font-weight:600}
 .prot-badge{font-size:10px;color:#7f8c8d;background:#f3f5f7;border:1px solid #d8dde3;border-radius:999px;padding:1px 6px;white-space:nowrap}
@@ -1099,7 +1183,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 #arch-fam-sidebar{flex:0 0 240px;border-right:1px solid #ccc}
 #arch-list-sidebar{flex:0 0 280px;border-right:1px solid #ccc}
 #arch-fam-top,#arch-list-top{padding:8px;border-bottom:1px solid #eee;display:flex;flex-direction:column;gap:6px}
-#arch-family-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}
+#arch-family-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:5px;box-sizing:border-box}
 #arch-family-count,#arch-arch-count{font-size:11px;color:#7f8c8d}
 #arch-family-list,#arch-arch-list{flex:1;overflow-y:auto}
 .arch-item{padding:7px 10px;border-bottom:1px solid #f1f3f5;cursor:pointer;font-size:11px;color:#2c3e50;display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -1140,20 +1224,26 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .arch-hg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 9px;border:1px solid #d7dde5;border-radius:8px;background:#f8fafc;cursor:pointer}
 .arch-hg-row:hover{background:#edf5ff;border-color:#b8cde5}
 .arch-hg-main{display:flex;flex-direction:column;gap:2px;min-width:0}
-.arch-hg-title{font-size:11px;font-weight:700;color:#234}
+.arch-hg-title{font-size:11px;font-weight:700;color:#234;font-family:"IBM Plex Mono",monospace}
 .arch-hg-meta{font-size:10px;color:#6d7c8a}
 .arch-hg-badges{display:flex;align-items:center;gap:6px;flex:0 0 auto}
 .arch-share-badge{font-size:10px;color:#35506a;background:#eef3f8;border:1px solid #c9d4df;border-radius:999px;padding:1px 6px;white-space:nowrap;font-weight:700}
 #arch-singletons-wrap{display:flex;align-items:center;gap:6px;font-size:11px;color:#506070}
 #aln-controls{flex-shrink:0;padding:6px 12px;background:#f5f5f5;border-bottom:1px solid #ddd;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-#aln-viewer{flex:1;display:none;grid-template-columns:220px 5px 1fr;grid-template-rows:24px 1fr;overflow:hidden;background:#fff;min-height:0}
-#aln-corner{grid-column:1;grid-row:1;background:#f0f0f0;border-right:1px solid #ccc;border-bottom:1px solid #ccc;position:relative;overflow:hidden;z-index:4}
-.aln-col-header{position:absolute;top:0;height:100%;display:flex;align-items:center;justify-content:flex-start;padding:0 6px;box-sizing:border-box;color:#44515e;font-size:10px;font-weight:700;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid #d9d9d9;background:rgba(255,255,255,.55);user-select:none}
+#aln-viewer{flex:1;display:none;grid-template-columns:220px 5px 1fr;grid-template-rows:30px 1fr;overflow:hidden;background:#fff;min-height:0}
+#aln-corner{grid-column:1;grid-row:1;background:linear-gradient(180deg,#f7f9fb 0%,#edf2f6 100%);border-right:1px solid #c9d2db;border-bottom:1px solid #c9d2db;position:relative;overflow:hidden;z-index:4}
+.aln-col-header{position:absolute;top:0;height:100%;display:flex;align-items:center;justify-content:flex-start;padding:0 12px 0 8px;box-sizing:border-box;color:#3f4f5f;font-size:10px;font-weight:700;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid #d7dee6;background:rgba(255,255,255,.58);user-select:none}
 .aln-col-header.drag{cursor:grab}
+.aln-col-header.drag:hover{background:rgba(232,241,252,.92);color:#1f4f80}
+.aln-col-header.static{background:rgba(245,247,250,.72);color:#5e6c7a}
+.aln-col-header.active-drop{box-shadow:inset 2px 0 0 #2f80ed}
+.aln-col-header-resizer{position:absolute;top:0;right:-4px;width:10px;height:100%;cursor:col-resize;z-index:2}
+.aln-col-header-resizer::before{content:"";position:absolute;top:6px;bottom:6px;left:4px;width:2px;border-radius:2px;background:#aab4bf}
+.aln-col-header-resizer:hover::before,.aln-col-header-resizer.dragging::before{background:#4f6f8f}
 #aln-resize-bar{grid-column:2;grid-row:1/3;background:#e8e8e8;border-left:1px solid #ccc;border-right:1px solid #ccc;cursor:col-resize;z-index:2}
 #aln-resize-bar:hover,#aln-resize-bar.dragging{background:#bbb}
-#aln-tree-resize-bar,#aln-ref-resize-bar,#aln-species-resize-bar,#aln-mrca-resize-bar,#aln-range-resize-bar{position:absolute;top:0;bottom:0;width:5px;background:#e8e8e8;border-left:1px solid #ccc;border-right:1px solid #ccc;cursor:col-resize;z-index:3}
-#aln-tree-resize-bar:hover,#aln-tree-resize-bar.dragging,#aln-ref-resize-bar:hover,#aln-ref-resize-bar.dragging,#aln-species-resize-bar:hover,#aln-species-resize-bar.dragging,#aln-mrca-resize-bar:hover,#aln-mrca-resize-bar.dragging,#aln-range-resize-bar:hover,#aln-range-resize-bar.dragging{background:#bbb}
+#aln-tree-resize-bar,#aln-ref-resize-bar,#aln-species-resize-bar,#aln-mrca-resize-bar,#aln-range-resize-bar{position:absolute;top:0;bottom:0;width:9px;background:rgba(232,232,232,.72);border-left:1px solid #ccc;border-right:1px solid #ccc;cursor:col-resize;z-index:3}
+#aln-tree-resize-bar:hover,#aln-tree-resize-bar.dragging,#aln-ref-resize-bar:hover,#aln-ref-resize-bar.dragging,#aln-species-resize-bar:hover,#aln-species-resize-bar.dragging,#aln-group-resize-bar:hover,#aln-group-resize-bar.dragging,#aln-mrca-resize-bar:hover,#aln-mrca-resize-bar.dragging,#aln-range-resize-bar:hover,#aln-range-resize-bar.dragging{background:#bbb}
 #aln-ruler-wrap{grid-column:3;grid-row:1;overflow:hidden;border-bottom:1px solid #ccc;background:#f8f8f8;position:relative}
 #aln-names-wrap{grid-column:1;grid-row:2;overflow-y:auto;overflow-x:hidden;border-right:1px solid #ccc;background:#fafafa;position:relative}
 #aln-names-wrap::-webkit-scrollbar{width:10px;height:10px}
@@ -1166,7 +1256,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 /* sidebar */
 #sidebar{flex:0 0 220px;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fff}
 #sidebar-top{padding:8px;border-bottom:1px solid #eee}
-#hg-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:3px}
+#hg-search{width:100%;padding:5px 7px;font-size:11px;border:1px solid #ccc;border-radius:5px}
 #hg-count{font-size:10px;color:#999;margin-top:4px}
 #hg-list{flex:1;overflow-y:auto}
 .fam-header{padding:5px 8px;background:#ecf0f1;border-bottom:1px solid #ddd;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#444;user-select:none}
@@ -1175,13 +1265,52 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .fam-header.open .fam-arrow{transform:rotate(90deg)}
 .fam-body{display:none}
 .fam-body.open{display:block}
-.hg-item{padding:5px 10px 5px 16px;cursor:pointer;border-bottom:1px solid #f0f0f0;line-height:1.35}
+.fam-toggle-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid #c7d3df;border-radius:4px;background:#fff;color:#4d6174;font-size:10px;cursor:pointer;vertical-align:middle;margin-right:6px}
+.fam-toggle-btn:hover{background:#edf4fb}
+.fam-link-btn{border:none;background:none;padding:0;color:#2980b9;cursor:pointer;font:inherit;text-decoration:underline}
+.fam-link-btn:hover{color:#1b5f8a}
+.fam-search-wrap{position:relative;display:inline-block}
+.fam-search-dd{display:none;position:absolute;top:100%;left:0;z-index:520;background:#fff;border:1px solid #ccd6e0;border-radius:0 0 8px 8px;max-height:280px;overflow-y:auto;min-width:420px;box-shadow:0 8px 18px rgba(20,30,40,.14);font-size:11px}
+.fam-search-sec{padding:6px 10px 4px;font-size:10px;font-weight:700;letter-spacing:.05em;color:#7a8896;text-transform:uppercase;background:#f7fafc;border-bottom:1px solid #eef3f7}
+.fam-search-hit{padding:7px 10px;border-bottom:1px solid #eef3f7;cursor:pointer}
+.fam-search-hit:hover,.fam-search-hit.active{background:#eef6ff}
+.fam-search-hit-main{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.fam-search-hit-og{font-weight:700;color:#243746}
+.fam-search-hit-meta{font-size:10px;color:#7b8a97;margin-top:2px}
+.fam-search-hit-badge{font-variant-numeric:tabular-nums;color:#506677}
+.fam-detail-cell{padding:0 !important;background:#fbfdff;border-bottom:1px solid #e4ebf2}
+.fam-detail-wrap{padding:10px 12px 12px 40px}
+.fam-detail-head,.fam-hg-row{display:grid;grid-template-columns:minmax(240px,1.8fr) 92px 92px 150px;gap:10px;align-items:center}
+.fam-og-row{display:grid;grid-template-columns:minmax(180px,1.3fr) 78px 78px minmax(120px,1fr) minmax(220px,1.8fr);gap:10px;align-items:center}
+.fam-detail-head{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#708090;padding:2px 8px 6px;border-bottom:1px solid #dbe4ed}
+.fam-hg-row{padding:8px;border-bottom:1px solid #edf2f6;background:#fff}
+.fam-hg-row:nth-child(even){background:#f9fbfd}
+.fam-og-wrap{padding:2px 0 8px 30px}
+.fam-og-row{padding:7px 8px;border-bottom:1px solid #f0f3f6;background:#fcfdff;cursor:pointer}
+.fam-og-row:hover{background:#eef6ff}
+.fam-og-row.match{background:#fff8da}
+.fam-og-row.focus{background:#ffe79f;box-shadow:inset 3px 0 0 #d99b00}
+.fam-label-main{display:flex;align-items:center;gap:6px;min-width:0}
+.fam-label-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fam-meta-note{font-size:10px;color:#7b8a97}
+.fam-num{font-variant-numeric:tabular-nums;text-align:right;color:#324657}
+.fam-num-muted{color:#8c98a4}
+.fam-og-mrca{font-size:10px;color:#566676;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fam-arch-cell{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.fam-arch-cell .arch-chip-list{min-width:0;overflow:hidden;flex-wrap:nowrap}
+.fam-arch-cell .arch-domain-chip{max-width:180px}
+.fam-arch-badge{flex:0 0 auto;font-size:10px;color:#6d7d8b;background:#eef3f7;border:1px solid #d4dde6;border-radius:999px;padding:2px 7px;font-variant-numeric:tabular-nums}
+.fam-og-count-pair{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end}
+.fam-og-count-pair .gr{color:#2a6fa8;font-weight:600}
+.fam-og-count-pair .iq{color:#8b6b2e;font-weight:600}
+.fam-empty-note{padding:10px 8px;color:#8a97a1;font-size:11px}
+.hg-item{padding:5px 10px 5px 16px;cursor:pointer;border-bottom:1px solid #f0f0f0;line-height:1.35;font-family:"IBM Plex Mono",monospace}
 .hg-item:hover{background:#f5f5f5}
-.hg-item.selected{background:#d5f5e3;border-left:3px solid #1abc9c;padding-left:13px}
+.hg-item.selected{background:#fef3c7;border-left:3px solid #f59e0b;padding-left:13px}
 .hg-item .hg-name{font-weight:600;font-size:11px}
 .hg-item .hg-meta{font-size:10px;color:#888}
 .hg-cov{height:3px;background:#e8e8e8;border-radius:2px;margin:3px 0 1px}
-.hg-cov-bar{height:3px;background:#1abc9c;border-radius:2px}
+.hg-cov-bar{height:3px;background:#f59e0b;border-radius:2px}
 .src-badge{font-size:8px;padding:1px 4px;border-radius:3px;background:#dceeff;color:#2a6fa8;font-weight:600;margin-left:5px;vertical-align:middle;letter-spacing:0.02em}
 
 /* main tree panel */
@@ -1203,12 +1332,12 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .ctrl-subtle{font-size:10px;color:#8b98a3}
 .ctrl-grp-label{font-size:9px;font-weight:700;color:#aaa;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;cursor:default;user-select:none}
 .ctrl-sep{width:1px;height:16px;background:#ddd;align-self:center;flex-shrink:0}
-.ctrl-btn{padding:3px 9px;border:1px solid #bbb;border-radius:3px;cursor:pointer;background:#fff;font-size:11px}
+.ctrl-btn{padding:3px 9px;border:1px solid #bbb;border-radius:5px;cursor:pointer;background:#fff;font-size:11px}
 .ctrl-btn:hover{background:#eee}
 #tree-title{font-size:11px;color:#555;margin-left:4px}
 #n-ogs-label{font-size:10px;color:#888}
-#hl-search{font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px;width:180px}
-#hl-clear{padding:2px 6px;border:1px solid #bbb;border-radius:3px;cursor:pointer;background:#fff;font-size:11px}
+#hl-search{font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:5px;width:180px}
+#hl-clear{padding:2px 6px;border:1px solid #bbb;border-radius:5px;cursor:pointer;background:#fff;font-size:11px}
 #hl-clear:hover{background:#eee}
 #hl-tags{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
 .hl-tag{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:10px;color:#fff;white-space:nowrap;cursor:default}
@@ -1232,9 +1361,9 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 .node-g circle:hover{stroke-width:2.5px !important}
 .col-tri{stroke:#222;cursor:pointer}
 .col-tri:hover{filter:brightness(0.88)}
-.leaf-label{font-family:monospace}
+.leaf-label{font-family:"IBM Plex Mono",monospace}
 .og-label{fill:#b5371f}
-.ctrl-btn.active-btn{background:#d5f5e3;border-color:#1abc9c;color:#1a6b4a}
+.ctrl-btn.active-btn{background:#fef3c7;border-color:#f59e0b;color:#92400e}
 .scale-bar-g line{stroke:#999;stroke-width:1.5px}
 .scale-bar-g text{font-size:9px;fill:#888;text-anchor:middle}
 
@@ -1244,16 +1373,16 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
 #mini-sp-panel svg text.msp-node-lbl{cursor:pointer;fill:#2980b9;font-size:10px}
 #mini-sp-panel svg text.msp-node-lbl:hover{fill:#e74c3c}
 /* tooltip */
-#tooltip{position:fixed;display:none;pointer-events:none;background:rgba(255,255,255,.97);border:1px solid #bbb;border-radius:5px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:100;max-width:min(920px,calc(100vw - 40px));max-height:min(85vh,900px);overflow:auto}
+#tooltip{position:fixed;display:none;pointer-events:none;background:rgba(255,255,255,.97);border:1px solid #d0d7df;border-radius:10px;padding:8px 10px;font-size:11px;box-shadow:0 6px 24px rgba(0,0,0,.16),0 1px 4px rgba(0,0,0,.08);z-index:100;max-width:min(920px,calc(100vw - 40px));max-height:min(85vh,900px);overflow:auto}
 /* collapsed-node popup */
 #collapsed-popup{position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:10px 12px;font-size:11px;box-shadow:0 3px 10px rgba(0,0,0,.2);z-index:200;min-width:230px}
 #collapsed-popup .cp-title{font-weight:700;margin-bottom:7px;font-size:12px;color:#333}
 #collapsed-popup .cp-row{display:flex;align-items:center;gap:6px;margin-bottom:5px}
-#collapsed-popup .cp-row input{flex:1;font-size:11px;padding:2px 5px;border:1px solid #ccc;border-radius:3px}
+#collapsed-popup .cp-row input{flex:1;font-size:11px;padding:2px 5px;border:1px solid #ccc;border-radius:5px}
 #collapsed-popup .cp-genes-label{font-size:10px;color:#888;margin-bottom:2px}
 #collapsed-popup textarea{width:100%;height:80px;font-size:9px;font-family:monospace;resize:vertical;border:1px solid #ddd;border-radius:3px;padding:3px;box-sizing:border-box}
 #collapsed-popup .cp-actions{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
-#collapsed-popup .cp-btn{font-size:10px;padding:3px 8px;border:1px solid #bbb;border-radius:3px;background:#f8f8f8;cursor:pointer}
+#collapsed-popup .cp-btn{font-size:10px;padding:3px 8px;border:1px solid #bbb;border-radius:5px;background:#f8f8f8;cursor:pointer}
 #collapsed-popup .cp-btn:hover{background:#e8e8e8}
 .tt-name{font-weight:700;margin-bottom:4px;font-size:12px}
 .tt-row{display:flex;justify-content:space-between;gap:10px;color:#555;margin-top:2px}
@@ -1471,8 +1600,8 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
                 </label>
                 <label class="ctrl-field" title="Horizontal branch-length multiplier — increase to extend branches">
                   Width:
-                  <input type="range" id="tree-width-slider" min="0.3" max="4" step="0.1" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
-                  <span id="tree-width-val" style="width:24px;text-align:right">1.0</span>&times;
+                  <input type="range" id="tree-width-slider" min="0.3" max="4" step="0.1" value="0.5" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+                  <span id="tree-width-val" style="width:24px;text-align:right">0.5</span>&times;
                 </label>
                 <label class="ctrl-field" title="Vertical space (as a fraction of normal row height) reserved for collapsed OG triangles">
                   Collapsed:
@@ -1500,7 +1629,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
                   <input id="hl-search" list="hl-list" placeholder="Species… (Enter)" title="Type a species name and press Enter to highlight it">
                   <datalist id="hl-list"></datalist>
                   <button id="hl-clear" onclick="clearHighlight()" title="Remove all species highlights">&#10005;</button>
-                  <button class="ctrl-btn" id="btn-mini-sp" onclick="toggleMiniSpPanel(event)" title="Open a mini species tree — click a named node to highlight that entire clade at once">&#x1F333; Species tree</button>
+                  <button class="ctrl-btn" id="btn-mini-sp" data-mini-sp-btn="tree" onclick="toggleMiniSpPanel(event,'tree')" title="Open a mini species tree — click a named node to highlight that entire clade at once">&#x1F333; Species tree</button>
                   <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips, keeping only the relevant subtree visible">Focus</button>
                 </div>
                 <div id="hl-tags"></div>
@@ -1529,9 +1658,12 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   <!-- ── Families pane ── -->
   <div class="tab-pane" id="pane-families" style="flex-direction:column;overflow:hidden">
     <div id="fam-controls" style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:#fafafa;border-bottom:1px solid #ddd;flex-shrink:0;flex-wrap:wrap">
-      <input id="fam-search" type="text" placeholder="&#128269; Search family, PFAM domain, category&#8230;" autocomplete="off"
-        style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;width:280px"
-        oninput="filterFamilyTable(this.value)">
+      <div class="fam-search-wrap">
+        <input id="fam-search" type="text" placeholder="&#128269; Search family, PFAM domain, category, OG&#8230;" autocomplete="off"
+          style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;width:320px"
+          oninput="filterFamilyTable(this.value)" onkeydown="famSearchKey(event)">
+        <div id="fam-search-dd" class="fam-search-dd"></div>
+      </div>
       <span id="fam-count" style="font-size:11px;color:#888"></span>
     </div>
     <div id="fam-table-wrap" style="flex:1;overflow:auto;padding:0 12px 12px">
@@ -1568,21 +1700,23 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <input type="range" id="aln-cell-slider" min="4" max="18" step="1" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9" oninput="alnCellW=+this.value;alnCellH=Math.round(alnCellW*1.6);document.getElementById('aln-cell-val').textContent=alnCellW;renderAlignment()">
           <span id="aln-cell-val">9</span>px
         </label>
-        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Domains:
-          <input type="range" id="aln-domain-chip-slider" min="0.6" max="2.2" step="0.1" value="1.0" style="width:78px;cursor:pointer;accent-color:#48a868" oninput="alnSetDomainChipScale(this.value)">
-          <span id="aln-domain-chip-val">1.0</span>x
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Structure Height:
+          <input type="range" id="aln-domain-chip-slider" min="0.6" max="2.2" step="0.1" value="2.0" style="width:78px;cursor:pointer;accent-color:#48a868" oninput="alnSetDomainChipScale(this.value)">
+          <span id="aln-domain-chip-val">2.0</span>x
         </label>
         <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Species:
           <input type="text" id="aln-seq-filter" placeholder="Enter to add…" style="font-size:11px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;width:120px" onkeydown="_alnSpFilterKey(event)">
         </label>
+        <button class="ctrl-btn" id="btn-aln-mini-sp" data-mini-sp-btn="align" onclick="toggleMiniSpPanel(event,'align')" title="Open a mini species tree — click a named node to filter the alignment to that clade">&#x1F333; Species tree</button>
         <span id="aln-sp-tags" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px"></span>
-        <button class="ctrl-btn" onclick="alnToggleBrLen()" id="btn-aln-brlen" title="Toggle branch lengths on/off">Br. len</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleBrLen()" id="btn-aln-brlen" title="Toggle branch lengths on/off">Br. len</button>
         <button class="ctrl-btn active-btn" onclick="alnToggleSeqPanel()" id="btn-aln-seqpanel" title="Show/hide sequence alignment pane">Alignment</button>
         <button class="ctrl-btn" onclick="alnToggleConsensus()" id="btn-aln-cons" title="Show/hide consensus row">Consensus</button>
         <button class="ctrl-btn" onclick="alnToggleCollapseAllOGs()" id="btn-aln-collapse-ogs" title="Collapse all orthogroups to single rows">Collapse OGs</button>
         <button class="ctrl-btn active-btn" onclick="alnToggleSeqId()" id="btn-aln-seqid" title="Show/hide sequence ID column">ID</button>
         <button class="ctrl-btn" onclick="alnToggleRefCol()" id="btn-aln-ref" title="Show/hide reference ortholog name column">Ref</button>
         <button class="ctrl-btn active-btn" onclick="alnToggleSpeciesCol()" id="btn-aln-species" title="Show/hide species column">Species</button>
+        <button class="ctrl-btn" onclick="alnToggleSpeciesGroupCol()" id="btn-aln-species-group" title="Show/hide species-group column" style="display:none">Species Group</button>
         <button class="ctrl-btn active-btn" onclick="alnToggleMrcaCol()" id="btn-aln-mrca" title="Show/hide MRCA clade column">MRCA</button>
         <button class="ctrl-btn active-btn" onclick="alnToggleRangeCol()" id="btn-aln-range" title="Show/hide compact domain-architecture column">Domain Architecture</button>
         <button class="ctrl-btn" onclick="alnToggleSource()" id="btn-aln-src" title="Toggle GeneRax / IQ-TREE tree source" style="display:none">IQ-TREE</button>
@@ -1594,7 +1728,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
         <div id="aln-corner"></div>
         <div id="aln-resize-bar"></div>
         <div id="aln-ruler-wrap"><canvas id="aln-ruler"></canvas></div>
-        <div id="aln-names-wrap" onscroll="_alnSyncFromNamesWrap(this)" onmousemove="_alnHandleNameHover(event)" onmouseleave="_alnHideTip()" onclick="_alnHandleNameClick(event)"><canvas id="aln-names-canvas"></canvas><div id="aln-tree-resize-bar" style="display:none"></div><div id="aln-ref-resize-bar" style="display:none"></div><div id="aln-species-resize-bar" style="display:none"></div><div id="aln-mrca-resize-bar" style="display:none"></div><div id="aln-range-resize-bar" style="display:none"></div></div>
+        <div id="aln-names-wrap" onscroll="_alnSyncFromNamesWrap(this)" onmousemove="_alnHandleNameHover(event)" onmouseleave="_alnHideTip()" onclick="_alnHandleNameClick(event)"><canvas id="aln-names-canvas"></canvas><div id="aln-tree-resize-bar" style="display:none"></div><div id="aln-ref-resize-bar" style="display:none"></div><div id="aln-species-resize-bar" style="display:none"></div><div id="aln-group-resize-bar" style="display:none"></div><div id="aln-mrca-resize-bar" style="display:none"></div><div id="aln-range-resize-bar" style="display:none"></div></div>
         <div id="aln-seq-wrap" onscroll="syncAlnScroll(this)" onclick="_alnHandleSeqClick(event)"><canvas id="aln-seq-canvas"></canvas></div>
       </div>
       <div id="aln-empty">
@@ -1660,12 +1794,14 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
           <option value="viridis">Viridis</option>
           <option value="warm">Warm</option>
           <option value="cool">Cool</option>
-          <option value="tableau">Tableau</option>
+          <option value="tableau" selected>Tableau</option>
           <option value="set3">Set3</option>
         </select>
       </label>
       <span id="sp-palette-preview" style="display:inline-flex;align-items:center;gap:2px;min-height:16px"></span>
       <button class="ctrl-btn" id="btn-sp-apply-palette" onclick="applySelectedSpeciesPalette()" title="Apply the selected multi-colour palette to all species">Apply palette</button>
+      <button class="ctrl-btn active-btn" id="btn-sp-logos" onclick="toggleSpeciesTreeLogos()" title="Show/hide species logos in the species-tree views">Logos</button>
+      <button class="ctrl-btn" id="btn-sp-names" onclick="toggleSpeciesTreeNames()" title="Toggle species labels between prefixes and full names when metadata is available">Names: Prefix</button>
       <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">
         Triangle fill:
         <input type="color" id="col-tri-fill" value="#ffffff" style="width:28px;height:22px;cursor:pointer;border:1px solid #bbb;border-radius:3px;padding:1px">
@@ -1674,15 +1810,14 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
       <button class="ctrl-btn" id="btn-dl-anno" onclick="downloadAnnotations()">&#11015; Annotations TSV</button>
       <button class="ctrl-btn" id="btn-dl-newick" onclick="downloadNewick()">&#11015; Newick</button>
     </div>
-    <div id="sp-tree-wrap"></div>
+    <div id="sptree-layout">
+      <div id="sp-tree-wrap"></div>
+      <aside id="sp-info-panel"></aside>
+    </div>
   </div>
 
 </div>
 
-<div id="sp-annot-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:300;min-width:150px">
-  <div style="font-size:10px;color:#888;margin-bottom:6px;font-weight:600" id="sp-annot-popup-title"></div>
-  <div id="sp-annot-popup-btns" style="display:flex;flex-direction:column;gap:4px"></div>
-</div>
 <div id="hm-open-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:320;min-width:160px">
   <div style="font-size:10px;color:#888;margin-bottom:6px;font-weight:600" id="hm-open-popup-title">Open in</div>
   <div style="display:flex;flex-direction:column;gap:5px">
@@ -1691,7 +1826,7 @@ body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:"Helv
   </div>
 </div>
 <div id="mini-sp-panel">
-  <div class="msp-title">Species tree — click a named node to highlight that clade</div>
+  <div class="msp-title" id="mini-sp-title">Species tree</div>
   <div id="mini-sp-svg-wrap"></div>
 </div>
 <div id="tooltip"></div>
@@ -1970,6 +2105,7 @@ function _speciesVariantAroundBase(base, i, n){
 function refreshSpeciesColorViews(){
   recomputeGroupColors();
   drawSpeciesTree();
+  renderSelectedSpeciesInfo();
   if(document.getElementById("pane-heatmap").classList.contains("active")) drawHeatmap();
   else drawCladogram();
   if(rootNode) renderTree(false);
@@ -2002,12 +2138,49 @@ function updateSpeciesPalettePreview(name){
 
 function applySelectedSpeciesPalette(){
   const sel=document.getElementById("sp-palette-select");
-  applySpeciesPalette(sel?sel.value:"turbo");
+  applySpeciesPalette(sel?sel.value:"tableau");
+}
+
+let selectedSpecies = null;      // selected species shown in the side panel
+let spShowLogos  = true;         // show species logos in species-tree views
+let spShowFullNames = false;     // show full species names in tree labels when available
+
+function updateSpeciesTreeButtonStates(){
+  const logosBtn=document.getElementById("btn-sp-logos");
+  if(logosBtn){
+    logosBtn.classList.toggle("active-btn", !!spShowLogos);
+    logosBtn.style.background = spShowLogos ? '#e8f0fe' : '';
+    logosBtn.style.borderColor = spShowLogos ? '#4a90d9' : '';
+    logosBtn.style.color = spShowLogos ? '#1a56c4' : '';
+    logosBtn.style.fontWeight = spShowLogos ? '600' : '';
+  }
+  const namesBtn=document.getElementById("btn-sp-names");
+  if(namesBtn){
+    namesBtn.textContent = spShowFullNames ? "Names: Full" : "Names: Prefix";
+    namesBtn.classList.toggle("active-btn", !!spShowFullNames);
+    namesBtn.style.background = spShowFullNames ? '#e8f0fe' : '';
+    namesBtn.style.borderColor = spShowFullNames ? '#4a90d9' : '';
+    namesBtn.style.color = spShowFullNames ? '#1a56c4' : '';
+    namesBtn.style.fontWeight = spShowFullNames ? '600' : '';
+  }
+}
+
+function toggleSpeciesTreeLogos(){
+  spShowLogos = !spShowLogos;
+  updateSpeciesTreeButtonStates();
+  drawSpeciesTree();
+}
+
+function toggleSpeciesTreeNames(){
+  spShowFullNames = !spShowFullNames;
+  updateSpeciesTreeButtonStates();
+  drawSpeciesTree();
 }
 
 (function(){
-  applySpeciesPalette("turbo", false);
+  applySpeciesPalette("tableau", false);
   recomputeGroupColors();
+  updateSpeciesTreeButtonStates();
 })();
 
 // ── Stable IDs for SP_TREE_DATA nodes (allows editing original by reference) ──
@@ -2065,7 +2238,7 @@ let showOGLabels   = false;       // toggle OG-node labels on expanded internals
 let tipFontSize    = null;        // null = auto; number = user override (px)
 let treeLinkWidth  = 1.3;        // branch stroke-width in screen px
 let treeHeightMult = 1.0;        // vertical stretch multiplier for the tree
-let treeWidthMult  = 1.0;        // horizontal stretch multiplier for the tree
+let treeWidthMult  = 0.5;        // horizontal stretch multiplier for the tree
 let showGeneId    = false;       // tip label parts
 let showOGName    = false;
 let showRefOrtho  = false;
@@ -2142,6 +2315,8 @@ function leafLabelParts(d){
 }
 
 function treeLabelFontSVG(){ return (ogHlSet!==null ? 2 : 1) * tipFontSVG(); }
+function cladeHighlightLabelFontSVG(){ return treeLabelFontSVG(); }
+function cladeHighlightSubtitleFontSVG(){ return Math.max(7, cladeHighlightLabelFontSVG()*0.82); }
 
 function computeLeafLabelLayout(leaves){
   const fs=treeLabelFontSVG();
@@ -2328,6 +2503,7 @@ let hmActiveClass  = null;
 let hmActiveFamily = null;
 let hmActiveHG     = null;   // id string from HG_DATA
 let hmActiveHGRec  = null;   // full HG_DATA record (for fallback lookup)
+let hmFocusedOG    = null;   // {hgId, ogId} when opening a single OG counts view
 let hmColSortSp    = null;   // sort heatmap columns by this species' count (descending)
 let hmCustomOGs    = [];     // user-selected individual OG names for custom view
 let hmCustomGroups = [];     // bulk selections: [{type:"class"|"family", key, label, ogs:[...]}]
@@ -2411,6 +2587,7 @@ function switchTab(name) {
   } else if (name==="sptree") {
     tc.style.display = "none"; pfx.style.display = "none";
     drawSpeciesTree();
+    renderSelectedSpeciesInfo();
   } else if (name==="families") {
     tc.style.display = "none"; pfx.style.display = "none";
     hb.style.display = "none"; cr.textContent = "";
@@ -2970,13 +3147,52 @@ function _proteinEntry(gid) {
   };
 }
 
+function _proteinFamilyToken(family) {
+  const fam = String(family || '').trim();
+  if (!fam) return '';
+  const parts = fam.split('.');
+  return parts.length > 1 ? parts.slice(1).join('.') : fam;
+}
+
+function _proteinFamilyMatches(trackFamily, family) {
+  const trackFam = String(trackFamily || '').trim();
+  const fam = String(family || '').trim();
+  if (!trackFam || !fam) return false;
+  if (trackFam === fam) return true;
+  return _proteinFamilyToken(trackFam) === _proteinFamilyToken(fam);
+}
+
 function _proteinTracksForFamily(entry, family) {
   if (!entry || !entry.tracks || !entry.tracks.length) return [];
   const fam = (family || '').trim();
   if (!fam) return entry.tracks.slice();
-  const matched = entry.tracks.filter(track => track.family === fam);
+  const matched = entry.tracks.filter(track => _proteinFamilyMatches(track.family, fam));
   if (matched.length) return matched;
   return entry.tracks.length === 1 ? entry.tracks.slice() : [];
+}
+
+function _proteinTrackArchitectureLabels(track) {
+  return [...(track?.hits || [])]
+    .filter(hit => !!(hit && (hit.name || hit.pfam)))
+    .sort((a, b) =>
+      ((a.start ?? 0) - (b.start ?? 0))
+      || ((a.end ?? 0) - (b.end ?? 0))
+      || String(a.name || a.pfam || '').localeCompare(String(b.name || b.pfam || ''), undefined, {numeric:true, sensitivity:"base"})
+    )
+    .map(hit => hit.name || hit.pfam || 'domain');
+}
+
+function _proteinGeneArchitectureForFamily(gid, family) {
+  const entry = _proteinEntry(gid);
+  if (!entry) return [];
+  const tracks = _proteinTracksForFamily(entry, family);
+  if (!tracks.length) return [];
+  const best = [...tracks].sort((a, b) =>
+    ((b.hits || []).length - (a.hits || []).length)
+    || ((a.rangeStart ?? 0) - (b.rangeStart ?? 0))
+    || String(a.family || '').localeCompare(String(b.family || ''), undefined, {numeric:true, sensitivity:"base"})
+  )[0];
+  return _proteinTrackArchitectureLabels(best);
 }
 
 function _proteinColor(key) {
@@ -3284,8 +3500,8 @@ let _alnRawFasta   = null;
 let alnOgMap       = {};
 let alnTreeOrder   = [];
 let alnTreeDict    = null;
-let alnTreeW       = 80;
-let alnUseBrLen    = false;
+let alnTreeW       = 240;
+let alnUseBrLen    = true;
 let _alnRows       = [];
 let alnSpFilters   = [];   // committed species filter tags
 let alnUseGeneRax  = false;
@@ -3297,17 +3513,27 @@ let alnCollapsedOGs = new Set();
 let alnShowSeqId    = true;
 let alnShowRefCol   = false;
 let alnShowSpeciesCol = true;
+let alnShowSpeciesGroupCol = false;
 let alnShowMrcaCol  = true;
 let alnShowRangeCol = true;
 let alnShowSeqPanel = true;
+let alnOgColW       = 34;
 let alnNameW        = 220;
 let alnRefColW      = 100;
 let alnSpeciesColW  = 110;
+let alnSpeciesGroupColW = 110;
 let alnMrcaColW     = 120;
 let alnRangeColW    = 96;
-let alnDomainChipScale = 1.0;
-let alnMetaColOrder = ['ref', 'species', 'mrca', 'range', 'id'];
+let alnDomainChipScale = 2.0;
+let alnMetaColOrder = ['ref', 'species', 'group', 'mrca', 'range', 'id'];
 let _alnSyncingScroll = false;
+const HAVE_SPECIES_GROUPS = Object.values(SPECIES_GROUPS || {}).some(v => !!(v || '').trim());
+
+(function initAlnSpeciesGroupButton(){
+  const btn = document.getElementById('btn-aln-species-group');
+  if (!btn) return;
+  btn.style.display = HAVE_SPECIES_GROUPS ? '' : 'none';
+})();
 
 const AA_COLORS = {
   A:'#C8C8C8',V:'#C8C8C8',I:'#C8C8C8',L:'#C8C8C8',M:'#C8C8C8',
@@ -3392,6 +3618,42 @@ function _alnApplyTreeSource() {
   }
 }
 
+function _alnHasGeneRaxSource() {
+  return !!(_alnTreeDataCache && _alnTreeDataCache.tree);
+}
+
+function _alnHasPrevSource() {
+  return !!(_alnTreeDataCache && _alnTreeDataCache.prev_tree);
+}
+
+function _alnSyncSourceButton() {
+  const btn = document.getElementById('btn-aln-src');
+  if (!btn) return;
+  const hasBoth = _alnHasGeneRaxSource() && _alnHasPrevSource();
+  btn.style.display = hasBoth ? '' : 'none';
+  btn.textContent = alnUseGeneRax ? 'GeneRax' : 'IQ-TREE';
+  btn.style.background = alnUseGeneRax ? '#e8f0fe' : '#fff';
+  btn.style.color = alnUseGeneRax ? '#1a56c4' : '#555';
+  btn.style.borderColor = alnUseGeneRax ? '#1a56c4' : '#888';
+  btn.style.fontWeight = alnUseGeneRax ? '600' : '';
+}
+
+function _alnSetSourcePreference(source=null) {
+  const hasGeneRax = _alnHasGeneRaxSource();
+  const hasPrev = _alnHasPrevSource();
+  if (source === 'generax') {
+    alnUseGeneRax = hasGeneRax || !hasPrev;
+  } else if (source === 'prev') {
+    alnUseGeneRax = hasPrev ? false : !!hasGeneRax;
+  } else if (hasGeneRax && !hasPrev) {
+    alnUseGeneRax = true;
+  } else if (!hasGeneRax && hasPrev) {
+    alnUseGeneRax = false;
+  }
+  _alnApplyTreeSource();
+  _alnSyncSourceButton();
+}
+
 function _alnReorderByTree(seqs) {
   if (!alnTreeOrder.length) return seqs;
   const byGene = {};
@@ -3420,6 +3682,31 @@ function _alnGetOgColor(og) {
   return idx >= 0 ? _alnOgPalette[idx % _alnOgPalette.length] : '#ccc';
 }
 
+function _alnDrawOgLabel(ctx, og, x0, y0, w, h) {
+  if (!og || w < 18 || h < 14) return;
+  const pad = 4;
+  const fontPx = Math.max(9, Math.min(12, Math.floor(w - pad * 2)));
+  const usableLen = h - pad * 2;
+  if (usableLen < fontPx + 2) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0 + 1, y0 + 1, Math.max(0, w - 2), Math.max(0, h - 2));
+  ctx.clip();
+  ctx.translate(x0 + w / 2, y0 + h / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = `600 ${fontPx}px monospace`;
+  const fitted = _alnFitText(ctx, og, usableLen);
+  if (!fitted) {
+    ctx.restore();
+    return;
+  }
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(17,17,17,.88)';
+  ctx.fillText(fitted, 0, 0);
+  ctx.restore();
+}
+
 function _alnColumnDefs() {
   return {
     ref: {
@@ -3435,6 +3722,13 @@ function _alnColumnDefs() {
       width: alnShowSpeciesCol ? alnSpeciesColW : 0,
       minWidth: 50,
       resizerId: 'aln-species-resize-bar',
+    },
+    group: {
+      key: 'group',
+      label: 'Species Group',
+      width: HAVE_SPECIES_GROUPS && alnShowSpeciesGroupCol ? alnSpeciesGroupColW : 0,
+      minWidth: 60,
+      resizerId: 'aln-group-resize-bar',
     },
     mrca: {
       key: 'mrca',
@@ -3460,9 +3754,101 @@ function _alnColumnDefs() {
   };
 }
 
+function _alnMetaWidthValue(key) {
+  switch (key) {
+    case 'ref': return alnRefColW;
+    case 'species': return alnSpeciesColW;
+    case 'group': return alnSpeciesGroupColW;
+    case 'mrca': return alnMrcaColW;
+    case 'range': return alnRangeColW;
+    case 'id': return alnNameW;
+    default: return 0;
+  }
+}
+
+function _alnSetMetaWidthValue(key, width) {
+  switch (key) {
+    case 'ref': alnRefColW = width; break;
+    case 'species': alnSpeciesColW = width; break;
+    case 'group': alnSpeciesGroupColW = width; break;
+    case 'mrca': alnMrcaColW = width; break;
+    case 'range': alnRangeColW = width; break;
+    case 'id': alnNameW = width; break;
+  }
+}
+
+function _alnVisibleMetaKeys() {
+  const defs = _alnColumnDefs();
+  return alnMetaColOrder.filter(key => {
+    const def = defs[key];
+    return !!(def && def.width > 0);
+  });
+}
+
+function _alnWidthMap(keys) {
+  const out = {};
+  keys.forEach(key => { out[key] = _alnMetaWidthValue(key); });
+  return out;
+}
+
+function _alnColumnMinWidth(key) {
+  const def = _alnColumnDefs()[key];
+  return def ? (def.minWidth || 0) : 0;
+}
+
+function _alnApplyMetaWidths(widths) {
+  Object.entries(widths).forEach(([key, width]) => {
+    _alnSetMetaWidthValue(key, width);
+  });
+}
+
+function _alnDistributeWidths(keys, total, baseWidths) {
+  const mins = {};
+  let minTotal = 0;
+  keys.forEach(key => {
+    mins[key] = _alnColumnMinWidth(key);
+    minTotal += mins[key];
+  });
+  let remaining = Math.max(total, minTotal);
+  const result = {};
+  let active = keys.map(key => ({
+    key,
+    min: mins[key],
+    weight: Math.max(1, baseWidths[key] || _alnMetaWidthValue(key) || mins[key] || 1),
+  }));
+  while (active.length) {
+    const weightSum = active.reduce((s, item) => s + item.weight, 0) || active.length;
+    const violating = active.filter(item => (remaining * item.weight / weightSum) < item.min - 1e-6);
+    if (!violating.length) {
+      active.forEach(item => {
+        result[item.key] = remaining * item.weight / weightSum;
+      });
+      break;
+    }
+    violating.forEach(item => {
+      result[item.key] = item.min;
+      remaining -= item.min;
+    });
+    active = active.filter(item => !violating.includes(item));
+  }
+  const rounded = {};
+  let used = 0;
+  keys.forEach((key, idx) => {
+    if (idx === keys.length - 1) return;
+    const val = Math.round(result[key] || mins[key] || 0);
+    rounded[key] = val;
+    used += val;
+  });
+  if (keys.length) {
+    const lastKey = keys[keys.length - 1];
+    rounded[lastKey] = Math.max(mins[lastKey] || 0, Math.round(Math.max(total, minTotal)) - used);
+  }
+  return rounded;
+}
+
 function _alnLayoutMetrics() {
   const treeW = alnTreeDict ? alnTreeW : 0;
-  const ogW = Object.keys(alnOgMap).length ? 14 : 0;
+  const ogW = Object.keys(alnOgMap).length ? alnOgColW : 0;
   const defs = _alnColumnDefs();
   const metaCols = [];
   const byKey = {};
@@ -3507,8 +3893,7 @@ function _alnRangeMeta(gid) {
   if (!gid) return null;
   const proteinEntry = _proteinEntry(gid);
   const currentFamily = (TREE_INDEX.find(rec => rec.id === currentAlnId)?.family) || null;
-  const familyTrack = proteinEntry?.tracks?.find(track => track.family === currentFamily)
-    || (proteinEntry?.tracks?.length === 1 ? proteinEntry.tracks[0] : null);
+  const familyTrack = _proteinTracksForFamily(proteinEntry, currentFamily)[0] || null;
   const meta = (GENE_META[gid] || {});
   const lenRaw = proteinEntry?.length ?? meta.length;
   const len = Number.isFinite(+lenRaw) ? +lenRaw : null;
@@ -3610,6 +3995,17 @@ function _alnColTooltip(row, key) {
 function _alnLayoutTree(treeDict, gidY, treeW, useBrLen) {
   if (!treeDict || !Object.keys(gidY).length) return null;
 
+  function _alnMergeTreeCoords(coords) {
+    const byY = new Map();
+    coords.forEach(cc => {
+      if (!cc) return;
+      const key = Number(cc.y);
+      const prev = byY.get(key);
+      if (!prev || cc.x > prev.x) byY.set(key, cc);
+    });
+    return [...byY.values()].sort((a, b) => a.y - b.y);
+  }
+
   if (!useBrLen) {
     // cladogram: leaves aligned to right edge, internal nodes by depth
     function maxDepth(n, d) {
@@ -3634,10 +4030,13 @@ function _alnLayoutTree(treeDict, gidY, treeW, useBrLen) {
         if (cc) childCoords.push(cc);
       }
       if (!childCoords.length) return null;
+      const mergedCoords = _alnMergeTreeCoords(childCoords);
+      if (!mergedCoords.length) return null;
+      if (mergedCoords.length === 1) return mergedCoords[0];
       const x = 2 + depth * xScale;
-      const y = (childCoords[0].y + childCoords[childCoords.length - 1].y) / 2;
-      lines.push({x1: x, y1: childCoords[0].y, x2: x, y2: childCoords[childCoords.length - 1].y});
-      for (const cc of childCoords) lines.push({x1: x, y1: cc.y, x2: cc.x, y2: cc.y});
+      const y = (mergedCoords[0].y + mergedCoords[mergedCoords.length - 1].y) / 2;
+      lines.push({x1: x, y1: mergedCoords[0].y, x2: x, y2: mergedCoords[mergedCoords.length - 1].y});
+      for (const cc of mergedCoords) lines.push({x1: x, y1: cc.y, x2: cc.x, y2: cc.y});
       return {x, y};
     }
     lay(treeDict, 0);
@@ -3669,9 +4068,12 @@ function _alnLayoutTree(treeDict, gidY, treeW, useBrLen) {
         if (cc) childCoords.push(cc);
       }
       if (!childCoords.length) return null;
-      const y = (childCoords[0].y + childCoords[childCoords.length - 1].y) / 2;
-      lines.push({x1: x, y1: childCoords[0].y, x2: x, y2: childCoords[childCoords.length - 1].y});
-      for (const cc of childCoords) lines.push({x1: x, y1: cc.y, x2: cc.x, y2: cc.y});
+      const mergedCoords = _alnMergeTreeCoords(childCoords);
+      if (!mergedCoords.length) return null;
+      if (mergedCoords.length === 1) return mergedCoords[0];
+      const y = (mergedCoords[0].y + mergedCoords[mergedCoords.length - 1].y) / 2;
+      lines.push({x1: x, y1: mergedCoords[0].y, x2: x, y2: mergedCoords[mergedCoords.length - 1].y});
+      for (const cc of mergedCoords) lines.push({x1: x, y1: cc.y, x2: cc.x, y2: cc.y});
       return {x, y};
     }
     lay(treeDict, 0);
@@ -3679,13 +4081,41 @@ function _alnLayoutTree(treeDict, gidY, treeW, useBrLen) {
   }
 }
 
+function resolveSpeciesSelectionQuery(query, activeSpecies){
+  const lq=(query||"").toLowerCase().trim();
+  if(!lq) return new Set();
+  const allowed = activeSpecies instanceof Set ? activeSpecies : new Set(activeSpecies || ALL_SPECIES);
+  const clade=CLADE_DATA.find(c=>c.name.toLowerCase()===lq)||CLADE_DATA.find(c=>c.name.toLowerCase().includes(lq));
+  if(clade){
+    const picked=new Set();
+    Object.keys(clade.groups||{}).forEach(sp=>{ if(allowed.has(sp)) picked.add(sp); });
+    if(picked.size) return picked;
+  }
+  const sp=new Set();
+  allowed.forEach(s=>{ if(String(s).toLowerCase().includes(lq)) sp.add(s); });
+  if(!sp.size){
+    ALL_SPECIES.forEach(s=>{ if(String(s).toLowerCase().includes(lq) && allowed.has(s)) sp.add(s); });
+  }
+  return sp;
+}
+
+function _alnActiveSpeciesSet() {
+  const set = new Set();
+  (alnSeqs || []).forEach(seq => {
+    const gid = (seq.name || '').split(/\s/)[0];
+    const sp = getSpeciesPfx(gid);
+    if (sp) set.add(sp);
+  });
+  return set.size ? set : new Set(ALL_SPECIES);
+}
+
 // --- species filter ---
 function _alnResolveSpFilter() {
   if (!alnSpFilters.length) return null;
+  const activeSpecies = _alnActiveSpeciesSet();
   const union = new Set();
   for (const q of alnSpFilters) {
-    const lq = q.toLowerCase();
-    ALL_SPECIES.forEach(s => { if (s.toLowerCase().includes(lq)) union.add(s); });
+    resolveSpeciesSelectionQuery(q, activeSpecies).forEach(s => union.add(s));
   }
   return union.size ? union : null;
 }
@@ -3762,7 +4192,7 @@ function _alnSpFilterKey(ev) {
   if (ev.key === 'Enter') { _alnAddSpFilter(ev.target.value); ev.preventDefault(); }
 }
 
-function selectAlignment(id) {
+function selectAlignment(id, opts={}) {
   if (!HAVE_ALIGNMENTS) return;
   currentAlnId = id;
   alnHiddenOGs.clear(); alnCollapsedOGs.clear();
@@ -3784,12 +4214,7 @@ function selectAlignment(id) {
   _alnRawFasta = fasta;
   alnSeqs = parseFasta(fasta);
   _alnLoadTreeData(id);
-  // show source toggle only when both GeneRax and IQ-TREE data exist
-  const srcBtn = document.getElementById('btn-aln-src');
-  if (srcBtn) {
-    const hasBoth = _alnTreeDataCache && _alnTreeDataCache.tree && _alnTreeDataCache.prev_tree;
-    srcBtn.style.display = hasBoth ? '' : 'none';
-  }
+  _alnSetSourcePreference(opts?.source || null);
   alnSeqs = _alnReorderByTree(alnSeqs);
   renderAlignment();
 }
@@ -3855,15 +4280,19 @@ function renderAlignment() {
       if (!_seenColl.has(og)) {
         _seenColl.add(og);
         const ogCount = seqs.filter(ss => (alnOgMap[ss.name.split(/\s/)[0]] || '') === og).length;
-        _alnRows.push({name: og, seq: '', isCons: false, isCollapsed: true, og, ogColor, ogCount, species:'', speciesLabel:'', mrca: ogMrca[og] || '', gid:''});
+        _alnRows.push({name: og, seq: '', isCons: false, isCollapsed: true, og, ogColor, ogCount, species:'', speciesLabel:'', speciesGroup:'', mrca: ogMrca[og] || '', gid:''});
       }
       continue;
     }
     const sp = getSpeciesPfx(gid);
-    _alnRows.push({...s, gid, og, ogColor, species: sp || '', speciesLabel: (SPECIES_INFO[sp] || sp || ''), mrca: og ? (ogMrca[og] || '') : ''});
+    _alnRows.push({...s, gid, og, ogColor, species: sp || '', speciesLabel: (SPECIES_INFO[sp] || sp || ''), speciesGroup: (SPECIES_GROUPS[sp] || ''), mrca: og ? (ogMrca[og] || '') : ''});
   }
   const rows = _alnRows;
   const totalH = rows.length * cH;
+  const ogBreakYs = [];
+  for (let r = 1; r < rows.length; r++) {
+    if ((rows[r].og || rows[r-1].og) && rows[r].og !== rows[r-1].og) ogBreakYs.push(r * cH + 0.5);
+  }
 
   const dpr = window.devicePixelRatio || 1;
 
@@ -3923,6 +4352,24 @@ function renderAlignment() {
   nCtx.clearRect(0, 0, dims.leftW, totalH);
   const fontSize = Math.max(8, Math.min(cH - 2, 12));
   nCtx.textBaseline = 'middle';
+  if (ogBreakYs.length) {
+    ogBreakYs.forEach(y => {
+      if (treeW > 0) {
+        nCtx.strokeStyle = '#dbe2e8';
+        nCtx.lineWidth = 1;
+        nCtx.beginPath();
+        nCtx.moveTo(0, y);
+        nCtx.lineTo(treeW, y);
+        nCtx.stroke();
+      }
+      nCtx.strokeStyle = '#000';
+      nCtx.lineWidth = 1;
+      nCtx.beginPath();
+      nCtx.moveTo(treeW, y);
+      nCtx.lineTo(dims.leftW, y);
+      nCtx.stroke();
+    });
+  }
 
   // draw cladogram/phylogram
   if (treeW > 0 && alnTreeDict) {
@@ -3976,6 +4423,10 @@ function renderAlignment() {
           nCtx.fillStyle = '#333';
           nCtx.textAlign = 'right';
           nCtx.fillText(_alnFitText(nCtx, row.mrca, col.width - 8), col.x1 - 4, y0 + cH / 2);
+        } else if (col.key === 'group' && row.speciesGroup) {
+          nCtx.fillStyle = groupColors[row.speciesGroup] || '#555';
+          nCtx.textAlign = 'right';
+          nCtx.fillText(_alnFitText(nCtx, row.speciesGroup, col.width - 8), col.x1 - 4, y0 + cH / 2);
         } else if (col.key === 'id') {
           nCtx.fillStyle = '#222';
           nCtx.textAlign = 'right';
@@ -4022,6 +4473,9 @@ function renderAlignment() {
         } else if (col.key === 'species' && row.speciesLabel) {
           nCtx.fillStyle = row.species ? spColor(row.species) : '#555';
           nCtx.fillText(_alnFitText(nCtx, row.speciesLabel, col.width - 8), col.x1 - 4, y0 + cH / 2);
+        } else if (col.key === 'group' && row.speciesGroup) {
+          nCtx.fillStyle = groupColors[row.speciesGroup] || '#555';
+          nCtx.fillText(_alnFitText(nCtx, row.speciesGroup, col.width - 8), col.x1 - 4, y0 + cH / 2);
         } else if (col.key === 'mrca' && row.mrca) {
           nCtx.fillStyle = '#555';
           nCtx.fillText(_alnFitText(nCtx, row.mrca, col.width - 8), col.x1 - 4, y0 + cH / 2);
@@ -4053,20 +4507,11 @@ function renderAlignment() {
           const y1 = runStart * cH;
           const y2 = r * cH;
           nCtx.strokeRect(treeW + 0.5, y1 + 0.5, ogBandW - 1, y2 - y1 - 1);
+          _alnDrawOgLabel(nCtx, runOg, treeW, y1, ogBandW, y2 - y1);
         }
         runStart = r;
         runOg = og;
       }
-    }
-  }
-
-  // OG separator lines on names canvas
-  nCtx.strokeStyle = '#000';
-  nCtx.lineWidth = 1;
-  for (let r = 1; r < rows.length; r++) {
-    if ((rows[r].og || rows[r-1].og) && rows[r].og !== rows[r-1].og) {
-      const y = r * cH + 0.5;
-      nCtx.beginPath(); nCtx.moveTo(0, y); nCtx.lineTo(dims.leftW, y); nCtx.stroke();
     }
   }
 
@@ -4083,7 +4528,7 @@ function renderAlignment() {
     sCtx.clearRect(0, 0, totalW, totalH);
     const showLetters = cW >= 9;
     if (showLetters) {
-      sCtx.font = `bold ${Math.max(8, cW - 1)}px monospace`;
+      sCtx.font = `${Math.max(7, cW - 2)}px monospace`;
       sCtx.textAlign = 'center';
       sCtx.textBaseline = 'middle';
     }
@@ -4097,8 +4542,8 @@ function renderAlignment() {
         sCtx.globalAlpha = 0.18;
         sCtx.fillRect(0, y0, totalW, cH);
         sCtx.globalAlpha = 1;
-        sCtx.strokeStyle = '#aaa';
-        sCtx.lineWidth = 0.5;
+        sCtx.strokeStyle = '#000';
+        sCtx.lineWidth = 1;
         sCtx.beginPath(); sCtx.moveTo(0, y0); sCtx.lineTo(totalW, y0); sCtx.stroke();
         sCtx.beginPath(); sCtx.moveTo(0, y0 + cH - 0.5); sCtx.lineTo(totalW, y0 + cH - 0.5); sCtx.stroke();
         sCtx.font = `bold ${Math.max(10, cH - 2)}px sans-serif`;
@@ -4128,12 +4573,9 @@ function renderAlignment() {
     }
     sCtx.strokeStyle = '#000';
     sCtx.lineWidth = 1;
-    for (let r = 1; r < rows.length; r++) {
-      if ((rows[r].og || rows[r-1].og) && rows[r].og !== rows[r-1].og) {
-        const y = r * cH + 0.5;
-        sCtx.beginPath(); sCtx.moveTo(0, y); sCtx.lineTo(totalW, y); sCtx.stroke();
-      }
-    }
+    ogBreakYs.forEach(y => {
+      sCtx.beginPath(); sCtx.moveTo(0, y); sCtx.lineTo(totalW, y); sCtx.stroke();
+    });
   } else {
     seqCanvas.width = 1;
     seqCanvas.height = 1;
@@ -4143,7 +4585,10 @@ function renderAlignment() {
 
   const info = document.getElementById('aln-info');
   const ogInfo = Object.keys(alnOgMap).length ? ` \u00b7 ${[...new Set(Object.values(alnOgMap))].length} OGs` : '';
-  info.textContent = `${seqs.length} seqs \u00d7 ${nCols} cols${ogInfo}${alnShowSeqPanel ? '' : ' \u00b7 alignment hidden'}`;
+  const sourceInfo = _alnHasGeneRaxSource() && _alnHasPrevSource()
+    ? ` \u00b7 ${alnUseGeneRax ? 'GeneRax' : 'IQ-TREE'} source`
+    : (_alnHasGeneRaxSource() ? ' \u00b7 GeneRax source' : (_alnHasPrevSource() ? ' \u00b7 IQ-TREE source' : ''));
+  info.textContent = `${seqs.length} seqs \u00d7 ${nCols} cols${ogInfo}${sourceInfo}${alnShowSeqPanel ? '' : ' \u00b7 alignment hidden'}`;
 
   const viewer = document.getElementById('aln-viewer');
   _alnApplyViewerWidths();
@@ -4380,20 +4825,27 @@ function _alnRenderCorner(){
   corner.style.width=dims.leftW+'px';
   corner.style.minWidth=dims.leftW+'px';
   const labels=[];
-  if(dims.treeW>0) labels.push({left:0,width:dims.treeW,label:'Gene Tree'});
+  if(dims.treeW>0) labels.push({left:0,width:dims.treeW,label:'Gene Tree',resizerId:'aln-tree-resize-bar'});
   if(dims.ogW>0) labels.push({left:dims.treeW,width:dims.ogW,label:'OG'});
-  dims.metaCols.forEach(col=>labels.push({left:col.x0,width:col.width,label:col.label,key:col.key}));
+  dims.metaCols.forEach(col=>labels.push({left:col.x0,width:col.width,label:col.label,key:col.key,resizerId:col.resizerId}));
   corner.innerHTML = '';
   for (const rec of labels) {
     const el = document.createElement('div');
-    el.className = `aln-col-header${rec.key ? ' drag' : ''}`;
+    el.className = `aln-col-header${rec.key ? ' drag' : ' static'}`;
     el.style.left = `${rec.left}px`;
     el.style.width = `${Math.max(0, rec.width)}px`;
     el.textContent = rec.label;
-    el.title = rec.label;
+    el.title = rec.key ? `${rec.label} — drag to reorder` : rec.label;
     if (rec.key) {
       el.dataset.alnCol = rec.key;
       el.draggable = true;
+    }
+    if (rec.resizerId && rec.width >= 20) {
+      const grip = document.createElement('div');
+      grip.className = 'aln-col-header-resizer';
+      grip.dataset.alnResizer = rec.resizerId;
+      grip.title = `Drag to resize ${rec.label}`;
+      el.appendChild(grip);
     }
     corner.appendChild(el);
   }
@@ -4438,6 +4890,7 @@ function _alnApplyViewerWidths(){
   const treeBar = document.getElementById('aln-tree-resize-bar');
   const refBar = document.getElementById('aln-ref-resize-bar');
   const speciesBar = document.getElementById('aln-species-resize-bar');
+  const groupBar = document.getElementById('aln-group-resize-bar');
   const mrcaBar = document.getElementById('aln-mrca-resize-bar');
   const rangeBar = document.getElementById('aln-range-resize-bar');
   if (treeBar) {
@@ -4452,6 +4905,10 @@ function _alnApplyViewerWidths(){
     speciesBar.style.display = dims.byKey.species ? 'block' : 'none';
     speciesBar.style.left = dims.byKey.species ? dims.byKey.species.x1 + 'px' : '0px';
   }
+  if (groupBar) {
+    groupBar.style.display = dims.byKey.group ? 'block' : 'none';
+    groupBar.style.left = dims.byKey.group ? dims.byKey.group.x1 + 'px' : '0px';
+  }
   if (mrcaBar) {
     mrcaBar.style.display = dims.byKey.mrca ? 'block' : 'none';
     mrcaBar.style.left = dims.byKey.mrca ? dims.byKey.mrca.x1 + 'px' : '0px';
@@ -4463,19 +4920,24 @@ function _alnApplyViewerWidths(){
 }
 
 (function(){
-  let _drag = null, _startX = 0, _startW = 0;
+  let _drag = null, _startX = 0, _startW = 0, _dragEl = null;
   document.addEventListener('mousedown', ev => {
-    const id = ev.target.id;
-    if (id !== 'aln-resize-bar' && id !== 'aln-tree-resize-bar' && id !== 'aln-ref-resize-bar' && id !== 'aln-species-resize-bar' && id !== 'aln-mrca-resize-bar' && id !== 'aln-range-resize-bar') return;
+    const grip = ev.target && typeof ev.target.closest === 'function'
+      ? ev.target.closest('[data-aln-resizer]')
+      : null;
+    const id = grip ? grip.dataset.alnResizer : ev.target.id;
+    if (id !== 'aln-resize-bar' && id !== 'aln-tree-resize-bar' && id !== 'aln-ref-resize-bar' && id !== 'aln-species-resize-bar' && id !== 'aln-group-resize-bar' && id !== 'aln-mrca-resize-bar' && id !== 'aln-range-resize-bar') return;
     _drag = id; _startX = ev.clientX;
+    _dragEl = grip || document.getElementById(id) || null;
     _startW =
       id === 'aln-resize-bar' ? alnNameW :
       id === 'aln-tree-resize-bar' ? alnTreeW :
       id === 'aln-ref-resize-bar' ? alnRefColW :
       id === 'aln-species-resize-bar' ? alnSpeciesColW :
+      id === 'aln-group-resize-bar' ? alnSpeciesGroupColW :
       id === 'aln-mrca-resize-bar' ? alnMrcaColW :
       alnRangeColW;
-    ev.target.classList.add('dragging');
+    if (_dragEl) _dragEl.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
     ev.preventDefault();
   });
@@ -4490,6 +4952,8 @@ function _alnApplyViewerWidths(){
       alnRefColW = Math.max(40, _startW + delta);
     } else if (_drag === 'aln-species-resize-bar') {
       alnSpeciesColW = Math.max(50, _startW + delta);
+    } else if (_drag === 'aln-group-resize-bar') {
+      alnSpeciesGroupColW = Math.max(60, _startW + delta);
     } else if (_drag === 'aln-mrca-resize-bar') {
       alnMrcaColW = Math.max(50, _startW + delta);
     } else {
@@ -4499,9 +4963,9 @@ function _alnApplyViewerWidths(){
   });
   document.addEventListener('mouseup', ev => {
     if (!_drag) return;
-    const bar = document.getElementById(_drag);
-    if (bar) bar.classList.remove('dragging');
+    if (_dragEl) _dragEl.classList.remove('dragging');
     _drag = null;
+    _dragEl = null;
     document.body.style.cursor = '';
     if (alnSeqs.length) renderAlignment();
   });
@@ -4511,12 +4975,21 @@ function _alnApplyViewerWidths(){
   const corner = document.getElementById('aln-corner');
   if (!corner) return;
   let dragKey = null;
+  let dragOverKey = null;
   function headerTarget(node){
     return node && typeof node.closest === 'function' ? node.closest('[data-aln-col]') : null;
   }
+  function clearDropState(){
+    if (!corner) return;
+    corner.querySelectorAll('.aln-col-header.active-drop').forEach(el=>el.classList.remove('active-drop'));
+    dragOverKey = null;
+  }
   corner.addEventListener('dragstart', ev => {
     const target = headerTarget(ev.target);
-    if (!target) return;
+    if (!target || (ev.target && ev.target.closest && ev.target.closest('[data-aln-resizer]'))) {
+      ev.preventDefault();
+      return;
+    }
     dragKey = target.dataset.alnCol || null;
     if (ev.dataTransfer) {
       ev.dataTransfer.effectAllowed = 'move';
@@ -4529,6 +5002,11 @@ function _alnApplyViewerWidths(){
     if (!dragKey || !target || target.dataset.alnCol === dragKey) return;
     ev.preventDefault();
     if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+    if (dragOverKey !== target.dataset.alnCol) {
+      clearDropState();
+      target.classList.add('active-drop');
+      dragOverKey = target.dataset.alnCol;
+    }
   });
   corner.addEventListener('drop', ev => {
     const target = headerTarget(ev.target);
@@ -4536,6 +5014,7 @@ function _alnApplyViewerWidths(){
     const dstKey = target.dataset.alnCol || '';
     if (!dstKey || dstKey === dragKey) return;
     ev.preventDefault();
+    clearDropState();
     const rect = target.getBoundingClientRect();
     const placeAfter = ev.clientX > rect.left + rect.width / 2;
     _alnMoveMetaColumn(dragKey, dstKey, placeAfter);
@@ -4543,7 +5022,11 @@ function _alnApplyViewerWidths(){
   corner.addEventListener('dragend', ev => {
     const target = headerTarget(ev.target);
     if (target) target.style.opacity = '';
+    clearDropState();
     dragKey = null;
+  });
+  corner.addEventListener('dragleave', ev => {
+    if (!corner.contains(ev.relatedTarget)) clearDropState();
   });
 })();
 
@@ -4563,6 +5046,13 @@ function alnToggleSpeciesCol() {
   alnShowSpeciesCol = !alnShowSpeciesCol;
   const btn = document.getElementById('btn-aln-species');
   if (btn) { btn.style.background = alnShowSpeciesCol?'#e8f0fe':'#fff'; btn.style.color = alnShowSpeciesCol?'#1a56c4':'#555'; btn.style.borderColor = alnShowSpeciesCol?'#1a56c4':'#888'; btn.style.fontWeight = alnShowSpeciesCol?'600':''; }
+  renderAlignment();
+}
+function alnToggleSpeciesGroupCol() {
+  if (!HAVE_SPECIES_GROUPS) return;
+  alnShowSpeciesGroupCol = !alnShowSpeciesGroupCol;
+  const btn = document.getElementById('btn-aln-species-group');
+  if (btn) { btn.style.background = alnShowSpeciesGroupCol?'#e8f0fe':'#fff'; btn.style.color = alnShowSpeciesGroupCol?'#1a56c4':'#555'; btn.style.borderColor = alnShowSpeciesGroupCol?'#1a56c4':'#888'; btn.style.fontWeight = alnShowSpeciesGroupCol?'600':''; }
   renderAlignment();
 }
 function alnToggleMrcaCol() {
@@ -4653,14 +5143,7 @@ function alnDownload() {
 
 function alnToggleSource() {
   alnUseGeneRax = !alnUseGeneRax;
-  const btn = document.getElementById('btn-aln-src');
-  if (btn) {
-    btn.textContent = alnUseGeneRax ? 'GeneRax' : 'IQ-TREE';
-    btn.style.background  = alnUseGeneRax ? '#e8f0fe' : '#fff';
-    btn.style.color       = alnUseGeneRax ? '#1a56c4' : '#555';
-    btn.style.borderColor = alnUseGeneRax ? '#1a56c4' : '#888';
-    btn.style.fontWeight  = alnUseGeneRax ? '600' : '';
-  }
+  _alnSyncSourceButton();
   _alnApplyTreeSource();
   if (alnSeqs.length) {
     alnSeqs = _alnReorderByTree(alnSeqs);
@@ -4734,18 +5217,69 @@ function renderAlnSidebar(query) {
 // FAMILIES TABLE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-let _famSortCol = "family", _famSortAsc = true;
+let _famSortCol = "total", _famSortAsc = false;
 let _famFilter  = "";
 let _famRendered = false;
 let _famExpandedCats = new Set();  // category keys currently expanded
+let _famExpandedFamilies = new Set();
+let _famExpandedHgs = new Set();
+const _famHgSortState = new Map();   // family -> {col, asc}
+const _famOgSortState = new Map();   // hgId -> {col, asc}
 
 // pre-index FAMILY_DATA by family name for quick species-union lookup
 const _famDataByName = {};
 FAMILY_DATA.forEach(d=>{ _famDataByName[d.family]=d; });
+const _famInfoByName = {};
+FAMILY_INFO.forEach(d=>{ _famInfoByName[d.family]=d; });
+const _hgDataById = {};
+HG_DATA.forEach(d=>{ _hgDataById[d.id]=d; });
+const _treeRecById = {};
+TREE_INDEX.forEach(d=>{ _treeRecById[d.id]=d; });
+const _famHgSummaryCache = new Map();
+const _famHgOgCache = new Map();
+const _famOgInfoCache = new Map();
+let _famOgSearchIndex = null;
+let _famSearchHits = [];
+let _famSearchSel = -1;
+let _famMatchedOgKeys = new Set();
+let _famMatchedHgSet = new Set();
+let _famMatchedFamilySet = new Set();
+let _famFocusedOgKey = null;
+let _famFocusedHgId = null;
+let _famFocusedFamily = null;
+let _famSearchDebounce = null;
 
 function famToggleCat(cat){
   if(_famExpandedCats.has(cat)) _famExpandedCats.delete(cat);
   else _famExpandedCats.add(cat);
+  drawFamilyTable();
+}
+
+function famToggleFamily(family){
+  if(_famExpandedFamilies.has(family)) _famExpandedFamilies.delete(family);
+  else _famExpandedFamilies.add(family);
+  drawFamilyTable();
+}
+
+function famToggleHg(hgId){
+  if(_famExpandedHgs.has(hgId)) _famExpandedHgs.delete(hgId);
+  else _famExpandedHgs.add(hgId);
+  drawFamilyTable();
+}
+
+function famSetHgSort(family, col){
+  const cur = _famHgSortState.get(family) || {col:"total", asc:false};
+  if(cur.col===col) cur.asc = !cur.asc;
+  else { cur.col=col; cur.asc=(col==="hg" || col==="refs"); }
+  _famHgSortState.set(family, cur);
+  drawFamilyTable();
+}
+
+function famSetOgSort(hgId, col){
+  const cur = _famOgSortState.get(hgId) || {col:"total", asc:false};
+  if(cur.col===col) cur.asc = !cur.asc;
+  else { cur.col=col; cur.asc=(col==="og"); }
+  _famOgSortState.set(hgId, cur);
   drawFamilyTable();
 }
 
@@ -4763,12 +5297,377 @@ function _clsBadge(cls){
 
 function famGoToClass(cls){
   switchTab("heatmap");
-  hmViewMode="family"; hmActiveClass=cls; hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null;
+  hmViewMode="family"; hmActiveClass=cls; hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; hmFocusedOG=null;
   drawHeatmap();
   const back=document.getElementById("hm-back");
   const cr=document.getElementById("hm-breadcrumb");
   if(back) back.style.display="inline";
   if(cr) cr.textContent=cls;
+}
+
+function _famSortIndicator(active, asc){
+  if(!active) return '<span style="color:#b3bfcb;margin-left:3px">↕</span>';
+  return `<span style="color:#56718c;margin-left:3px">${asc?'↑':'↓'}</span>`;
+}
+
+function _famCompareValues(av, bv, asc){
+  if(typeof av==="number" && typeof bv==="number") return asc ? av-bv : bv-av;
+  const aa=String(av||"").toLowerCase();
+  const bb=String(bv||"").toLowerCase();
+  return asc ? aa.localeCompare(bb, undefined, {numeric:true, sensitivity:"base"}) : bb.localeCompare(aa, undefined, {numeric:true, sensitivity:"base"});
+}
+
+function _famTrimText(text, maxLen){
+  const s=String(text||"").trim();
+  if(!s) return "";
+  return s.length>maxLen ? (s.slice(0, Math.max(0,maxLen-1))+"\u2026") : s;
+}
+
+function _famOgKey(hgId, og){
+  return `${hgId}\x00${og}`;
+}
+
+function _famBuildOgSearchIndex(){
+  if(_famOgSearchIndex) return _famOgSearchIndex;
+  const out = [];
+  for(const treeRec of TREE_INDEX){
+    const detail = loadDetail(treeRec.id);
+    const ogs = detail && detail.ogs ? detail.ogs : null;
+    if(!ogs) continue;
+    for(const [og, gids] of Object.entries(ogs)){
+      const species = new Set((gids||[]).map(g=>getSpeciesPfx(g)).filter(Boolean));
+      out.push({
+        key: _famOgKey(treeRec.id, og),
+        family: treeRec.family || "",
+        cls: treeRec.class || treeRec.prefix || "",
+        hgId: treeRec.id,
+        hg: treeRec.hg || treeRec.id,
+        og,
+        total: gids.length,
+        nSpecies: species.size,
+        search: `${og} ${treeRec.hg||treeRec.id} ${treeRec.family||""} ${treeRec.class||""}`.toLowerCase(),
+      });
+    }
+  }
+  _famOgSearchIndex = out;
+  return out;
+}
+
+function famHideDD(){
+  const dd = document.getElementById("fam-search-dd");
+  if(dd) dd.style.display = "none";
+  _famSearchSel = -1;
+}
+
+function _famSearchResults(q){
+  q = (q||"").trim().toLowerCase();
+  if(!q) return [];
+  return _famBuildOgSearchIndex()
+    .filter(rec=>rec.search.includes(q))
+    .sort((a,b)=>
+      (b.total-a.total)
+      || (b.nSpecies-a.nSpecies)
+      || a.family.localeCompare(b.family, undefined, {numeric:true, sensitivity:"base"})
+      || a.hg.localeCompare(b.hg, undefined, {numeric:true, sensitivity:"base"})
+      || a.og.localeCompare(b.og, undefined, {numeric:true, sensitivity:"base"})
+    );
+}
+
+function _famTextMatchFamily(rec, q){
+  return rec.family.toLowerCase().includes(q)
+    || (rec.pfam||[]).some(p=>p.toLowerCase().includes(q))
+    || (rec.category||"").toLowerCase().includes(q)
+    || (rec.cls||"").toLowerCase().includes(q);
+}
+
+function famRenderSearchDD(){
+  const dd = document.getElementById("fam-search-dd");
+  if(!dd) return;
+  if(!_famSearchHits.length){ famHideDD(); return; }
+  const hits = _famSearchHits.slice(0, 18);
+  dd.innerHTML =
+    `<div class="fam-search-sec">Matching Orthogroups</div>` +
+    hits.map((hit,i)=>`
+      <div class="fam-search-hit${i===_famSearchSel?' active':''}" data-i="${i}" onmousedown="event.preventDefault();famFocusOgResult('${hit.hgId.replace(/'/g,"\\'")}','${hit.og.replace(/'/g,"\\'")}')">
+        <div class="fam-search-hit-main">
+          <div class="fam-search-hit-og">${_proteinEsc(hit.og)}</div>
+          <div class="fam-search-hit-badge">${hit.total} seqs · ${hit.nSpecies} spp</div>
+        </div>
+        <div class="fam-search-hit-meta">${_proteinEsc(hit.family)} \u203a ${_proteinEsc(hit.hg)}</div>
+      </div>
+    `).join("");
+  dd.style.display = "block";
+}
+
+function _famApplySearch(val){
+  const q = (val||"").trim().toLowerCase();
+  _famMatchedOgKeys = new Set();
+  _famMatchedHgSet = new Set();
+  _famMatchedFamilySet = new Set();
+  _famSearchHits = [];
+  _famSearchSel = -1;
+  if(!q){
+    _famFocusedOgKey=null;
+    _famFocusedHgId=null;
+    _famFocusedFamily=null;
+    famHideDD();
+    return;
+  }
+  const hits = _famSearchResults(q);
+  _famSearchHits = hits;
+  hits.forEach(hit=>{
+    _famMatchedOgKeys.add(hit.key);
+    _famMatchedHgSet.add(hit.hgId);
+    _famMatchedFamilySet.add(hit.family);
+  });
+  if(_famFocusedOgKey && !_famMatchedOgKeys.has(_famFocusedOgKey)){
+    _famFocusedOgKey=null;
+    _famFocusedHgId=null;
+    _famFocusedFamily=null;
+  }
+  famRenderSearchDD();
+}
+
+function _famFlashFocusedOg(hgId, og){
+  const rows = Array.from(document.querySelectorAll(".fam-og-row"));
+  const row = rows.find(el=>el.dataset.hg===hgId && el.dataset.og===og);
+  if(!row) return;
+  row.classList.add("focus");
+  row.scrollIntoView({block:"center", behavior:"smooth"});
+  window.setTimeout(()=>row.classList.remove("focus"), 1800);
+}
+
+function famFocusOgResult(hgId, og){
+  const hit = _famSearchHits.find(rec=>rec.hgId===hgId && rec.og===og);
+  if(hit){
+    _famExpandedFamilies.add(hit.family);
+    _famExpandedHgs.add(hgId);
+    _famFocusedOgKey = _famOgKey(hgId, og);
+    _famFocusedHgId = hgId;
+    _famFocusedFamily = hit.family;
+  }
+  drawFamilyTable();
+  famHideDD();
+  window.setTimeout(()=>_famFlashFocusedOg(hgId, og), 30);
+}
+
+function famSearchKey(e){
+  if(_famSearchDebounce && (e.key==="Enter" || e.key==="ArrowDown" || e.key==="ArrowUp")){
+    window.clearTimeout(_famSearchDebounce);
+    _famSearchDebounce = null;
+    _famApplySearch(e.target?.value || _famFilter || "");
+    drawFamilyTable();
+  }
+  const dd = document.getElementById("fam-search-dd");
+  const items = dd ? dd.querySelectorAll(".fam-search-hit") : [];
+  if(!items.length){
+    if(e.key==="Escape") famHideDD();
+    return;
+  }
+  if(e.key==="ArrowDown"){
+    e.preventDefault();
+    _famSearchSel = Math.min(_famSearchSel + 1, items.length - 1);
+    items.forEach((el,i)=>el.classList.toggle("active", i===_famSearchSel));
+    return;
+  }
+  if(e.key==="ArrowUp"){
+    e.preventDefault();
+    _famSearchSel = Math.max(_famSearchSel - 1, 0);
+    items.forEach((el,i)=>el.classList.toggle("active", i===_famSearchSel));
+    return;
+  }
+  if(e.key==="Enter"){
+    if(_famSearchSel>=0 && _famSearchHits[_famSearchSel]){
+      e.preventDefault();
+      famFocusOgResult(_famSearchHits[_famSearchSel].hgId, _famSearchHits[_famSearchSel].og);
+    }
+    return;
+  }
+  if(e.key==="Escape"){ famHideDD(); }
+}
+
+function _famReferenceSummary(hgId, treeRec){
+  if(!treeRec) return "";
+  const detail = loadDetail(hgId);
+  if(!detail) return "";
+  let meta = null;
+  if(treeRec.source==="generax") meta = detail.meta || detail.prev_meta || null;
+  else meta = detail.prev_meta || detail.meta || null;
+  const refs = [...new Set(Object.values(meta||{})
+    .map(m=>m && (m.ref_ortholog || m.reference_gene_name || ""))
+    .filter(Boolean))]
+    .sort((a,b)=>String(a).localeCompare(String(b), undefined, {numeric:true, sensitivity:"base"}));
+  if(!refs.length) return "";
+  return _famTrimText(refs.join(", "), 84);
+}
+
+function _extractOgInfo(hgId, ogId, family, source="generax"){
+  const cacheKey = `${hgId}\x00${source}\x00${ogId}\x00${family || ""}`;
+  if(_famOgInfoCache.has(cacheKey)) return _famOgInfoCache.get(cacheKey);
+  const detail = loadDetail(hgId);
+  const treeRec = _treeRecById[hgId] || null;
+  const ogMap = source==="prev"
+    ? (detail?.prev_ogs || detail?.ogs || {})
+    : (detail?.ogs || detail?.prev_ogs || {});
+  const gids = (ogMap && ogMap[ogId]) ? [...ogMap[ogId]] : [];
+  const species = new Set(gids.map(gid => getSpeciesPfx(gid)).filter(Boolean));
+  const mrca = species.size ? (spMRCAName(species) || "") : "";
+  const archCounts = new Map();
+  gids.forEach(gid => {
+    const labels = _proteinGeneArchitectureForFamily(gid, family);
+    const key = JSON.stringify(labels || []);
+    const rec = archCounts.get(key) || {labels, count:0};
+    rec.count += 1;
+    archCounts.set(key, rec);
+  });
+  const dominantArchitecture = [...archCounts.values()].sort((a,b)=>
+    (b.count-a.count)
+    || ((b.labels?.length || 0) - (a.labels?.length || 0))
+    || _archSeriesText(a.labels).localeCompare(_archSeriesText(b.labels), undefined, {numeric:true, sensitivity:"base"})
+  )[0] || {labels:[], count:0};
+  const info = {
+    hgId,
+    ogId,
+    family: family || treeRec?.family || "",
+    source,
+    gids,
+    mrca,
+    dominantArchitecture,
+  };
+  _famOgInfoCache.set(cacheKey, info);
+  return info;
+}
+
+function _famSortedHgRows(family){
+  const cacheKey = family + "\x00" + JSON.stringify(_famHgSortState.get(family) || {col:"total", asc:false});
+  if(_famHgSummaryCache.has(cacheKey)) return _famHgSummaryCache.get(cacheKey);
+  const sortState = _famHgSortState.get(family) || {col:"total", asc:false};
+  const rows = HG_DATA
+    .filter(rec=>rec.family===family)
+    .map(rec=>{
+      const treeRec = _treeRecById[rec.id] || null;
+      const detail = treeRec ? loadDetail(rec.id) : null;
+      const prevCount = treeRec && detail && detail.prev_ogs ? Object.keys(detail.prev_ogs).length : null;
+      return {
+        id: rec.id,
+        hg: rec.hg || rec.id,
+        family: rec.family,
+        cls: rec.class || rec.pref || "",
+        total: rec.total || 0,
+        nSpecies: Object.keys(rec.species_counts || {}).length,
+        treeRec,
+        nOgs: treeRec ? (treeRec.n_ogs || 0) : null,
+        prevNOgs: prevCount,
+        refs: _famReferenceSummary(rec.id, treeRec),
+      };
+    })
+    .sort((a,b)=>{
+      const cmp = _famCompareValues(a[sortState.col], b[sortState.col], sortState.asc);
+      if(cmp) return cmp;
+      return (b.total-a.total)
+        || (b.nSpecies-a.nSpecies)
+        || String(a.hg||"").localeCompare(String(b.hg||""), undefined, {numeric:true, sensitivity:"base"});
+    });
+  _famHgSummaryCache.set(cacheKey, rows);
+  return rows;
+}
+
+function _famSortedOgRows(hgId){
+  const cacheKey = hgId + "\x00" + JSON.stringify(_famOgSortState.get(hgId) || {col:"total", asc:false});
+  if(_famHgOgCache.has(cacheKey)) return _famHgOgCache.get(cacheKey);
+  const sortState = _famOgSortState.get(hgId) || {col:"total", asc:false};
+      const treeRec = _treeRecById[hgId] || null;
+      const detail = treeRec ? loadDetail(hgId) : null;
+      const rows = detail && detail.ogs
+    ? Object.entries(detail.ogs).map(([og, gids])=>{
+        const species = new Set((gids||[]).map(g=>getSpeciesPfx(g)).filter(Boolean));
+        const info = _extractOgInfo(hgId, og, treeRec?.family || _hgDataById[hgId]?.family || "", treeRec?.source || "generax");
+        return {
+          hgId,
+          family: treeRec?.family || _hgDataById[hgId]?.family || "",
+          cls: treeRec?.class || _hgDataById[hgId]?.class || _hgDataById[hgId]?.pref || "",
+          og,
+          total: gids.length,
+          nSpecies: species.size,
+          mrca: info.mrca || "",
+          dominantArchitecture: info.dominantArchitecture || {labels:[], count:0},
+          architectureText: _archSeriesText((info.dominantArchitecture && info.dominantArchitecture.labels) || []),
+        };
+      }).sort((a,b)=>
+        _famCompareValues(a[sortState.col], b[sortState.col], sortState.asc)
+        || (b.total-a.total)
+        || (b.nSpecies-a.nSpecies)
+        || String(a.og||"").localeCompare(String(b.og||""), undefined, {numeric:true, sensitivity:"base"})
+      )
+    : [];
+  _famHgOgCache.set(cacheKey, rows);
+  return rows;
+}
+
+function _famHgOgCountHtml(rec){
+  if(rec.nOgs==null) return '<span class="fam-num fam-num-muted">—</span>';
+  if(rec.treeRec && rec.treeRec.source==="generax" && rec.prevNOgs!=null){
+    return `<span class="fam-og-count-pair" title="GeneRax / IQ-TREE orthogroup counts"><span class="gr">G ${rec.nOgs}</span><span style="color:#9aa7b4">/</span><span class="iq">I ${rec.prevNOgs}</span></span>`;
+  }
+  return `<span class="fam-num">${rec.nOgs}</span>`;
+}
+
+function _famHgDetailHtml(family){
+  const hgRows = _famSortedHgRows(family);
+  if(!hgRows.length) return '<div class="fam-empty-note">No homology groups available.</div>';
+  const hgSort = _famHgSortState.get(family) || {col:"total", asc:false};
+  let html = `<div class="fam-detail-head"><div><button class="fam-link-btn" type="button" onclick="famSetHgSort('${family.replace(/'/g,"\\'")}','hg')" style="text-decoration:none;color:inherit">Homology Group${_famSortIndicator(hgSort.col==="hg", hgSort.asc)}</button></div><div class="fam-num"><button class="fam-link-btn" type="button" onclick="famSetHgSort('${family.replace(/'/g,"\\'")}','total')" style="text-decoration:none;color:inherit">Seqs${_famSortIndicator(hgSort.col==="total", hgSort.asc)}</button></div><div class="fam-num"><button class="fam-link-btn" type="button" onclick="famSetHgSort('${family.replace(/'/g,"\\'")}','nSpecies')" style="text-decoration:none;color:inherit">Species${_famSortIndicator(hgSort.col==="nSpecies", hgSort.asc)}</button></div><div class="fam-num"><button class="fam-link-btn" type="button" onclick="famSetHgSort('${family.replace(/'/g,"\\'")}','nOgs')" style="text-decoration:none;color:inherit">OGs${_famSortIndicator(hgSort.col==="nOgs", hgSort.asc)}</button></div></div>`;
+  hgRows.forEach(rec=>{
+    const isOpen = _famExpandedHgs.has(rec.id) || (_famFocusedHgId===rec.id);
+    const canExpand = !!rec.treeRec && (rec.nOgs||0)>0;
+    const arrow = isOpen ? '&#9660;' : '&#9654;';
+    const badge = rec.treeRec && rec.treeRec.source==="generax" ? '<span class="src-badge">GeneRax</span>' : (rec.treeRec ? '<span class="src-badge" style="background:#f2ead8;color:#7c6120">IQ-TREE</span>' : '');
+    const hgIdEsc = rec.id.replace(/'/g,"\\'");
+    html += `<div class="fam-hg-row">
+      <div class="fam-label-main">
+        ${canExpand ? `<button class="fam-toggle-btn" type="button" onclick="event.stopPropagation();famToggleHg('${hgIdEsc}')">${arrow}</button>` : `<span style="display:inline-block;width:24px"></span>`}
+        <div style="min-width:0">
+          <div class="fam-label-text" title="${_proteinEsc(rec.id)}">${_proteinEsc(rec.hg)}</div>
+          ${rec.refs ? `<div class="fam-meta-note" title="${_proteinEsc(rec.refs)}">${_proteinEsc(rec.refs)}</div>` : ``}
+        </div>
+        ${badge}
+      </div>
+      <div class="fam-num">${rec.total}</div>
+      <div class="fam-num">${rec.nSpecies}</div>
+      <div class="fam-num">${_famHgOgCountHtml(rec)}</div>
+    </div>`;
+    if(isOpen){
+      const ogRows = _famSortedOgRows(rec.id);
+      if(ogRows.length){
+        const ogSort = _famOgSortState.get(rec.id) || {col:"total", asc:false};
+        html += `<div class="fam-og-wrap"><div class="fam-detail-head" style="grid-template-columns:minmax(180px,1.3fr) 78px 78px minmax(120px,1fr) minmax(220px,1.8fr);padding-top:8px"><div><button class="fam-link-btn" type="button" onclick="famSetOgSort('${hgIdEsc}','og')" style="text-decoration:none;color:inherit">Orthogroup${_famSortIndicator(ogSort.col==="og", ogSort.asc)}</button></div><div class="fam-num"><button class="fam-link-btn" type="button" onclick="famSetOgSort('${hgIdEsc}','total')" style="text-decoration:none;color:inherit">Seqs${_famSortIndicator(ogSort.col==="total", ogSort.asc)}</button></div><div class="fam-num"><button class="fam-link-btn" type="button" onclick="famSetOgSort('${hgIdEsc}','nSpecies')" style="text-decoration:none;color:inherit">Species${_famSortIndicator(ogSort.col==="nSpecies", ogSort.asc)}</button></div><div><button class="fam-link-btn" type="button" onclick="famSetOgSort('${hgIdEsc}','mrca')" style="text-decoration:none;color:inherit">MRCA${_famSortIndicator(ogSort.col==="mrca", ogSort.asc)}</button></div><div><button class="fam-link-btn" type="button" onclick="famSetOgSort('${hgIdEsc}','architectureText')" style="text-decoration:none;color:inherit">Architecture${_famSortIndicator(ogSort.col==="architectureText", ogSort.asc)}</button></div></div>`;
+        ogRows.forEach(ogRec=>{
+          const ogEsc = ogRec.og.replace(/'/g,"\\'");
+          const archLabels = (ogRec.dominantArchitecture && ogRec.dominantArchitecture.labels) || [];
+          const archCount = (ogRec.dominantArchitecture && ogRec.dominantArchitecture.count) || 0;
+          const ogKey = _famOgKey(rec.id, ogRec.og);
+          const extraCls = [
+            _famMatchedOgKeys.has(ogKey) ? "match" : "",
+            _famFocusedOgKey===ogKey ? "focus" : "",
+          ].filter(Boolean).join(" ");
+          html += `<div class="fam-og-row ${extraCls}" data-hg="${_proteinEsc(rec.id)}" data-og="${_proteinEsc(ogRec.og)}" onclick="showFamOgPopup(event, '${hgIdEsc}', '${ogEsc}')">
+            <div class="fam-label-main"><span style="display:inline-block;width:24px"></span><span class="fam-label-text" title="${_proteinEsc(ogRec.og)}">${_proteinEsc(ogRec.og)}</span></div>
+            <div class="fam-num">${ogRec.total}</div>
+            <div class="fam-num">${ogRec.nSpecies}</div>
+            <div class="fam-og-mrca" title="${_proteinEsc(ogRec.mrca || '')}">${_proteinEsc(ogRec.mrca || '—')}</div>
+            <div class="fam-arch-cell" title="${_proteinEsc(ogRec.architectureText || '')}">
+              <div class="arch-chip-list">${_archSeriesChipHtml(archLabels)}</div>
+              <span class="fam-arch-badge">${archCount}/${ogRec.total}</span>
+            </div>
+          </div>`;
+        });
+        html += `</div>`;
+      } else {
+        html += `<div class="fam-og-wrap"><div class="fam-empty-note">No orthogroups available for this HG.</div></div>`;
+      }
+    }
+  });
+  return html;
 }
 
 function drawFamilyTable(){
@@ -4778,10 +5677,7 @@ function drawFamilyTable(){
 
   let rows = FAMILY_INFO.filter(d=>{
     if(!q) return true;
-    return d.family.toLowerCase().includes(q)
-        || (d.pfam||[]).some(p=>p.toLowerCase().includes(q))
-        || (d.category||"").toLowerCase().includes(q)
-        || (d.cls||"").toLowerCase().includes(q);
+    return _famTextMatchFamily(d, q) || _famMatchedFamilySet.has(d.family);
   });
 
   countEl.textContent = rows.length + " / " + FAMILY_INFO.length + " families";
@@ -4814,7 +5710,11 @@ function drawFamilyTable(){
     const cat = d.cls || "(other)";
     (catMap[cat]||(catMap[cat]=[])).push(d);
   });
-  const catKeys = Object.keys(catMap).sort();
+  const catKeys = Object.keys(catMap).sort((a,b)=>{
+    const at = (catMap[a]||[]).reduce((s,d)=>s+(d.total||0),0);
+    const bt = (catMap[b]||[]).reduce((s,d)=>s+(d.total||0),0);
+    return (bt-at) || a.localeCompare(b, undefined, {numeric:true, sensitivity:"base"});
+  });
 
   // auto-expand all cats when searching
   const autoExpand = q.length > 0;
@@ -4863,10 +5763,15 @@ function drawFamilyTable(){
     if(expanded){
       fams.forEach((d,i)=>{
         const bg = i%2===0?"#fff":"#fafcff";
-        html += `<tr class="fam-fam-row" style="background:${bg};border-bottom:1px solid #eee">
-          <td style="padding:4px 8px 4px 28px;font-weight:600;cursor:pointer;color:#2980b9;white-space:nowrap;text-decoration:underline"
-              onclick="famGoToFamily('${d.family.replace(/'/g,"\\'")}')"
-              title="Open HG-level counts in Counts tab">${d.family}</td>
+        const famOpen = _famExpandedFamilies.has(d.family) || (_famFocusedFamily===d.family);
+        const famArrow = famOpen ? "&#9660;" : "&#9654;";
+        const famEsc = d.family.replace(/'/g,"\\'");
+        html += `<tr class="fam-fam-row" style="background:${bg};border-bottom:${famOpen?'0':'1px solid #eee'}">
+          <td style="padding:4px 8px 4px 28px;font-weight:600;white-space:nowrap">
+            <button class="fam-toggle-btn" type="button" onclick="event.stopPropagation();famToggleFamily('${famEsc}')">${famArrow}</button>
+            <button class="fam-link-btn" type="button"
+              onclick="event.stopPropagation();famGoToFamily('${famEsc}')"
+              title="Open HG-level counts in Counts tab">${_proteinEsc(d.family)}</button></td>
           <td style="padding:4px 8px;font-size:11px">${pfamLinks(d)}</td>
           <td style="padding:4px 8px"><span style="color:#888;font-size:11px">${d.category||""}</span></td>
           <td style="padding:4px 8px;text-align:right">${speciesFrac(d.n_species||0)}</td>
@@ -4876,6 +5781,9 @@ function drawFamilyTable(){
           <td class="fam-td-generax" style="padding:4px 8px;text-align:right">${treeFrac(d.n_generax||0, d.n_hgs||0)}</td>
           <td style="padding:4px 8px;text-align:right;color:#555">${d.total||0}</td>
         </tr>`;
+        if(famOpen){
+          html += `<tr><td class="fam-detail-cell" colspan="9"><div class="fam-detail-wrap">${_famHgDetailHtml(d.family)}</div></td></tr>`;
+        }
       });
     }
   });
@@ -4900,7 +5808,12 @@ function drawFamilyTable(){
 
 function filterFamilyTable(val){
   _famFilter=val;
-  drawFamilyTable();
+  if(_famSearchDebounce) window.clearTimeout(_famSearchDebounce);
+  _famSearchDebounce = window.setTimeout(()=>{
+    _famSearchDebounce = null;
+    _famApplySearch(val);
+    drawFamilyTable();
+  }, 120);
 }
 
 function famGoToFamily(family){
@@ -4910,12 +5823,82 @@ function famGoToFamily(family){
   const fRec = FAMILY_DATA.find(d=>d.family===family);
   if(!fRec) return;
   hmViewMode="hg"; hmActiveFamily=family; hmActiveClass=fRec.class||null;
-  hmActiveHG=null; hmActiveHGRec=null;
+  hmActiveHG=null; hmActiveHGRec=null; hmFocusedOG=null;
   drawHeatmap();
   const back=document.getElementById("hm-back");
   const cr=document.getElementById("hm-breadcrumb");
   if(back) back.style.display="inline";
   if(cr) cr.textContent=(hmActiveClass?hmActiveClass+" › ":"")+family;
+}
+
+function famOpenCountsForOG(hgId, ogId){
+  const hgRec = _hgDataById[hgId] || null;
+  if(!hgRec) return;
+  switchTab("heatmap");
+  hmViewMode="og";
+  hmActiveClass=hgRec.class || hgRec.pref || null;
+  hmActiveFamily=hgRec.family || null;
+  hmActiveHG=hgId;
+  hmActiveHGRec=hgRec;
+  hmFocusedOG={hgId, ogId};
+  drawHeatmap();
+}
+
+function _treeSourceLabel(source){
+  return source === "prev" ? "IQ-TREE" : "GeneRax";
+}
+
+function famOpenTreeForOG(hgId, ogId){
+  const treeRec = _treeRecById[hgId] || null;
+  if(!treeRec) return;
+  hmFocusedOG=null;
+  hmOpenTreeForOG(treeRec, ogId);
+}
+
+function famOpenAlignmentForOG(hgId, ogId){
+  const treeRec = _treeRecById[hgId] || null;
+  if(!treeRec) return;
+  hmFocusedOG=null;
+  hmOpenAlignmentForOG(treeRec, ogId);
+}
+
+let _famOgPopupState = {counts:null, tree:null, align:null};
+function showFamOgPopup(ev, hgId, ogId){
+  let popup = document.getElementById("fam-og-popup");
+  if(!popup){
+    popup = document.createElement("div");
+    popup.id = "fam-og-popup";
+    popup.style.cssText = "position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:0 3px 10px rgba(0,0,0,.2);z-index:9999;min-width:180px";
+    popup.innerHTML = `
+      <div id="fam-og-popup-title" style="font-size:10px;color:#888;margin-bottom:6px;font-weight:600"></div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button id="fam-og-popup-counts" style="padding:4px 10px;font-size:11px;border:1px solid #2a6fa8;border-radius:4px;background:#f2f8fd;color:#2a6fa8;cursor:pointer;text-align:left">Show counts</button>
+        <button id="fam-og-popup-tree" style="padding:4px 10px;font-size:11px;border:1px solid #27ae60;border-radius:4px;background:#f3fbf5;color:#1d7a43;cursor:pointer;text-align:left">Show gene tree</button>
+        <button id="fam-og-popup-align" style="padding:4px 10px;font-size:11px;border:1px solid #8e44ad;border-radius:4px;background:#f8f2fb;color:#7b3699;cursor:pointer;text-align:left">Show alignment</button>
+      </div>`;
+    document.body.appendChild(popup);
+    const hide = ()=>{ popup.style.display="none"; _famOgPopupState={counts:null, tree:null, align:null}; };
+    popup.querySelector("#fam-og-popup-counts").addEventListener("click",()=>{ const fn=_famOgPopupState.counts; hide(); if(fn) fn(); });
+    popup.querySelector("#fam-og-popup-tree").addEventListener("click",()=>{ const fn=_famOgPopupState.tree; hide(); if(fn) fn(); });
+    popup.querySelector("#fam-og-popup-align").addEventListener("click",()=>{ const fn=_famOgPopupState.align; hide(); if(fn) fn(); });
+    document.addEventListener("click",(e)=>{ if(popup.style.display==="block" && !popup.contains(e.target)) hide(); });
+  }
+  ev.stopPropagation();
+  hideTip();
+  popup.querySelector("#fam-og-popup-title").textContent = ogId;
+  const treeRec = _treeRecById[hgId] || null;
+  const sourceLabel = _treeSourceLabel(treeRec?.source || "generax");
+  popup.querySelector("#fam-og-popup-tree").textContent = `Show gene tree (${sourceLabel})`;
+  popup.querySelector("#fam-og-popup-align").textContent = `Show alignment (${sourceLabel})`;
+  _famOgPopupState = {
+    counts: ()=>famOpenCountsForOG(hgId, ogId),
+    tree: ()=>famOpenTreeForOG(hgId, ogId),
+    align: ()=>famOpenAlignmentForOG(hgId, ogId),
+  };
+  popup.querySelector("#fam-og-popup-align").style.display = HAVE_ALIGNMENTS ? "" : "none";
+  popup.style.display = "block";
+  popup.style.left = Math.min(ev.clientX + 8, window.innerWidth - popup.offsetWidth - 8) + "px";
+  popup.style.top = Math.min(ev.clientY + 8, window.innerHeight - popup.offsetHeight - 8) + "px";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -5325,25 +6308,113 @@ const cladoColors     = new Map();   // key → custom fill color override
 // map: clade label → sorted array of species (updated by drawCladogram, read by drawHeatmap)
 const hmCollapsedBands = [];  // [{species:[...], label}] — reset on each drawCladogram call
 
-(function seedSpeciesGroupCollapses(){
-  if(!SP_TREE_DATA||!Object.keys(SPECIES_GROUPS).length) return;
-  const treeLeaves = new Set(spNodeLeaves(SP_TREE_DATA));
-  const groups = {};
-  Object.entries(SPECIES_GROUPS).forEach(([sp, grp])=>{
-    if(!grp||!treeLeaves.has(sp)) return;
-    (groups[grp]||(groups[grp]=[])).push(sp);
-  });
-  Object.entries(groups).forEach(([grp, sps])=>{
-    const uniq = [...new Set(sps)];
-    if(uniq.length < 2) return;
-    const node = findSpMrcaForSpecies(SP_TREE_DATA, new Set(uniq));
-    if(!node||node===SP_TREE_DATA||!node.children||node.children.length<2) return;
-    const key = spTreeNodeKey(node);
-    spCollapsed.add(key);
-    cladoCollapsed.add(key);
-    if(!cladoNames.has(key)) cladoNames.set(key, grp);
-  });
-})();
+function _speciesColorValue(sp){
+  const rgb=_cssToRgb(spColor(sp));
+  return rgb ? _rgbToHex(rgb[0], rgb[1], rgb[2]) : "#aaaaaa";
+}
+
+function getSpeciesAnnotationSummary(sp){
+  buildOGIndex();
+  const classCounts={};
+  let total=0;
+  for(const [gene,og] of Object.entries(hmGeneIndex)){
+    if(getSpeciesPfx(gene)!==sp) continue;
+    const cls=(hmOGIndex[og]||{}).cls||"other";
+    classCounts[cls]=(classCounts[cls]||0)+1;
+    total++;
+  }
+  return {total, classCounts};
+}
+
+function selectSpecies(sp, redraw=false){
+  selectedSpecies=sp||null;
+  renderSelectedSpeciesInfo();
+  if(redraw) drawSpeciesTree();
+}
+
+function renderSelectedSpeciesInfo(){
+  const panel=document.getElementById("sp-info-panel");
+  if(!panel) return;
+  if(!selectedSpecies){
+    panel.innerHTML = `
+      <div class="sp-info-empty">
+        <div style="font-size:18px;font-weight:700;color:#304050;margin-bottom:10px">Species details</div>
+        <div>Click a species tip or label in the tree to pin its image, metadata, and annotation download action here.</div>
+      </div>`;
+    return;
+  }
+  const sp=selectedSpecies;
+  const meta=spMeta[sp]||{genes:0,families:0,hgs:0};
+  const fullName=SPECIES_INFO[sp]||"";
+  const grp=SPECIES_GROUPS[sp]||"";
+  const grpCol=grp?(groupColors[grp]||"#6c8aa8"):"";
+  const imgSrc=SPECIES_IMAGES[sp]||"";
+  const summary=getSpeciesAnnotationSummary(sp);
+  panel.innerHTML = `
+    ${imgSrc ? `<img class="sp-info-image" src="${imgSrc}" alt="${_proteinEsc(sp)} silhouette">` : ""}
+    <div class="sp-info-head">
+      <div class="sp-info-code" style="color:${spColor(sp)}">${_proteinEsc(sp)}</div>
+      ${fullName ? `<div class="sp-info-name">${_proteinEsc(fullName)}</div>` : ""}
+      ${grp ? `<div class="sp-info-group" style="background:${grpCol}">${_proteinEsc(grp)}</div>` : ""}
+    </div>
+    <div class="sp-info-stats">
+      <div class="sp-info-stat">
+        <span class="sp-info-stat-label">Annotated genes</span>
+        <span class="sp-info-stat-value">${meta.genes||0}</span>
+      </div>
+      <div class="sp-info-stat">
+        <span class="sp-info-stat-label">Families</span>
+        <span class="sp-info-stat-value">${meta.families||0}</span>
+      </div>
+      <div class="sp-info-stat">
+        <span class="sp-info-stat-label">Homology groups</span>
+        <span class="sp-info-stat-value">${meta.hgs||0}</span>
+      </div>
+    </div>
+    <div class="sp-info-actions">
+      <label class="sp-info-color">
+        Species colour
+        <input type="color" id="sp-info-color-input" value="${_speciesColorValue(sp)}" style="width:30px;height:24px;border:1px solid #bcc7d1;border-radius:4px;padding:1px;cursor:pointer">
+      </label>
+    </div>
+    <div class="sp-info-downloads">
+      <div class="sp-info-download-title">Download annotations</div>
+      <div class="sp-info-download-grid" id="sp-info-download-grid"></div>
+    </div>
+    <div class="sp-info-note">
+      ${summary.total ? `${summary.total} annotation${summary.total===1?"":"s"} available for this species.` : "No per-gene annotations are currently available for this species."}
+    </div>`;
+  const dlGrid=document.getElementById("sp-info-download-grid");
+  if(dlGrid){
+    const btnStyle="padding:6px 10px;font-size:11px;border:1px solid #aac4e8;border-radius:6px;background:#f6faff;color:#255b8f;cursor:pointer;text-align:left;width:100%;display:flex;justify-content:space-between;gap:10px";
+    const makeBtn=(label, cls, count)=>{
+      const b=document.createElement("button");
+      b.type="button";
+      b.className="sp-info-download";
+      b.style.cssText=btnStyle;
+      const left=document.createElement("span");
+      left.textContent=label;
+      const right=document.createElement("span");
+      right.textContent=String(count);
+      right.style.cssText="color:#5f7287;font-variant-numeric:tabular-nums;flex-shrink:0";
+      b.appendChild(left);
+      b.appendChild(right);
+      b.addEventListener("click",()=>downloadSpeciesGenes(sp, cls));
+      dlGrid.appendChild(b);
+    };
+    makeBtn("All genes", undefined, summary.total);
+    Object.entries(summary.classCounts)
+      .sort((a,b)=> (b[1]-a[1]) || a[0].localeCompare(b[0]))
+      .forEach(([cls,count])=>makeBtn(cls, cls, count));
+  }
+  const colorInput=document.getElementById("sp-info-color-input");
+  if(colorInput){
+    colorInput.addEventListener("input",function(){
+      SP_COLORS[sp]=this.value;
+      refreshSpeciesColorViews();
+    });
+  }
+}
 
 function drawCladogram() {
   hmCollapsedBands.length = 0;  // reset collapsed-clade shading bands
@@ -5533,6 +6604,7 @@ function clearHmSplits() {
 function hmOpenTreeForHG(tRec, sp){
   if(!tRec) return;
   hmFocusGids=null;
+  hmFocusedOG=null;
   switchTab("trees");
   selectTree(tRec);
   renderSidebar("");
@@ -5545,6 +6617,7 @@ function hmOpenTreeForHG(tRec, sp){
 
 function hmOpenTreeForOG(treeRec, ogId, sp){
   if(!treeRec) return;
+  hmFocusedOG=null;
   const det=loadDetail(treeRec.id);
   const ogGids=(det&&det.ogs&&det.ogs[ogId])||[];
   const targetGids=sp?ogGids.filter(g=>getSpeciesPfx(g)===sp):ogGids;
@@ -5562,6 +6635,7 @@ function hmOpenTreeForOG(treeRec, ogId, sp){
 function hmOpenAlignmentForHG(alnId){
   if(!HAVE_ALIGNMENTS) return;
   if(!alnId) return;
+  hmFocusedOG=null;
   switchTab("align");
   selectAlignment(alnId);
 }
@@ -5569,8 +6643,9 @@ function hmOpenAlignmentForHG(alnId){
 function hmOpenAlignmentForOG(treeRec, ogId){
   if(!HAVE_ALIGNMENTS) return;
   if(!treeRec) return;
+  hmFocusedOG=null;
   switchTab("align");
-  selectAlignment(treeRec.id);
+  selectAlignment(treeRec.id, {source: treeRec.source || "generax"});
   const allOGs=[...new Set(Object.values(alnOgMap))];
   alnHiddenOGs.clear();
   alnCollapsedOGs.clear();
@@ -5579,6 +6654,10 @@ function hmOpenAlignmentForOG(treeRec, ogId){
 }
 
 function drawSpeciesTree() {
+  return drawSpeciesTreeRect();
+}
+
+function drawSpeciesTreeRect() {
   const wrap = document.getElementById("sp-tree-wrap");
   wrap.innerHTML = "";
   if (!SP_TREE_DATA || !SP_TREE_DATA.children || !SPECIES_ORDER.length) {
@@ -5586,11 +6665,18 @@ function drawSpeciesTree() {
     return;
   }
 
-  const rowH = 22, topM = 16, leftM = 16, rightM = 260;
+  const rowH = 22, topM = 16, leftM = 16;
   const W = Math.max(Math.floor((wrap.clientWidth || 900) * spTreeWidthPct / 100), 300);
-  const treeW = W - leftM - rightM;
   const inPhylo = new Set(ALL_SPECIES);
   const tipColor = n => inPhylo.has(n.name) ? spColor(n.name) : "#bbb";
+  const imgW = 24, imgH = 18, imgGap = 4;
+  const reserveLogoCol = !!spShowLogos;
+  const speciesLabel = sp => (spShowFullNames && SPECIES_INFO[sp]) ? SPECIES_INFO[sp] : sp;
+  const speciesLabelFont = (sp, fontPx) => (spShowFullNames && SPECIES_INFO[sp])
+    ? `italic ${fontPx}px sans-serif`
+    : `${fontPx}px monospace`;
+  const labelMeasureCtx = drawSpeciesTreeRect._labelMeasureCtx
+    || (drawSpeciesTreeRect._labelMeasureCtx = document.createElement("canvas").getContext("2d"));
 
   // groupColors is recomputed whenever species colors change
 
@@ -5615,6 +6701,18 @@ function drawSpeciesTree() {
   const tree = prune(clone(SP_TREE_DATA));
   SP_TREE_PRUNED = tree;
   if(!tree){ wrap.innerHTML='<p style="padding:20px;color:#888">Species tree is empty.</p>'; return; }
+  const allLeaves = getLeaves(tree);
+  function measureSpeciesLabel(sp, fontPx){
+    labelMeasureCtx.font = speciesLabelFont(sp, fontPx);
+    return labelMeasureCtx.measureText(speciesLabel(sp)).width;
+  }
+  const maxLabelW = d3.max(allLeaves, l => measureSpeciesLabel(l.name, 12)) || 0;
+  const maxChipW = d3.max(allLeaves, l => {
+    const grp = SPECIES_GROUPS[l.name] || "";
+    return grp ? (grp.length * 6.5 + 10) : 0;
+  }) || 0;
+  const rightM = Math.max(260, Math.ceil(10 + (reserveLogoCol ? imgW + imgGap : 0) + maxLabelW + (maxChipW ? maxChipW + 28 : 0)));
+  const treeW = Math.max(140, W - leftM - rightM);
 
   // ── assign stable IDs and depths ──────────────────────────────────────
   let _uid=0;
@@ -5693,25 +6791,43 @@ function drawSpeciesTree() {
       }
       // species names at triangle base — same layout as drawLeaves
       const nameH=n._colH/leaves.length;
-      const imgW=24, imgH=18, imgGap=4;
       leaves.forEach((l,i)=>{
         const ly=n._colY0+i*nameH+nameH/2;
         const tc=tipColor(l);
         const imgSrc=SPECIES_IMAGES[l.name]||"";
-        const showImg=imgSrc&&nameH>=14;
-        const textX=xTip+10+(showImg?imgW+imgGap:0);
+        const isSelected=selectedSpecies===l.name;
+        const showImg=spShowLogos&&imgSrc&&nameH>=14;
+        const labelText=speciesLabel(l.name);
+        const textX=xTip+10+(reserveLogoCol?imgW+imgGap:0);
         svg.append("circle").attr("cx",xTip).attr("cy",ly).attr("r",5)
-          .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.8);
+          .attr("fill",tc).attr("stroke",isSelected?"#111":"#fff").attr("stroke-width",isSelected?2:0.8)
+          .style("cursor","pointer")
+          .on("click",(ev)=>{ ev.stopPropagation(); hideTip(); selectSpecies(l.name, true); })
+          .on("mouseover",(ev)=>showTip(ev,`<div class="tt-name" style="color:${tc}">${l.name}</div><div style="font-size:9px;color:#aaa">click to show details</div>`))
+          .on("mousemove",moveTip).on("mouseout",hideTip);
         if(showImg){
           svg.append("image")
             .attr("x",xTip+10).attr("y",ly-imgH/2)
             .attr("width",imgW).attr("height",imgH)
             .attr("href",imgSrc)
-            .attr("preserveAspectRatio","xMidYMid meet");
+            .attr("preserveAspectRatio","xMidYMid meet")
+            .style("cursor","pointer")
+            .on("click",(ev)=>{ ev.stopPropagation(); hideTip(); selectSpecies(l.name, true); })
+            .on("mouseover",(ev)=>showTip(ev,`<div class="tt-name" style="color:${tc}">${l.name}</div><div style="font-size:9px;color:#aaa">click to show details</div>`))
+            .on("mousemove",moveTip).on("mouseout",hideTip);
         }
+        const collapsedFontPx = Math.max(7,Math.min(11,nameH-2));
         svg.append("text").attr("x",textX).attr("y",ly).attr("dy","0.35em")
-          .attr("font-size",Math.max(7,Math.min(11,nameH-2)))
-          .attr("fill",tc).attr("font-family","monospace").text(l.name);
+          .attr("font-size",collapsedFontPx)
+          .attr("fill",tc)
+          .attr("font-family",(spShowFullNames && SPECIES_INFO[l.name]) ? "sans-serif" : "monospace")
+          .attr("font-style",(spShowFullNames && SPECIES_INFO[l.name]) ? "italic" : "normal")
+          .attr("font-weight",(spShowFullNames && SPECIES_INFO[l.name]) ? "400" : (isSelected?"700":"400"))
+          .text(labelText)
+          .style("cursor","pointer")
+          .on("click",(ev)=>{ ev.stopPropagation(); hideTip(); selectSpecies(l.name, true); })
+          .on("mouseover",(ev)=>showTip(ev,`<div class="tt-name" style="color:${tc}">${l.name}</div><div style="font-size:9px;color:#aaa">click to show details</div>`))
+          .on("mousemove",moveTip).on("mouseout",hideTip);
       });
       return;
     }
@@ -5794,23 +6910,21 @@ function drawSpeciesTree() {
     if(!n.children){
       const tc=tipColor(n);
       const inData=inPhylo.has(n.name);
+      const isSelected=selectedSpecies===n.name;
       svg.append("circle").attr("cx",sx(n._d)).attr("cy",n._y).attr("r",5)
-        .attr("fill",tc).attr("stroke","#fff").attr("stroke-width",0.8)
-        .style("cursor",inData?"pointer":"default")
-        .on("mouseover",(ev)=>{ if(inData) showTip(ev,'<div style="font-size:10px;color:#aaa">click to change color</div>'); })
+        .attr("fill",tc).attr("stroke",isSelected?"#111":"#fff").attr("stroke-width",isSelected?2:0.8)
+        .style("cursor","pointer")
+        .on("mouseover",(ev)=>showTip(ev,makeTip()))
         .on("mousemove",moveTip).on("mouseout",hideTip)
         .on("click",(ev)=>{
-          if(!inData) return;
           ev.stopPropagation();
-          openColorPicker(spColor(n.name),c=>{
-            SP_COLORS[n.name]=c;
-            refreshSpeciesColorViews();
-          });
+          hideTip();
+          selectSpecies(n.name, true);
         });
       const imgSrc=SPECIES_IMAGES[n.name]||"";
-      const imgW=24, imgH=18, imgGap=4;
-      const textX=sx(n._d)+10+(imgSrc?imgW+imgGap:0);
-      if(imgSrc){
+      const labelText=speciesLabel(n.name);
+      const textX=sx(n._d)+10+(reserveLogoCol?imgW+imgGap:0);
+      if(spShowLogos&&imgSrc){
         svg.append("image")
           .attr("x",sx(n._d)+10).attr("y",n._y-imgH/2)
           .attr("width",imgW).attr("height",imgH)
@@ -5818,10 +6932,19 @@ function drawSpeciesTree() {
           .attr("preserveAspectRatio","xMidYMid meet")
           .style("cursor","pointer")
           .on("mouseover",(ev)=>showTip(ev,makeTip())).on("mousemove",moveTip).on("mouseout",hideTip)
-          .on("click",(ev)=>{ hideTip(); showSpAnnotPopup(ev, n.name); });
+          .on("click",(ev)=>{ ev.stopPropagation(); hideTip(); selectSpecies(n.name, true); });
       }
       const grp=SPECIES_GROUPS[n.name]||"";
       const grpCol=grp?groupColors[grp]:"";
+      const estW=(grp&&grpCol)?(grp.length*6.5+10):0;
+      const maxLabelPx=(grp&&grpCol)?(W-8-estW-8-textX):(W-16-textX);
+      labelMeasureCtx.font=speciesLabelFont(n.name,12);
+      let displayText=labelText;
+      if(maxLabelPx>0&&labelMeasureCtx.measureText(labelText).width>maxLabelPx){
+        let t=labelText;
+        while(t.length>1&&labelMeasureCtx.measureText(t+"…").width>maxLabelPx) t=t.slice(0,-1);
+        displayText=t+"…";
+      }
       function makeTip(){
         const m=spMeta[n.name]||{genes:0,families:0,hgs:0};
         const fullName=SPECIES_INFO[n.name]||"";
@@ -5832,16 +6955,20 @@ function drawSpeciesTree() {
           +'<div class="tt-row"><span>Annotated genes</span><strong>'+m.genes+'</strong></div>'
           +'<div class="tt-row"><span>Families</span><strong>'+m.families+'</strong></div>'
           +'<div class="tt-row"><span>Homology groups</span><strong>'+m.hgs+'</strong></div>'
-          +'<div style="font-size:9px;color:#aaa;margin-top:3px">click to export annotations</div>';
+          +'<div style="font-size:9px;color:#aaa;margin-top:3px">click to pin details</div>';
       }
       svg.append("text").attr("x",textX).attr("y",n._y).attr("dy","0.35em")
-        .attr("font-size",12).attr("fill",inData?"#222":"#bbb").attr("font-family","monospace").text(n.name)
+        .attr("font-size",12)
+        .attr("fill",inData?"#222":"#bbb")
+        .attr("font-family",(spShowFullNames && SPECIES_INFO[n.name]) ? "sans-serif" : "monospace")
+        .attr("font-style",(spShowFullNames && SPECIES_INFO[n.name]) ? "italic" : "normal")
+        .attr("font-weight",(spShowFullNames && SPECIES_INFO[n.name]) ? "400" : (isSelected?"700":"400"))
+        .text(displayText)
         .style("cursor","pointer")
         .on("mouseover",(ev)=>showTip(ev,makeTip())).on("mousemove",moveTip).on("mouseout",hideTip)
-        .on("click",(ev)=>{ hideTip(); showSpAnnotPopup(ev, n.name); });
+        .on("click",(ev)=>{ ev.stopPropagation(); hideTip(); selectSpecies(n.name, true); });
       if(grp && grpCol){
         const pillH=13, pillRx=3, badgeX=W-8;
-        const estW=grp.length*6.5+10;
         svg.append("rect")
           .attr("x",badgeX-estW).attr("y",n._y-pillH/2)
           .attr("width",estW).attr("height",pillH).attr("rx",pillRx)
@@ -5907,7 +7034,7 @@ function drawHeatmap() {
       Object.values(a.species_counts).reduce((x,y)=>x+y,0));
     back.style.display="none"; crumb.textContent=""; expandBtn.style.display="none";
     colLabel=d=>d.id;
-    clickHandler=(_ev,d)=>{ hmViewMode="family"; hmActiveClass=d.id; drawHeatmap(); };
+      clickHandler=(_ev,d)=>{ hmViewMode="family"; hmActiveClass=d.id; hmFocusedOG=null; drawHeatmap(); };
 
   } else if (hmViewMode==="family") {
     data=FAMILY_DATA.filter(d=>(d.class||d.pref)===hmActiveClass)
@@ -5915,7 +7042,7 @@ function drawHeatmap() {
                     .sort((a,b)=>b.total-a.total);
     back.style.display="inline"; crumb.textContent=hmActiveClass; expandBtn.style.display="none";
     colLabel=d=>d.family;
-    clickHandler=(_ev,d)=>{ hmViewMode="hg"; hmActiveFamily=d.family; drawHeatmap(); };
+    clickHandler=(_ev,d)=>{ hmViewMode="hg"; hmActiveFamily=d.family; hmFocusedOG=null; drawHeatmap(); };
 
   } else if (hmViewMode==="hg") {
     data=HG_DATA.filter(d=>d.family===hmActiveFamily)
@@ -5927,7 +7054,7 @@ function drawHeatmap() {
     clickHandler=(ev,d,sp)=>{
       if(sp===undefined){
         if(ev.shiftKey){ hmExpandHGToOGs([d.id]); return; }
-        hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; drawHeatmap(); return;
+        hmViewMode="og"; hmActiveHG=d.id; hmActiveHGRec=d; hmFocusedOG=null; drawHeatmap(); return;
       }
       const tRec=TREE_INDEX.find(t=>t.id===d.id)||TREE_INDEX.find(t=>t.family===d.family&&t.hg===d.hg);
       if(!tRec) return;
@@ -5951,7 +7078,10 @@ function drawHeatmap() {
       gids.forEach(g=>{ const sp=getSpeciesPfx(g); if(sp) sc[sp]=(sc[sp]||0)+1; });
       return {id:og,species_counts:sc,total:gids.length};
     }).sort((a,b)=>b.total-a.total);
-    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG); expandBtn.style.display="none";
+    if(hmFocusedOG && hmFocusedOG.hgId===hmActiveHG){
+      data=data.filter(d=>d.id===hmFocusedOG.ogId);
+    }
+    back.style.display="inline"; crumb.textContent=hmActiveClass+" \u203a "+hmActiveFamily+" \u203a "+(r&&r.hg||hmActiveHG)+(hmFocusedOG&&hmFocusedOG.hgId===hmActiveHG?(" \u203a "+hmFocusedOG.ogId):""); expandBtn.style.display="none";
     colLabel=d=>d.id+" ["+d.total+"]";
     // third arg 'sp': species clicked (from cell), undefined for column-header click
     clickHandler=(ev,_d,sp)=>{
@@ -6553,9 +7683,9 @@ function drawHeatmap() {
 }
 
 function hmBack(){
-  if(hmViewMode==="og")     { hmViewMode="hg";     hmActiveHG=null; hmActiveHGRec=null; }
-  else if(hmViewMode==="hg"){ hmViewMode="family";  hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; }
-  else                      { hmViewMode="class";   hmActiveClass=null; hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; }
+  if(hmViewMode==="og")     { hmViewMode="hg";     hmActiveHG=null; hmActiveHGRec=null; hmFocusedOG=null; }
+  else if(hmViewMode==="hg"){ hmViewMode="family";  hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; hmFocusedOG=null; }
+  else                      { hmViewMode="class";   hmActiveClass=null; hmActiveFamily=null; hmActiveHG=null; hmActiveHGRec=null; hmFocusedOG=null; }
   drawHeatmap();
 }
 
@@ -6655,6 +7785,7 @@ function hmTextSearchGo(i){
   if(h.kind==="nav"){
     document.getElementById("hm-search-dd").style.display="none";
     document.getElementById("hm-text-search").value=""; hmTextFilter="";
+    hmFocusedOG=null;
     if(h.type==="class"){ hmViewMode="class"; hmActiveClass=h.cls; hmActiveFamily=hmActiveHG=hmActiveHGRec=null; }
     else if(h.type==="family"){ hmViewMode="family"; hmActiveClass=h.cls; hmActiveFamily=h.fam; hmActiveHG=hmActiveHGRec=null; }
     else if(h.type==="hg"){
@@ -6731,7 +7862,7 @@ function hmSearchSelectVisible(){
     const key=hmSearchItemKey(h);
     if(key && !hmSearchItemDone(h)) hmBatchSelection.add(key);
   });
-  hmTextSearchInput(document.getElementById("hm-text-search").value||"");
+  hmSearchAddSelected();
 }
 
 function hmSearchClearSelected(){
@@ -6779,7 +7910,7 @@ function hmExpandToOGs(){
 }
 function hmExitCustom(){
   hmViewMode="class"; hmActiveClass=null; hmActiveFamily=null;
-  hmActiveHG=null; hmActiveHGRec=null;
+  hmActiveHG=null; hmActiveHGRec=null; hmFocusedOG=null;
   hmColOrderOverride=null;
   document.getElementById("hm-custom-bar").style.display="none";
   drawHeatmap();
@@ -6996,14 +8127,8 @@ function populateDatalist(){
 }
 
 function resolveQuery(query){
-  const lq=(query||"").toLowerCase().trim();
-  if(!lq) return new Set();
-  const clade=CLADE_DATA.find(c=>c.name.toLowerCase()===lq)||CLADE_DATA.find(c=>c.name.toLowerCase().includes(lq));
-  if(clade) return new Set(Object.keys(clade.groups));
-  const sp=new Set();
-  if(currentIndex) for(const s of currentIndex.species){ if(s.toLowerCase().includes(lq)) sp.add(s); }
-  ALL_SPECIES.forEach(s=>{ if(s.toLowerCase().includes(lq)) sp.add(s); });
-  return sp;
+  const activeSpecies=currentIndex?new Set(currentIndex.species):new Set(ALL_SPECIES);
+  return resolveSpeciesSelectionQuery(query, activeSpecies);
 }
 
 function rebuildHlSet(){
@@ -7156,7 +8281,7 @@ document.getElementById("line-width-slider").addEventListener("input",function()
   treeLinkWidth=+this.value;
   document.getElementById("line-width-val").textContent=this.value;
   if(gMain) gMain.selectAll(".link").attr("stroke-width",treeLinkWidth/_zoomScale);
-  if(gMain) gMain.selectAll(".col-tri").attr("stroke-width",treeLinkWidth/_zoomScale);
+  if(gMain) gMain.selectAll(".col-tri").attr("stroke-width",1/_zoomScale);
 });
 
 document.getElementById("tree-height-slider").addEventListener("input",function(){
@@ -7336,44 +8461,6 @@ function downloadSpeciesGenes(sp, cls){
   URL.revokeObjectURL(a.href);
 }
 
-function showSpAnnotPopup(event, sp){
-  buildOGIndex();
-  const classCounts={};   // cls → gene count for this species
-  let total=0;
-  for(const [gene,og] of Object.entries(hmGeneIndex)){
-    if(getSpeciesPfx(gene)!==sp) continue;
-    const cls=(hmOGIndex[og]||{}).cls||"other";
-    classCounts[cls]=(classCounts[cls]||0)+1;
-    total++;
-  }
-  const sorted=Object.keys(classCounts).sort();
-  if(!sorted.length){ downloadSpeciesGenes(sp); return; }
-  const pop=document.getElementById("sp-annot-popup");
-  document.getElementById("sp-annot-popup-title").textContent=sp;
-  const btns=document.getElementById("sp-annot-popup-btns"); btns.innerHTML="";
-  const btnStyle="padding:3px 8px;font-size:11px;border:1px solid #aaa;border-radius:3px;background:#f8f8f8;cursor:pointer;text-align:left;width:100%;display:flex;justify-content:space-between;gap:8px";
-  const mkBtn=(label,cls,count)=>{
-    const b=document.createElement("button"); b.style.cssText=btnStyle;
-    const nameSpan=document.createElement("span"); nameSpan.textContent=label;
-    const countSpan=document.createElement("span");
-    countSpan.textContent=count; countSpan.style.cssText="color:#888;font-variant-numeric:tabular-nums;flex-shrink:0";
-    b.appendChild(nameSpan); b.appendChild(countSpan);
-    b.onclick=()=>{ pop.style.display="none"; downloadSpeciesGenes(sp,cls); };
-    btns.appendChild(b);
-  };
-  mkBtn("All classes", undefined, total);
-  sorted.forEach(c=>mkBtn(c, c, classCounts[c]));
-  event.stopPropagation();
-  pop.style.display="block";
-  const x=Math.min(event.clientX+8,window.innerWidth-pop.offsetWidth-8);
-  const y=Math.min(event.clientY+8,window.innerHeight-pop.offsetHeight-8);
-  pop.style.left=Math.max(4,x)+"px"; pop.style.top=Math.max(4,y)+"px";
-}
-document.addEventListener("click",(e)=>{
-  const pop=document.getElementById("sp-annot-popup");
-  if(pop&&!pop.contains(e.target)&&e.target.id!=="sp-annot-popup") pop.style.display="none";
-});
-
 function downloadAnnotations(){
   // Build species × class annotation table from FAMILY_DATA
   const rows=[];
@@ -7472,11 +8559,13 @@ function toggleTreeSource(){
     treeSource="original";
     toggle.textContent="Showing: Original (bootstrap)";
     rebuildOgColors();
+    document.getElementById("n-ogs-label").textContent=Object.keys(activeOgs()).length+" orthogroups";
     drawGeneTree(currentDetail.prev_tree);
   } else {
     treeSource="generax";
     toggle.textContent="Showing: GeneRax";
     rebuildOgColors();
+    document.getElementById("n-ogs-label").textContent=Object.keys(activeOgs()).length+" orthogroups";
     drawGeneTree(currentDetail.tree);
   }
 }
@@ -7512,10 +8601,13 @@ function applyTipFontSize(){
   if(!gMain) return;
   const fs=tipFontSVG();
   const labelFs=treeLabelFontSVG();
+  const cladeLabelFs=cladeHighlightLabelFontSVG();
   gMain.selectAll(".leaf-label").attr("font-size",d=>d&&d.data&&d.data.leaf?labelFs:0);
   gMain.selectAll(".og-label").attr("font-size",labelFs);
   // update MRCA sub-label tspan inside og-label
   gMain.selectAll(".og-label tspan:nth-child(2)").attr("font-size",Math.max(7,labelFs*0.82));
+  gMain.selectAll(".clade-hl-label-main").attr("font-size",cladeLabelFs);
+  gMain.selectAll(".clade-hl-label-sub").attr("font-size",cladeHighlightSubtitleFontSVG());
   const colR2=Math.max(10,fs*0.9), leafR2=fs*0.36, colCx2=-(colR2-leafR2);
   gMain.selectAll(".count-label").attr("font-size",fs).attr("x",d=>d&&d._children&&!d._isOgCol?colCx2:null);
   gMain.selectAll("circle").filter(d=>d&&d._children&&!d._isOgCol).attr("r",colR2).attr("cx",colCx2);
@@ -7765,20 +8857,57 @@ function toggleDSNodes(){
 }
 
 // ── Mini species tree floating panel ──────────────────────────────────────────
-function toggleMiniSpPanel(ev){
+let _miniSpMode = "tree";
+
+function _miniSpContext(mode){
+  if(mode==="align"){
+    const activeSpecies=_alnActiveSpeciesSet();
+    return {
+      mode,
+      buttonId:"btn-aln-mini-sp",
+      title:"Species tree — click a named node to filter the alignment to that clade",
+      activeSpecies,
+      onPick(nodeName, cladeSps){
+        const resolved=resolveSpeciesSelectionQuery(nodeName, activeSpecies);
+        if(resolved.size>0){ _alnAddSpFilter(nodeName); }
+        else { cladeSps.forEach(s=>_alnAddSpFilter(s)); }
+      },
+    };
+  }
+  const activeSpecies=currentIndex?new Set(currentIndex.species):new Set(ALL_SPECIES);
+  return {
+    mode:"tree",
+    buttonId:"btn-mini-sp",
+    title:"Species tree — click a named node to highlight that clade",
+    activeSpecies,
+    onPick(nodeName, cladeSps){
+      const resolved=resolveSpeciesSelectionQuery(nodeName, activeSpecies);
+      if(resolved.size>0){ addHlTag(nodeName); }
+      else { cladeSps.forEach(s=>addHlTag(s)); }
+    },
+  };
+}
+
+function toggleMiniSpPanel(ev, mode){
   const panel=document.getElementById("mini-sp-panel");
-  if(panel.style.display==="block"){ panel.style.display="none"; return; }
+  const nextMode=mode||"tree";
+  if(panel.style.display==="block"&&_miniSpMode===nextMode){ panel.style.display="none"; return; }
+  _miniSpMode=nextMode;
   // position near button
-  const btn=document.getElementById("btn-mini-sp");
+  const ctx=_miniSpContext(_miniSpMode);
+  const btn=document.getElementById(ctx.buttonId);
+  if(!btn) return;
   const r=btn.getBoundingClientRect();
   panel.style.top=(r.bottom+6)+"px";
   panel.style.left=Math.max(0,r.left-180)+"px";
   panel.style.display="block";
-  drawMiniSpTree();
+  const title=document.getElementById("mini-sp-title");
+  if(title) title.textContent=ctx.title;
+  drawMiniSpTree(ctx);
 }
 document.addEventListener("click",ev=>{
   const panel=document.getElementById("mini-sp-panel");
-  if(panel.style.display==="block"&&!panel.contains(ev.target)&&ev.target.id!=="btn-mini-sp")
+  if(panel.style.display==="block"&&!panel.contains(ev.target)&&!ev.target.closest("[data-mini-sp-btn]"))
     panel.style.display="none";
   // close global heatmap search dropdown when clicking outside
   if(!ev.target.closest("#hm-text-search")&&!ev.target.closest("#hm-search-dd")){
@@ -7787,16 +8916,19 @@ document.addEventListener("click",ev=>{
   }
   // close OG highlight dropdown when clicking outside
   if(!ev.target.closest("#og-hl-search")&&!ev.target.closest("#og-hl-dd")) ogHlHideDD();
+  // close families dropdown when clicking outside
+  if(!ev.target.closest("#fam-search")&&!ev.target.closest("#fam-search-dd")) famHideDD();
 });
 
-function drawMiniSpTree(){
+function drawMiniSpTree(ctx){
   const wrap=document.getElementById("mini-sp-svg-wrap"); wrap.innerHTML="";
   if(!SP_TREE_DATA) return;
+  ctx=ctx||_miniSpContext(_miniSpMode);
   // simple recursive layout
   function flat(n){ return [n].concat(n.children?n.children.flatMap(flat):[]); }
   function clone(n){ return Object.assign({},n,{children:n.children?n.children.map(clone):null}); }
   // collect only species present in current tree
-  const activeSp=currentIndex?new Set(currentIndex.species):new Set(ALL_SPECIES);
+  const activeSp=ctx.activeSpecies instanceof Set ? ctx.activeSpecies : new Set(ctx.activeSpecies||ALL_SPECIES);
   function prune(n){
     if(!n.children) return activeSp.has(n.name)?n:null;
     const k=n.children.map(prune).filter(Boolean);
@@ -7839,10 +8971,7 @@ function drawMiniSpTree(){
           function sp2(nd){ return nd.children?nd.children.flatMap(sp2):[nd.name]; }
           const cladeSps=sp2(n).filter(s=>activeSp.has(s));
           if(!cladeSps.length) return;
-          // try clade name first (works if in CLADE_DATA); else add species individually
-          const resolved=resolveQuery(n.name);
-          if(resolved.size>0){ addHlTag(n.name); }
-          else { cladeSps.forEach(s=>addHlTag(s)); }
+          ctx.onPick(n.name, cladeSps);
           document.getElementById("mini-sp-panel").style.display="none";
         });
     }
@@ -9176,7 +10305,7 @@ function fitTree(){
   if(!b.width||!b.height) return;
   const pad=24;
   const sc=Math.min((W-pad*2)/b.width,(H-pad*2)/b.height,2);
-  const tx=(W-b.width*sc)/2-b.x*sc, ty=(H-b.height*sc)/2-b.y*sc;
+  const tx=pad-b.x*sc, ty=(H-b.height*sc)/2-b.y*sc;
   treeSvg.transition().duration(350)
     .call(_zoom.transform, d3.zoomIdentity.translate(tx,ty).scale(sc));
 }
@@ -9291,10 +10420,12 @@ function renderTree(animate){
     visibleLeafNodes,
     d=>leafLabelRightPx(d, mg, leafLabelLayout)
   ) || (nodeX(rootNode,mg)+iWeff);
+  const cladeLabelFs=cladeHighlightLabelFontSVG();
+  const cladeSubtitleFs=cladeHighlightSubtitleFontSVG();
   const maxCladeLabelWidth=cladeHighlights.size
     ? d3.max(Array.from(cladeHighlights.values()), rec=>Math.max(
-        measureTextPx((rec&&rec.label)||"", 16, "sans-serif", "600"),
-        measureTextPx((rec&&rec.subtitle)||"", 12, "sans-serif", "400")
+        measureTextPx((rec&&rec.label)||"", cladeLabelFs, "sans-serif", "600"),
+        measureTextPx((rec&&rec.subtitle)||"", cladeSubtitleFs, "sans-serif", "400")
       ))
     : 0;
   treeSvg.attr("width", Math.max(W, visLeafRight + cladeHlExtend + 14 + (maxCladeLabelWidth||0) + 24));
@@ -9331,9 +10462,10 @@ function renderTree(animate){
           .on("click",(ev)=>{ ev.stopPropagation(); showCladeHlPopup(ev,uid); })
           .on("contextmenu",(ev)=>showCladeHlPopup(ev,uid));
         if(label){
-          const labelFontSize=Math.max(11, Math.min(13, tipFontSVG()*1.05));
+          const labelFontSize=cladeLabelFs;
           const textY=(y1+y2)/2 - (subtitle ? labelFontSize*0.42 : 0);
           const txt=hlLayer.append("text")
+            .attr("class","clade-hl-label")
             .attr("x", boxRight+8)
             .attr("y", textY)
             .attr("text-anchor","start")
@@ -9342,12 +10474,15 @@ function renderTree(animate){
             .attr("fill", "#111")
             .attr("opacity", 1)
             .style("pointer-events","none");
-          txt.append("tspan").text(label);
+          txt.append("tspan")
+            .attr("class","clade-hl-label-main")
+            .text(label);
           if(subtitle){
             txt.append("tspan")
+              .attr("class","clade-hl-label-sub")
               .attr("x", boxRight+8)
               .attr("dy","1.15em")
-              .attr("font-size",Math.max(10, labelFontSize*0.86))
+              .attr("font-size",cladeSubtitleFs)
               .attr("font-weight","400")
               .attr("fill","#8a97a1")
               .text(subtitle);
@@ -9459,7 +10594,7 @@ function renderTree(animate){
         const tipName=d.data.gene_id||d.data.name||"";
         if(tipName&&navigator.clipboard) navigator.clipboard.writeText(tipName).then(()=>{
           const tt=document.getElementById("tooltip");
-          tt.style.display="block"; tt.innerHTML="<span style='color:#1abc9c'>&#10003; Copied!</span>";
+          tt.style.display="block"; tt.innerHTML="<span style='color:#f59e0b'>&#10003; Copied!</span>";
           tt.style.left=Math.min(event.clientX+12,window.innerWidth-tt.offsetWidth-5)+"px";
           tt.style.top=Math.min(event.clientY+12,window.innerHeight-tt.offsetHeight-5)+"px";
           setTimeout(()=>{ tt.style.display="none"; },900);
@@ -9505,7 +10640,7 @@ function renderTree(animate){
       }
       return "#ffffff";
     })
-    .attr("stroke-width",d=>(d._children&&d._isOgCol)?treeLinkWidth/_zoomScale:null)
+    .attr("stroke-width",d=>(d._children&&d._isOgCol)?1/_zoomScale:null)
     .on("click",(event,d)=>{
       if(!d._children) return; event.stopPropagation();
       if(_compareNode1!==null){ if(_compareNode1!==d) runSpeciesComparison(d); hideTip(); return; }
@@ -10078,12 +11213,12 @@ def _load_species_tree_bundle(species_tree_path):
     return species_order, tree_dict, newick_raw, clade_groupings
 
 
-def _load_tree_records(possvm_dir: Path, possvm_prev_dir):
+def _load_tree_records(possvm_dir: Path, possvm_prev_dir, family_info: dict | None = None):
     if not possvm_dir.exists():
         print(f"WARN: {possvm_dir} does not exist – no gene trees.", file=sys.stderr)
 
     raw_records, all_species, gene_meta = (
-        load_possvm_trees(possvm_dir, source="generax") if possvm_dir.exists() else ([], [], {})
+        load_possvm_trees(possvm_dir, source="generax", family_info=family_info) if possvm_dir.exists() else ([], [], {})
     )
     generax_gene_meta = dict(gene_meta)
     # Deduplicate: same possvm dir may have both .generax.tree and .treefile outputs.
@@ -10101,7 +11236,7 @@ def _load_tree_records(possvm_dir: Path, possvm_prev_dir):
     if possvm_prev_dir:
         prev_dir = Path(possvm_prev_dir)
         if prev_dir.is_dir():
-            prev_list, prev_sp, prev_gene_meta = load_possvm_trees(prev_dir, source="prev")
+            prev_list, prev_sp, prev_gene_meta = load_possvm_trees(prev_dir, source="prev", family_info=family_info)
             prev_records = {r["id"]: r for r in prev_list}
             for gene_id, meta in prev_gene_meta.items():
                 gene_meta.setdefault(gene_id, {}).update(meta)
@@ -10334,7 +11469,9 @@ def build_report_context(args) -> dict:
         args.species_tree
     )
 
-    records, all_species, prev_records, gene_meta, generax_gene_meta, prev_gene_meta = _load_tree_records(possvm_dir, possvm_prev_dir)
+    records, all_species, prev_records, gene_meta, generax_gene_meta, prev_gene_meta = _load_tree_records(
+        possvm_dir, possvm_prev_dir, family_info
+    )
     records, prev_records, family_records, hg_records = _filter_report_inputs(
         records, prev_records, family_records, hg_records, family_info
     )
@@ -10349,11 +11486,11 @@ def build_report_context(args) -> dict:
     family_info_records, have_generax = _build_family_info_records(
         family_details, family_records, hg_records, records, prev_records
     )
-    domain_hits = load_domain_hits(search_dir)
+    domain_hits = load_domain_hits(search_dir, family_info)
     domain_spans = build_domain_spans(domain_hits)
-    gene_lengths = load_gene_lengths(cluster_dir)
-    gene_to_hg, hg_sizes = load_gene_to_hg_map(cluster_dir)
-    search_gene_lengths = load_search_gene_lengths(search_dir)
+    gene_lengths = load_gene_lengths(cluster_dir, family_info)
+    gene_to_hg, hg_sizes = load_gene_to_hg_map(cluster_dir, family_info)
+    search_gene_lengths = load_search_gene_lengths(search_dir, family_info)
     protein_lengths = dict(gene_lengths)
     protein_lengths.update(search_gene_lengths)
     species_info, species_groups = load_species_info(args.species_info)
@@ -10366,8 +11503,10 @@ def build_report_context(args) -> dict:
     for gene_id, ref_name in refname_map.items():
         gene_meta.setdefault(gene_id, {})["is_reference_gene"] = True
         gene_meta[gene_id]["reference_gene_name"] = ref_name
-    protein_domain_catalog = build_exact_domain_catalog(search_dir, protein_lengths)
-    architecture_catalog = build_domain_architecture_catalog(search_dir, protein_lengths, gene_to_hg, hg_sizes)
+    protein_domain_catalog = build_exact_domain_catalog(search_dir, protein_lengths, family_info)
+    architecture_catalog = build_domain_architecture_catalog(
+        search_dir, protein_lengths, gene_to_hg, hg_sizes, family_info
+    )
 
     return {
         "species_order": species_order,

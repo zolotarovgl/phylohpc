@@ -74,9 +74,43 @@ Key tools: HMMER, MAFFT, IQ-TREE2, FastTree, MCL, GeneRax, POSSVM, PastML, ete3,
 **On the CRG HPC**, load the required modules before running any pipeline:
 ```bash
 mamba activate phylo
-module load Java          
+module load Java 
 module load OpenMPI       
 ```
+
+---
+
+Re-run search to generate domain arrangement info:
+
+```bash
+comm <(comm <(basename -a results/search/*genes.list | cut -f 1,2 -d . | sort | uniq) <(awk '{print $7"."$1}' genefam.csv  | sort | uniq) -12) <(basename -a results/search/*.domains_ummerged.csv  | cut -f 1,2 -d . | sort | uniq) -23  > tmp/tosearch
+
+for ID in $(cat tmp/tosearch); do
+  echo "$ID"
+  snakemake -s step1.smk --allowed-rules search --cores 22 --set-threads search=22 -- "results/search/${ID}.domains_ummerged.csv"
+done
+```
+
+Download phylopics
+
+
+```bash
+comm <(cut -f 1 data/species_info.tsv | sort | uniq ) <(basename -a img/phylo/*.png | sed 's/.png//g' | sort | uniq) -32 | awk -F '\t' 'FNR==NR{d[$1]=$2;next}{print $1"\t"d[$1]}' data/species_info.tsv  - > tmp/phylopic_missing
+wc -l tmp/phylopic_missing
+
+
+for PREF in $(cat tmp/phylopic_missing | cut -f 1 ); do
+SPECIES_NAME=$(awk -F '\t' -v ID=$PREF '$1==ID{print $2}' data/species_info.tsv )
+echo $PREF
+echo $SPECIES_NAME
+python workflow/download_phylopic.py "${SPECIES_NAME}" -o img/phylo/${PREF}.png
+done
+
+```
+
+
+---
+
 
 ---
 
@@ -164,14 +198,6 @@ sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf \
 ```
 
 **Outputs:** `results/search/` (domain sequences, gene lists) and `results/clusters/` (per-HG FASTA files).
-
-Simple Snakemake port for exploratory runs:
-
-```bash
-snakemake -s step1.smk --cores 4
-```
-
-By default this mirrors `step1.nf` and writes to `results/search/` and `results/clusters/`. The declared Snakemake targets are the per-family `*_cluster.tsv` files, while the per-HG FASTA files are still written into `results/clusters/` for exploration. Override `search_dir=...` and `cluster_dir=...` if you want to use a separate exploratory output root.
 
 
 ### Select HGs for downstream analysis
