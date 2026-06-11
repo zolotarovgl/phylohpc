@@ -1,0 +1,31 @@
+name: Demo Report
+
+on:
+  push:
+    branches: ["**"]
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to push gh-pages branch
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Regenerate demo step2 report
+        run: python workflow/make_demo_report2.py
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          force_orphan: false
+          commit_message: "chore: regenerate demo report from ${{ github.sha }}"

@@ -1,0 +1,24 @@
+# Snakemake configuration for step2.smk
+# Override any key on the command line: --config key=value
+
+# Input / output
+ids:         ids.txt
+outdir:      results
+refnames:    data/Mmus_gene_names.csv
+species_tree: data/species_tree.newick
+
+# Reference species for POSSVM
+refspecies:  Mmus
+
+# Tree method: fasttree | iqtree2
+tree_method:   fasttree
+iqtree2_model: LG
+
+# MAFFT options (empty = default; use "--maxiterate 1000 --localpair" for L-INS-i)
+mafft_opt: ""
+
+# GeneRax (set to 1 to enable)
+run_generax:  0
+ncpu_generax: 4
+max_spr:      2
+subs_model:   LG

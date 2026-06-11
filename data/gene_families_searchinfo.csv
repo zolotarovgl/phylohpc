@@ -294,7 +294,7 @@ zf-MIZ	zf-MIZ	1.1	3	GA	TF	tfs
 zf-nanos	zf-nanos	1.1	3	GA	RBP	rbp
 eff	EFF-AFF	1.1	3	GA	EFF	eff
 Galpha	G-alpha	1.1	3	GA	Galpha	xxx
-ERICH	DUF4590	1.1	3	GA	neuronC30	n30
+ERICH	DUF4590	1.1	3	GA	neural	neu
 Tektin	Tektin	1.1	3	GA	cilia	cil
 sHIPPO	SHIPPO-rpt	1.1	3	GA	cilia	cil
 Dynein	Dynein_heavy,Dynein_C	1.1	3	GA	cilia	cil

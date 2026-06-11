@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# Ensure all arguments are provided
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <SPECIES_PREFS> <OUTPUT_FILE>"
+# Ensure the required arguments are provided
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    echo "Usage: $0 <SPECIES_PREFS> <OUTPUT_FILE> [DB_DIR]"
     exit 1
 fi
 
 PREFS=$1
 OUTFILE=$2
+DB=${3:-/users/asebe/xgraubove/genomes/data/}
 
-DB=/users/asebe/xgraubove/genomes/data/
 TEMPDIR=tmp_prep
 
 if [ -d $TEMPDIR ]; then

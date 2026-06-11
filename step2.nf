@@ -1,28 +1,39 @@
 nextflow.enable.dsl=2
-params.ids = "${projectDir}/ids.txt"
-params.config = "${projectDir}/configs/config.txt"
+params.ids           = "${projectDir}/ids.txt"
 params.resources_tsv = "${projectDir}/resources.tsv"
-params.run_generax = params.run_generax ?: false
-
-def cfg = [:]
-file(params.config).eachLine { line ->
-	line = line.trim()
-	if( line && !line.startsWith('#') && line.contains('=') ) {
-		def (k,v) = line.split('=',2)
-		cfg[k.trim()] = v.trim()
-	}
-}
-
-params.ALIGN_DIR = cfg.ALIGN_DIR
-params.TREE_DIR = cfg.TREE_DIR
-params.SPECIES_TREE = cfg.SPECIES_TREE
-params.REFSPECIES = cfg.REFSPECIES
-params.REFNAMES = cfg.REFNAMES
-params.OUTDIR = "${projectDir}/results"
+params.family_info   = params.containsKey('family_info')
+    ? params.family_info
+    : (params.containsKey('genefam_info')
+        ? params.genefam_info
+        : (file("${projectDir}/genefam.csv").exists()
+            ? "${projectDir}/genefam.csv"
+            : "${projectDir}/data/gene_families_searchinfo.csv"))
+params.species_tree  = params.containsKey('species_tree')
+    ? params.species_tree
+    : "${projectDir}/data/species_tree.full.newick"
+params.refnames      = params.containsKey('refnames')
+    ? params.refnames
+    : (params.containsKey('REFNAMES') ? params.REFNAMES : null)
+params.refsps        = params.containsKey('refsps')
+    ? params.refsps
+    : (params.containsKey('REFSPECIES') ? params.REFSPECIES : null)
+params.run_generax   = params.containsKey('run_generax') ? params.run_generax : false
+params.OUTDIR        = params.containsKey('OUTDIR')
+    ? params.OUTDIR
+    : (params.containsKey('outdir') ? params.outdir : "${projectDir}/results")
 //params.MAFFT_OPT = "--maxiterate 1000 --localpair"
 
 
 params.tag_prefix = ''
+
+def countFastaSeqs(path) {
+    def n = 0
+    path.eachLine { line ->
+        if( line.startsWith('>') )
+            n++
+    }
+    return n
+}
 
 def res = [:]
 
@@ -66,12 +77,32 @@ if( params.resources_tsv && file(params.resources_tsv).exists() ) {
         res[rid] = m
     }
 }
-Channel.fromPath(params.ids).splitText().map { it.trim() }.filter { it }.map { id -> tuple(id, file("${projectDir}/results/clusters/${id}.fasta")) }.set { hg_fastas }
+
+if( params.ids && file(params.ids).exists() ) {
+    Channel
+        .fromPath(params.ids)
+        .splitText()
+        .map { it.trim() }
+        .filter { it }
+        .map { id -> tuple(id, file("${params.OUTDIR}/clusters/${id}.fasta")) }
+        .filter { id, fasta -> countFastaSeqs(fasta) >= 2 }
+        .set { hg_fastas }
+}
+else {
+    Channel
+        .fromPath("${params.OUTDIR}/clusters/*.fasta")
+        .map { fasta -> tuple(fasta.baseName, fasta) }
+        .filter { id, fasta -> countFastaSeqs(fasta) >= 2 }
+        .set { hg_fastas }
+}
+
 process ALN {
 
     tag "${id}"
 
     publishDir "${params.OUTDIR}/align", mode: 'copy'
+
+    cpus 4
 
     errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
     maxRetries 10
@@ -91,13 +122,23 @@ process ALN {
         ln -s ${existing} ${id}.aln.fasta
         """
     }
-    else {
-        """
-        python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
-        python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
-        mv ${id}.aln.fasta_tmp ${id}.aln.fasta
-        """
-    }
+	    else {
+	        """
+	        export PYTHONNOUSERSITE=1
+	        NSEQ=\$(grep -c '^>' ${fasta} || true)
+	        if [[ "\$NSEQ" -lt 2 ]]; then
+	            echo "Alignment input for ${id} contains fewer than 2 sequences; cannot build a trimmed alignment." >&2
+	            exit 1
+	        fi
+	        if ! clipkit --help >/dev/null 2>&1; then
+	            echo "clipkit is required for Step 2 trimming but is not runnable in the current environment." >&2
+	            exit 1
+	        fi
+	        python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
+	        python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
+	        mv ${id}.aln.fasta_tmp ${id}.aln.fasta
+	        """
+	    }
 }
 process PHY {
 
@@ -126,26 +167,48 @@ process PHY {
     tuple val(id), path(aln)
 
     output:
-    tuple val(id), path("${id}.treefile"), path(aln)
+    tuple val(id), path("${id}.treefile"), path(aln), path("${id}.log"), emit: trees
+    path("${id}.ckp.gz"), optional: true, emit: ckp
 
     script:
 
-    def existing = file("${params.OUTDIR}/gene_trees/${id}.treefile")
+    def existing     = file("${params.OUTDIR}/gene_trees/${id}.treefile")
+    def existing_ckp = file("${params.OUTDIR}/gene_trees/${id}.ckp.gz")
 
     if (existing.exists()) {
         """
         echo "Using existing tree for ${id}"
         ln -sf ${existing} ${id}.treefile
+        if [[ -e ${params.OUTDIR}/gene_trees/${id}.log ]]; then
+            ln -sf ${params.OUTDIR}/gene_trees/${id}.log ${id}.log
+        else
+            printf "Using existing tree for %s\\nOriginal phylogeny log unavailable in %s\\n" "${id}" "${params.OUTDIR}/gene_trees" > ${id}.log
+        fi
         """
     }
-    else {
+    else if (params.TREE_METHOD == "iqtree2" && existing_ckp.exists()) {
         """
+        echo "Resuming IQ-TREE2 from checkpoint for ${id}"
+        cp ${existing_ckp} ${id}.ckp.gz
         python ${projectDir}/phylogeny/main.py phylogeny \
             -f ${aln} \
             --outprefix ${id} \
             -c ${task.cpus} \
             --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL}
+            --iqtree2_model ${params.IQTREE2_MODEL} \
+            --logfile ${id}.log
+        """
+    }
+	    else {
+	        """
+	        export PYTHONNOUSERSITE=1
+	        python ${projectDir}/phylogeny/main.py phylogeny \
+	            -f ${aln} \
+	            --outprefix ${id} \
+            -c ${task.cpus} \
+            --method ${params.TREE_METHOD} \
+            --iqtree2_model ${params.IQTREE2_MODEL} \
+            --logfile ${id}.log
         """
     }
 }
@@ -182,11 +245,12 @@ process PVM {
 		      path("${id}.*.ortholog_groups.csv"),
 		      path("${id}.*.pairs_orthologs.csv")
 
-	script:
-	"""
-	python ${projectDir}/phylogeny/main.py possvm \
-	    -t ${tree} \
-	    --refsps ${params.REFSPECIES} \
+		script:
+		"""
+		export PYTHONNOUSERSITE=1
+		python ${projectDir}/phylogeny/main.py possvm \
+		    -t ${tree} \
+		    --refsps ${params.REFSPECIES} \
 	    -r ${refnames_file} \
 	    -o ${id}.
 	"""
@@ -199,6 +263,23 @@ process PVM_PREV {
 
 	cpus 1
 
+	memory {
+		def base = res[id]?.pvm_mem ?: 500.MB
+		return base + (task.attempt - 1) * 500.MB
+	}
+
+	time {
+		def base = res[id]?.pvm_time ?: 5.min
+		return base * task.attempt
+	}
+
+	errorStrategy {
+		return task.attempt <= 3 ? 'retry' : 'ignore'
+	}
+
+	maxRetries 3
+	maxErrors -1
+
 	input:
 	tuple val(id), path(tree), path(aln), path(refnames_file)
 
@@ -209,14 +290,49 @@ process PVM_PREV {
 	      path("${id}.*.ortholog_groups.csv"),
 	      path("${id}.*.pairs_orthologs.csv")
 
-	script:
-	"""
-	python ${projectDir}/phylogeny/main.py possvm \
-	    -t ${tree} \
-	    --refsps ${params.REFSPECIES} \
+		script:
+		"""
+		export PYTHONNOUSERSITE=1
+		python ${projectDir}/phylogeny/main.py possvm \
+		    -t ${tree} \
+		    --refsps ${params.REFSPECIES} \
 	    -r ${refnames_file} \
 	    -o ${id}.
 	"""
+}
+
+// -----------------------------
+// Step-2 HTML report
+// -----------------------------
+process REPORT {
+
+    publishDir "${params.OUTDIR}", mode: 'copy'
+
+    cpus   1
+    memory 2.GB
+    time   30.min
+
+    input:
+    path(newicks)   // collected PVM newick outputs — used as a completion barrier
+
+    output:
+    path("report_step2.html")
+
+	    script:
+        def reportRefArgs = []
+        if (params.refnames) reportRefArgs << "--refnames ${params.refnames}"
+        if (params.refsps)   reportRefArgs << "--refsps ${params.refsps}"
+        def refArgs = reportRefArgs.join(' ')
+	    """
+		    export PYTHONNOUSERSITE=1
+		    python ${projectDir}/workflow/report_step2.py \
+		        --results_dir     ${params.OUTDIR} \
+		        --family_info     ${params.family_info} \
+		        --species_tree    ${params.species_tree} \
+		        --species_info    ${projectDir}/data/species_info.tsv \
+	            ${refArgs} \
+	        --output          report_step2.html
+    """
 }
 
 // -----------------------------
@@ -243,21 +359,27 @@ process GR_watcher {
     }
 
     errorStrategy {
+        def max_attempts = 5
         if( task.exitStatus == 10 ) {
             log.warn "GeneRax | ${id} | Exit 10 | Family parsing error — ignored"
             return 'ignore'
         }
-        else if( task.exitStatus == 137 ) {
-            log.warn "GeneRax | ${id} | Exit 137 | Likely OOM — retrying (attempt ${task.attempt})"
+        else if( task.attempt <= max_attempts ) {
+            if( task.exitStatus == 137 ) {
+                log.warn "GeneRax | ${id} | Exit 137 | Likely OOM — retrying (attempt ${task.attempt}/${max_attempts})"
+            }
+            else {
+                log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retrying (attempt ${task.attempt}/${max_attempts})"
+            }
             return 'retry'
         }
         else {
-            log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retrying"
-            return 'retry'
+            log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retries exhausted — ignored"
+            return 'ignore'
         }
     }
 
-    maxRetries 2
+    maxRetries 5
     maxErrors -1
 
     input:
@@ -287,9 +409,10 @@ process GR_watcher {
     }
     else {
         """
-        set -euo pipefail
+	        set -euo pipefail
+	        export PYTHONNOUSERSITE=1
 
-        export OMP_NUM_THREADS=${task.cpus}
+	        export OMP_NUM_THREADS=${task.cpus}
         export OPENBLAS_NUM_THREADS=${task.cpus}
         export MKL_NUM_THREADS=${task.cpus}
         export NUMEXPR_NUM_THREADS=${task.cpus}
@@ -352,20 +475,21 @@ refnames_ch     = Channel.value( file(params.REFNAMES) )
 
 workflow {
 
-    phy_out = hg_fastas | ALN | PHY
+    PHY(hg_fastas | ALN)
+    phy_out = PHY.out.trees
 
     if (params.run_generax) {
 
         // ---------- PVM on original trees ----------
-        phy_out
-            .map { id, tree, aln -> tuple(id, tree, aln) }
+        pvm_prev_out = phy_out
+            .map { id, tree, aln, log -> tuple(id, tree, aln) }
             .combine(refnames_ch)
             | PVM_PREV
 
 
         // ---------- GeneRax ----------
         gr_input = phy_out
-            .map { id, tree, aln ->
+            .map { id, tree, aln, log ->
                 tuple(id, aln, tree)
             }
             .combine(species_tree_ch)
@@ -374,21 +498,33 @@ workflow {
 
 
         // ---------- PVM on GeneRax trees ----------
-        gr_out
+        pvm_out = gr_out
             .map { id, generax_tree, log, progress, aln ->
                 tuple(id, generax_tree, aln)
             }
             .combine(refnames_ch)
             | PVM
 
-    } 
+        // ---------- Report (wait for both PVM and PVM_PREV) ----------
+        pvm_out.map { id, tree, nwk, csv, pairs -> nwk }
+            .mix(pvm_prev_out.map { id, tree, nwk, csv, pairs -> nwk })
+            .collect()
+            | REPORT
+
+    }
     else {
 
-        phy_out
-            .map { id, tree, aln ->
+        pvm_out = phy_out
+            .map { id, tree, aln, log ->
                 tuple(id, tree, aln)
             }
             .combine(refnames_ch)
             | PVM
+
+        // ---------- Report ----------
+        pvm_out
+            .map { id, tree, nwk, csv, pairs -> nwk }
+            .collect()
+            | REPORT
     }
 }

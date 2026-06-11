@@ -2,35 +2,20 @@
 import argparse, subprocess, os, tempfile
 
 parser = argparse.ArgumentParser(description="Gather species annotation")
-parser.add_argument("--config",required = False, help = 'Bash-formatted config file configs/config.txt')
-parser.add_argument("--id", required=True, help = 'Species prefox')
-parser.add_argument("--outfile", help = 'Optional output tab file. If not specified, the annotations are printed to stdout')
-parser.add_argument("--search-dir", default=None)
-parser.add_argument("--tree-dir", default=None)
-parser.add_argument("--prefix", default=None, help = 'Optional prefix of the families, e.g. tfs')
+parser.add_argument("--id", required=True, help="Species prefix")
+parser.add_argument("--outfile", help="Optional output tab file. If not specified, annotations are printed to stdout")
+parser.add_argument("--search-dir", required=True)
+parser.add_argument("--tree-dir", required=True)
+parser.add_argument("--cluster-dir", default="results/clusters", help="Directory with *_cluster.tsv files (default: results/clusters)")
+parser.add_argument("--prefix", default=None, help="Optional prefix of the families, e.g. tfs")
 args = parser.parse_args()
 
 ID = args.id
 SEARCH_DIR = args.search_dir
 TREE_DIR = args.tree_dir
+CLUSTER_DIR = args.cluster_dir
 OUTFILE = args.outfile
 verbose = False
-
-
-from helper import parse_bash_config
-if args.config:
-    config = parse_bash_config(args.config)
-else:
-    if not SEARCH_DIR:
-        print(f'provide either config or --search-dir')
-        quit()
-    if not TREE_DIR:
-        print(f'provide either config or --tree-dir')
-        quit()
-if not SEARCH_DIR:
-	SEARCH_DIR = config['SEARCH_DIR']
-if not TREE_DIR:
-	TREE_DIR = config['TREE_DIR']
 
 def run(cmd):
 	r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -75,14 +60,15 @@ with open(gene2class, "w") as out:
         subprocess.run(cmd, shell=True, stdout=out)
 
 # 4. pep2hg
-cmd = "bash workflow/get_gene2cluster.sh configs/config.txt pep2hg"
-if OUTFILE and verbose:
-    print(cmd)
-subprocess.run(cmd, shell=True)
-cmd = f"grep -E '^{ID}' pep2hg > {pep2hg}"
-if OUTFILE and verbose:
-    print(cmd)
-subprocess.run(cmd, shell=True)
+with open(pep2hg, "w") as out:
+    for f in os.listdir(CLUSTER_DIR):
+        if f.endswith("_cluster.tsv"):
+            pref = f.replace("_cluster.tsv", "")
+            with open(os.path.join(CLUSTER_DIR, f)) as fh:
+                for line in fh:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) >= 2 and parts[1].startswith(ID):
+                        out.write(f"{parts[1]}\t{pref}.{parts[0]}\n")
 
 # 5. RESULT (awk logic)
 awk_cmd = (

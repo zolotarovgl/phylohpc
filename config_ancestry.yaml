@@ -1,0 +1,7 @@
+node_names:      "Choanozoa,Metazoa,Parahoxozoa,Bilateria,Deuterostomia"
+ids:             ancestry_ids.txt
+outdir:          results
+species_tree:    data/species_tree.newick
+refspecies:      Mmus
+refnames:        data/Mmus_gene_names.csv
+gene_trees_dir:  results/possvm

@@ -1,0 +1,18 @@
+# Snakemake configuration for step1.smk
+# Override any key on the command line: --config key=value
+
+genefam_info:  genefam.csv
+species_list:  species_list
+infasta:       data/input.fasta
+use_prepare:   0
+prepare_db_dir: /users/asebe/xgraubove/genomes/data/
+
+search_dir:    results/search
+cluster_dir:   results/clusters
+
+pfam_db:       /users/asebe/xgraubove/data/pfam/Pfam-A.hmm
+domain_expand: 30
+s1_ncpu:       4
+s2_ncpu:       4
+s2_inflation:  1.1
+max_n:         3000

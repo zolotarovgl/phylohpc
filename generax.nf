@@ -96,60 +96,73 @@ process GR_watcher {
           path(aln)
 
 	script:
-	"""
-	set -euo pipefail
 
-	export OMP_NUM_THREADS=${task.cpus}
-	export OPENBLAS_NUM_THREADS=${task.cpus}
-	export MKL_NUM_THREADS=${task.cpus}
-	export NUMEXPR_NUM_THREADS=${task.cpus}
+	def existing = file("${params.OUTDIR}/generax/${id}.generax.tree")
 
-	touch ${id}.progress.tree
-
-	progress_watcher() {
-		while kill -0 \$MAIN_PID 2>/dev/null; do
-			if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
-				cp ${id}_generax/results/${id}/geneTree.newick \
-				${id}.progress.tree 2>/dev/null || true
-			fi
-			sleep 60
-		done
+	if (existing.exists()) {
+		"""
+		echo "Using existing GeneRax result for ${id}"
+		ln -sf ${existing} ${id}.generax.tree
+		touch ${id}.generax.log
+		touch ${id}.progress.tree
+		"""
 	}
+	else {
+		"""
+		set -euo pipefail
 
-	python ${projectDir}/phylogeny/main.py generax \
-		--name ${id} \
-		--alignment ${aln} \
-		--gene_tree ${tree} \
-		--species_tree ${species_tree} \
-		--output_dir ${id}_generax \
-		--subs_model ${params.SUBS_MODEL} \
-		--max_spr ${params.MAX_SPR} \
-		--cpus ${task.cpus} \
-		--logfile ${id}.generax.log \
-		--outfile ${id}.generax.tree &
+		export OMP_NUM_THREADS=${task.cpus}
+		export OPENBLAS_NUM_THREADS=${task.cpus}
+		export MKL_NUM_THREADS=${task.cpus}
+		export NUMEXPR_NUM_THREADS=${task.cpus}
 
-	MAIN_PID=\$!
+		touch ${id}.progress.tree
 
-	progress_watcher &
-	WATCH_PID=\$!
+		progress_watcher() {
+			while kill -0 \$MAIN_PID 2>/dev/null; do
+				if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
+					cp ${id}_generax/results/${id}/geneTree.newick \
+					${id}.progress.tree 2>/dev/null || true
+				fi
+				sleep 60
+			done
+		}
 
-	cleanup() {
-		kill \$WATCH_PID 2>/dev/null || true
-		wait \$WATCH_PID 2>/dev/null || true
+		python ${projectDir}/phylogeny/main.py generax \
+			--name ${id} \
+			--alignment ${aln} \
+			--gene_tree ${tree} \
+			--species_tree ${species_tree} \
+			--output_dir ${id}_generax \
+			--subs_model ${params.SUBS_MODEL} \
+			--max_spr ${params.MAX_SPR} \
+			--cpus ${task.cpus} \
+			--logfile ${id}.generax.log \
+			--outfile ${id}.generax.tree &
+
+		MAIN_PID=\$!
+
+		progress_watcher &
+		WATCH_PID=\$!
+
+		cleanup() {
+			kill \$WATCH_PID 2>/dev/null || true
+			wait \$WATCH_PID 2>/dev/null || true
+		}
+		trap cleanup EXIT INT TERM
+
+		wait \$MAIN_PID
+		EXIT_CODE=\$?
+
+		echo "GeneRax exit code: \$EXIT_CODE"
+
+		if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
+			cp ${id}_generax/results/${id}/geneTree.newick ${id}.progress.tree || true
+		fi
+
+		exit \$EXIT_CODE
+		"""
 	}
-	trap cleanup EXIT INT TERM
-
-	wait \$MAIN_PID
-	EXIT_CODE=\$?
-
-	echo "GeneRax exit code: \$EXIT_CODE"
-
-	if [[ -f ${id}_generax/results/${id}/geneTree.newick ]]; then
-		cp ${id}_generax/results/${id}/geneTree.newick ${id}.progress.tree || true
-	fi
-
-	exit \$EXIT_CODE
-	"""
 }
 
 process GR {
