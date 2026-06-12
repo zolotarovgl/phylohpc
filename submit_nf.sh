@@ -3,6 +3,7 @@
 #SBATCH --mem=1GB
 #SBATCH -p genoa64
 #SBATCH --qos=pipelines
+#SBATCH --output=reports/slurm-%x-%j.out
 
 set -euo pipefail
 
