@@ -257,9 +257,9 @@ PROFILE=local,fast
 nextflow run step2.nf \
     -profile $PROFILE \
     -resume -w $WORKDIR \
-    --run_generax \
+    --rungenerax \
     --family_info genefam.csv \
-    --species_tree data/species_tree.full.newick \
+    --species_tree_report data/species_tree.full.newick \
     -with-report reports/report.step2.html \
     -with-trace  reports/trace.step2.txt
 
@@ -270,7 +270,7 @@ sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf \
     -resume -w $WORKDIR \
     --run_generax \
     --family_info genefam.csv \
-    --species_tree data/species_tree.full.newick \
+    --species_tree_report data/species_tree.full.newick \
     --report   reports/report.step2.html \
     --trace    reports/trace.step2.txt \
     --timeline reports/timeline.step2.html

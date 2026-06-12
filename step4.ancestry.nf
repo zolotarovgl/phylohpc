@@ -10,6 +10,52 @@ params.REFSPECIES      = "Mmus"
 params.REFNAMES        = "${projectDir}/data/Mmus_gene_names.csv"
 params.gene_trees_dir  = "${params.OUTDIR}/gene_trees"
 
+// ── Failure diagnostics ───────────────────────────────────────────────────────
+// Log the work dir + tail of .command.err whenever a task fails (any attempt).
+def errReport(task) {
+    def errf = task.workDir?.resolve('.command.err')
+    def tail = (errf && errf.exists()) ? errf.text.readLines().takeRight(15).join('\n  ')
+                                       : '(.command.err not found)'
+    log.warn "✗ ${task.process} [${task.tag ?: task.index}] exit=${task.exitStatus} attempt=${task.attempt}\n" +
+             "  workDir: ${task.workDir}\n  ${tail}"
+}
+
+workflow.onError {
+    log.error "Pipeline stopped: ${workflow.errorMessage ?: 'see the failed task above'}"
+}
+
+workflow.onComplete {
+    log.info "step4 ${workflow.success ? 'completed OK' : 'FAILED'} after ${workflow.duration}"
+    if( !workflow.success )
+        log.info "List failed tasks:  nextflow log ${workflow.runName} -f name,status,exit,workdir -F \"status=='FAILED'\""
+}
+
+// ── Environment preflight ─────────────────────────────────────────────────────
+// Runs once before clade extraction; fails fast with one clear message if Python
+// deps are missing (e.g. the conda env wasn't activated).
+process PREFLIGHT {
+
+    tag 'env_check'
+    cpus 1
+    memory '500.MB'
+    time '5.min'
+    cache false
+
+    output:
+    path 'preflight.ok'
+
+    script:
+    """
+    export PYTHONNOUSERSITE=1
+    python -c 'import Bio, ete3, yaml' 2>/dev/null || {
+        echo "PREFLIGHT FAILED: missing Python deps (Bio/ete3/yaml) -- run 'mamba activate phylo' before launching." >&2
+        exit 1
+    }
+    echo "PREFLIGHT OK"
+    touch preflight.ok
+    """
+}
+
 if (!params.node_names) {
     error "ERROR: --node_names is required. Provide a comma-separated list of " +
           "clade names ordered broad→narrow. Example: --node_names Metazoa,Bilateria,Vertebrata"
@@ -76,7 +122,7 @@ process PVM_CLADE {
     memory { 500.MB * task.attempt }
     time   { 10.min * task.attempt }
 
-    errorStrategy { task.attempt <= 3 ? 'retry' : 'ignore' }
+    errorStrategy { errReport(task); task.attempt <= 3 ? 'retry' : 'ignore' }
     maxRetries 3
 
     input:
@@ -166,9 +212,14 @@ process VISUALIZE_HIERARCHY {
 
 workflow {
 
+    // Fail fast if the environment is not ready.
+    def ready = PREFLIGHT()
+
     // Step 1: extract per-clade species lists and pruned trees
     clade_info = node_names_ch
         .combine(species_tree_val)
+        .combine(ready)
+        .map { node, tree, ok -> tuple(node, tree) }
         | EXTRACT_CLADE
     // clade_info: (node, in_species, ign_species, pruned_tree)
 

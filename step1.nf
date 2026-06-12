@@ -14,6 +14,58 @@ params.s1_ncpu       = 4
 params.s2_ncpu       = 4
 params.s2_inflation  = 1.1
 
+// ── Failure diagnostics ───────────────────────────────────────────────────────
+// Log the work dir + tail of .command.err whenever a task fails (any attempt),
+// so a failure is readable in the run log without digging into work dirs.
+def errReport(task) {
+    def errf = task.workDir?.resolve('.command.err')
+    def tail = (errf && errf.exists()) ? errf.text.readLines().takeRight(15).join('\n  ')
+                                       : '(.command.err not found)'
+    log.warn "✗ ${task.process} [${task.tag ?: task.index}] exit=${task.exitStatus} attempt=${task.attempt}\n" +
+             "  workDir: ${task.workDir}\n  ${tail}"
+}
+
+workflow.onError {
+    log.error "Pipeline stopped: ${workflow.errorMessage ?: 'see the failed task above'}"
+}
+
+workflow.onComplete {
+    log.info "step1 ${workflow.success ? 'completed OK' : 'FAILED'} after ${workflow.duration}"
+    if( !workflow.success )
+        log.info "List failed tasks:  nextflow log ${workflow.runName} -f name,status,exit,workdir -F \"status=='FAILED'\""
+}
+
+// ── Environment preflight ─────────────────────────────────────────────────────
+// Runs once before the search swarm and fails the whole run with one clear
+// message if Python deps or tools are missing (e.g. the conda env wasn't activated).
+process PREFLIGHT {
+
+    tag 'env_check'
+    cpus 1
+    memory '500.MB'
+    time '5.min'
+    cache false
+
+    output:
+    path 'preflight.ok'
+
+    script:
+    """
+    export PYTHONNOUSERSITE=1
+    missing=0
+    python -c 'import Bio, ete3, yaml' 2>/dev/null || { echo "PREFLIGHT: missing Python deps (Bio/ete3/yaml)." >&2; missing=1; }
+    for tool in hmmsearch mafft mcl samtools; do
+        command -v \$tool >/dev/null 2>&1 || { echo "PREFLIGHT: '\$tool' not on PATH." >&2; missing=1; }
+    done
+    if [ "\$missing" -ne 0 ]; then
+        echo "PREFLIGHT FAILED: environment not ready -- run 'mamba activate phylo' (and 'module load ...' on the HPC) before launching." >&2
+        exit 1
+    fi
+    echo "PREFLIGHT OK"
+    touch preflight.ok
+    """
+}
+
 workflow {
 
     if( !params.genefam_info )
@@ -21,6 +73,9 @@ workflow {
 
     if( !params.infasta )
         error "Please provide --infasta"
+
+    // Fail fast with one clear message if the environment is not ready.
+    def ready = PREFLIGHT()
 
     def families_ch = Channel
         .fromPath(params.genefam_info)
@@ -32,6 +87,8 @@ workflow {
             def pref   = cols[-1].trim()
             tuple(pref, family)
         }
+        .combine(ready)
+        .map { pref, family, ok -> tuple(pref, family) }
 
     def genefam_ch = Channel.value(file(params.genefam_info))
     def infasta_ch = Channel.value(file(params.infasta))
@@ -55,7 +112,7 @@ process SEARCH {
   memory { 500.MB + (task.attempt - 1) * 500.MB }
   time   { 5.min + (task.attempt - 1) * 10.min }
 
-  errorStrategy = { task.attempt <= 5 ? 'retry' : 'terminate' }
+  errorStrategy = { errReport(task); task.attempt <= 5 ? 'retry' : 'terminate' }
   maxRetries 5
 
   input:
@@ -105,7 +162,7 @@ process CLUSTER {
     memory { 300.MB + (task.attempt - 1) * 1.GB }
     time   { 10.min + (task.attempt - 1) * 1.h }
 
-    errorStrategy = { task.attempt <= 5 ? 'retry' : 'terminate' }
+    errorStrategy = { errReport(task); task.attempt <= 5 ? 'retry' : 'terminate' }
     maxRetries 5
 
     input:

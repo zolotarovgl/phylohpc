@@ -32,8 +32,6 @@ with open(IDS_FILE) as fh:
     ALL_HGS = [l.strip() for l in fh if l.strip()]
 
 # Only keep HGs whose gene tree exists (mirrors NF .filter { treefile.exists() })
-print(GT_DIR)
-print(TREE_SUFF)
 HG_IDS = [hg for hg in ALL_HGS if Path(f"{GT_DIR}/{hg}.{TREE_SUFF}").exists()]
 
 if not HG_IDS:
