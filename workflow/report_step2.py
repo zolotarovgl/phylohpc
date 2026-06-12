@@ -919,8 +919,13 @@ def load_gene_lengths(cluster_dir: Path, family_info: dict | None = None) -> dic
     return lengths
 
 
-def load_possvm_trees(possvm_dir: Path, source: str = "generax", family_info: dict | None = None) -> tuple[list, list, dict]:
-    """Return (tree_records, all_species, gene_meta).  source='generax' or 'prev'."""
+def load_possvm_trees(possvm_dir: Path, source: str = "generax", family_info: dict | None = None, detect_method: bool = False) -> tuple[list, list, dict]:
+    """Return (tree_records, all_species, gene_meta).  source='generax' or 'prev'.
+
+    When detect_method is True, each tree's source is inferred from its POSSVM
+    output filename (``.generax`` -> 'generax', ``.treefile`` -> 'iqtree') instead
+    of the passed ``source``, so raw trees that land in results/possvm/ when the
+    pipeline ran without --run_generax are not mislabelled as GeneRax."""
     try:
         from ete3 import Tree  # type: ignore
     except ImportError:
@@ -972,12 +977,18 @@ def load_possvm_trees(possvm_dir: Path, source: str = "generax", family_info: di
         for gene_id, meta in csv_gene_meta.items():
             gene_meta.setdefault(gene_id, {}).update(meta)
 
+        if detect_method:
+            nm = nwk.name
+            rec_source = "generax" if ".generax" in nm else ("iqtree" if ".treefile" in nm else source)
+        else:
+            rec_source = source
+
         records.append({
             "id":               stem,
             "hg":               hg,
             "family":           family,
             "prefix":           prefix,
-            "source":           source,
+            "source":           rec_source,
             "n_leaves":         len(leaves),
             "species":          species,
             "og_names":         sorted(ogs.keys()),
@@ -5845,7 +5856,7 @@ function famOpenCountsForOG(hgId, ogId){
 }
 
 function _treeSourceLabel(source){
-  return source === "prev" ? "IQ-TREE" : "GeneRax";
+  return source === "generax" ? "GeneRax" : "IQ-TREE";
 }
 
 function famOpenTreeForOG(hgId, ogId){
@@ -8049,7 +8060,7 @@ function renderSidebar(filter){
     for(const rec of matching){
       const item=document.createElement("div");
       item.className="hg-item"+(currentIndex&&currentIndex.id===rec.id?" selected":"");
-      const badge=rec.source==="generax"?'<span class="src-badge">GeneRax</span>':'';
+      const badge=rec.source==="generax"?'<span class="src-badge">GeneRax</span>':'<span class="src-badge" style="background:#f2ead8;color:#7c6120">IQ-TREE</span>';
       const covPct=ALL_SPECIES.length?Math.round((rec.species||[]).length/ALL_SPECIES.length*100):0;
       item.innerHTML='<div class="hg-name">'+rec.hg+' '+badge+'</div>'
         +'<div class="hg-cov"><div class="hg-cov-bar" style="width:'+covPct+'%"></div></div>'
@@ -8523,7 +8534,7 @@ function selectTree(rec){
   populateColorBy();
   document.getElementById("color-by").value="og"; // set after options are added
   populateDatalist();
-  const srcSuffix=rec.source==="generax"?" (GeneRax)":rec.source==="prev"?" (IQ-Tree)":"";
+  const srcSuffix=rec.source==="generax"?" (GeneRax)":(rec.source==="prev"||rec.source==="iqtree")?" (IQ-Tree)":"";
   document.getElementById("tree-title").textContent=rec.id+srcSuffix+" \u00b7 "+rec.n_leaves+" genes";
   document.getElementById("n-ogs-label").textContent=rec.n_ogs+" orthogroups";
 
@@ -11218,7 +11229,7 @@ def _load_tree_records(possvm_dir: Path, possvm_prev_dir, family_info: dict | No
         print(f"WARN: {possvm_dir} does not exist – no gene trees.", file=sys.stderr)
 
     raw_records, all_species, gene_meta = (
-        load_possvm_trees(possvm_dir, source="generax", family_info=family_info) if possvm_dir.exists() else ([], [], {})
+        load_possvm_trees(possvm_dir, source="generax", family_info=family_info, detect_method=True) if possvm_dir.exists() else ([], [], {})
     )
     generax_gene_meta = dict(gene_meta)
     # Deduplicate: same possvm dir may have both .generax.tree and .treefile outputs.
