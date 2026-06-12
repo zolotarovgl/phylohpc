@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Step 2 Report</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>%%CSS%%</style>
+</head>
+<body>
+
+<!-- ════════ Single top bar ════════ -->
+<div class="top-bar">
+  <h2>Step 2 Report</h2>
+  <button class="btn" id="hm-back" style="display:none" onclick="hmBack()">&#8592; Back</button>
+  <span id="hm-breadcrumb" style="font-size:11px"></span>
+  <button id="hm-expand-og" style="display:none;padding:2px 8px;font-size:11px;border:1px solid #27ae60;color:#27ae60;border-radius:3px;background:#fff;cursor:pointer" title="Switch to Custom view with all OGs from all visible HGs" onclick="hmExpandToOGs()">&#43; Expand all to OGs</button>
+  <span id="tree-count" style="font-size:11px;color:#95a5a6;display:none"></span>
+</div>
+
+<!-- ════════ Body: tab strip + panes ════════ -->
+<div id="body-wrap">
+
+  <!-- vertical tab strip -->
+  <div id="tab-strip">
+    <button class="tab-btn" data-tab="families" onclick="switchTab('families')">&#9783; Families</button>
+    <button class="tab-btn" data-tab="architectures" onclick="switchTab('architectures')">&#9776; Domain Architectures</button>
+    <button class="tab-btn active" data-tab="sptree" onclick="switchTab('sptree')">&#10022; Species Tree</button>
+    <button class="tab-btn" data-tab="heatmap" onclick="switchTab('heatmap')">&#9639; Counts</button>
+    <button class="tab-btn" data-tab="trees" onclick="switchTab('trees')">&#11044; Gene Trees</button>
+    <button class="tab-btn" id="tab-btn-align" data-tab="align" onclick="switchTab('align')">&#9644; Alignments</button>
+  </div>
+
+  <!-- ── Heatmap pane ── -->
+  <div class="tab-pane" id="pane-heatmap">
+    <div id="hm-custom-bar" style="display:none;position:fixed;z-index:500;border:1px solid #c8b96e;border-top:none;background:#fffbf0;box-shadow:0 4px 12px rgba(0,0,0,.15);border-radius:0 0 6px 6px;flex-direction:column;gap:0">
+      <div style="display:flex;align-items:center;gap:6px;padding:3px 10px;cursor:pointer" onclick="hmToggleCustomBar()">
+        <span id="hm-custom-toggle" style="font-size:10px;color:#888">&#9654;</span>
+        <span id="hm-custom-summary" style="font-size:11px;color:#888;font-weight:600">Custom selection:</span>
+        <button onclick="event.stopPropagation();hmCustomClear()" style="margin-left:auto;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">Clear all</button>
+        <button onclick="event.stopPropagation();hmExitCustom()" style="padding:1px 8px;font-size:10px;border:1px solid #4a90d9;color:#4a90d9;border-radius:3px;background:#fff;cursor:pointer">&#8592; Browse</button>
+      </div>
+      <div id="hm-custom-chips-wrap" style="display:none;padding:2px 10px 4px;max-height:120px;overflow-y:auto">
+        <span id="hm-custom-chips" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"></span>
+      </div>
+    </div>
+    <div id="hm-split-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;font-size:11px;color:#555;border-bottom:1px solid #eee;background:#fafafa">
+      <span style="font-weight:600">Row groups:</span>
+      <span id="hm-split-tags"></span>
+      <button onclick="clearHmSplits()" style="margin-left:4px;padding:1px 8px;font-size:10px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">&#10005; Clear</button>
+      <span style="font-size:10px;color:#aaa">(shift+click a node in the Species Tree tab to add a group)</span>
+    </div>
+    <div id="hm-layout">
+      <div style="display:flex;flex-direction:column;width:200px;flex-shrink:0;border-right:1px solid #ccc">
+        <div style="padding:4px 8px;background:#fafafa;border-bottom:1px solid #eee;flex-shrink:0">
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Prefix: <select id="prefixSelect" style="font-size:11px;flex:1;padding:2px 4px;border:1px solid #ccc;border-radius:3px"></select>
+          </label>
+        </div>
+        <div id="tree-panel" style="flex:1;overflow-y:auto;background:#fff"></div>
+      </div>
+      <div id="hm-right" style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0">
+        <!-- column-label controls strip: always visible above the heatmap SVG -->
+        <div id="hm-col-strip" style="display:flex;align-items:center;gap:10px;padding:3px 10px;background:#fafafa;border-bottom:1px solid #eee;flex-shrink:0;flex-wrap:wrap">
+          <div style="position:relative;display:inline-block">
+            <input id="hm-text-search" type="text" placeholder="&#128269; Search classes, families, HGs, OGs, genes&hellip;" autocomplete="off"
+              style="font-size:11px;padding:2px 8px;border:1px solid #ccc;border-radius:3px;width:210px"
+              oninput="hmTextSearchInput(this.value)" onkeydown="hmTextSearchKey(event)">
+            <div id="hm-search-dd"
+              style="display:none;position:absolute;top:100%;left:0;z-index:520;background:#fff;
+                     border:1px solid #ccc;border-radius:0 0 4px 4px;max-height:220px;
+                     overflow-y:auto;min-width:290px;box-shadow:0 3px 8px rgba(0,0,0,.12);
+                     font-size:11px"></div>
+          </div>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Label size:
+            <input type="range" id="hm-col-font-slider" min="5" max="16" step="0.5" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="hm-col-font-val" style="width:20px;text-align:right">9</span>px
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Rotation:
+            <input type="range" id="hm-col-rot-slider" min="0" max="90" step="5" value="90" style="width:70px;cursor:pointer;accent-color:#4a90d9">
+            <span id="hm-col-rot-val" style="width:24px;text-align:right">90</span>&deg;
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Colour:
+            <select id="hm-color-mode" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:3px">
+              <option value="zscore">Z-score (RdBu)</option>
+              <option value="absolute">Absolute count</option>
+            </select>
+          </label>
+          <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
+            Sort cols:
+            <select id="hm-col-sort-sp" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:3px" onchange="hmColSortSp=this.value||null;hmColOrderOverride=null;drawHeatmap()">
+              <option value="">— none —</option>
+            </select>
+          </label>
+          <button onclick="downloadHeatmapPNG()" title="Download heatmap as PNG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; PNG</button>
+          <button onclick="downloadHeatmapSVG()" title="Download heatmap as SVG" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#11015; SVG</button>
+          <button id="btn-hm-sp-logos" onclick="hmToggleSpLogos()" title="Toggle species images in cladogram" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#128444; Logos</button>
+          <button id="btn-hm-group-hg" onclick="hmToggleGroupByHG()" title="Group columns by Homology Group (drag group headers to reorder)" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#8801; Group HG</button>
+          <button id="btn-hm-flip" onclick="hmToggleFlip()" title="Flip heatmap: species as columns, HGs/OGs as rows with horizontal species tree" style="padding:2px 8px;font-size:11px;border:1px solid #888;color:#555;border-radius:3px;background:#fff;cursor:pointer">&#8646; Flip</button>
+          <details style="margin-left:auto;font-size:10px">
+            <summary style="cursor:pointer;color:#888;list-style:none">&#9432; Help</summary>
+            <div style="position:absolute;z-index:50;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;box-shadow:0 2px 8px rgba(0,0,0,.12);line-height:1.7;color:#999;min-width:300px;right:10px">
+              <div><b style="color:#777">Navigate:</b> click a <i>column header</i> to drill into family &rarr; HG &rarr; OG</div>
+              <div><b style="color:#777">Expand to OGs:</b> at HG level, shift+click a column or use the &ldquo;Expand all to OGs&rdquo; button</div>
+              <div><b style="color:#777">Open tree:</b> click a <i>cell</i> to open the gene tree and highlight that species</div>
+              <div><b style="color:#777">Sort columns:</b> use the &ldquo;Sort cols&rdquo; dropdown to rank columns by a species&rsquo; gene count</div>
+              <div><b style="color:#777">Reorder:</b> drag a column header left or right to reorder columns manually</div>
+              <div><b style="color:#777">Row groups:</b> shift+click a node in the Species Tree tab to split rows by clade</div>
+              <div><b style="color:#777">Colour:</b> intensity = gene count; grey = absent</div>
+              <div><b style="color:#777">Custom:</b> build a heatmap from any OGs, classes or HGs; search by OG name, gene ID or group name</div>
+            </div>
+          </details>
+        </div>
+        <div id="heatmap-panel" style="flex:1;overflow:auto;background:#fff"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Gene tree pane ── -->
+  <div class="tab-pane" id="pane-trees">
+    <div id="app">
+      <div id="sidebar">
+        <div id="sidebar-top">
+          <select id="class-filter" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid #ccc;border-radius:3px;margin-bottom:4px"><option value="">All classes</option></select>
+          <input id="hg-search" type="text" placeholder="Search HG / family…">
+          <div id="hg-count"></div>
+        </div>
+        <div id="hg-list"></div>
+      </div>
+      <div id="main">
+        <div id="controls">
+          <div class="ctrl-topline">
+            <div class="ctrl-primary">
+              <button class="ctrl-btn" onclick="expandAll()" title="Expand all collapsed nodes">Expand all</button>
+              <button class="ctrl-btn" onclick="collapseAll()" title="Collapse all nodes to leaves">Collapse all</button>
+              <button class="ctrl-btn" id="btn-reset-root" onclick="resetRoot()" title="Restore the original root (undo all rerooting)" style="display:none">&#x21BA; Reset root</button>
+              <button class="ctrl-btn" id="btn-reset-focus" onclick="resetFocus()" title="Restore the full tree after focusing on a subtree" style="display:none">&#x21F1; Reset focus</button>
+              <button class="ctrl-btn" onclick="fitTree()" title="Fit the tree to the current panel size">&#x2922; Fit</button>
+              <button class="ctrl-btn" id="tree-toggle" style="display:none;background:#e8f0fe;border-color:#4a90d9" onclick="toggleTreeSource()" title="Switch between available tree sources (e.g. GeneRax vs FastTree)">Showing: GeneRax</button>
+              <button class="ctrl-btn" id="btn-collapse-ogs" onclick="toggleCollapseToOGs()" title="Collapse each orthogroup clade into a single labelled triangle">Collapse to OGs</button>
+              <button class="ctrl-btn" id="btn-highlight-ogs" onclick="toggleHighlightOGs()" title="Shade the background of each orthogroup clade with its colour">Highlight OGs</button>
+              <button class="ctrl-btn" id="btn-possvm" onclick="togglePossvmPanel(event)" title="Re-call orthogroups using the POSSVM species-overlap method — choose ingroup species, then click Run">Orthogroups</button>
+              <button class="ctrl-btn" onclick="downloadTreeSVG()" title="Download the current tree view as an SVG file">&#11015; SVG</button>
+              <button class="ctrl-btn" onclick="downloadTreePNG()" title="Download the current tree view as a PNG image">&#11015; PNG</button>
+            </div>
+            <div class="ctrl-primary">
+              <span id="tree-title"></span>
+              <span id="n-ogs-label"></span>
+            </div>
+          </div>
+
+          <div class="ctrl-drawers">
+            <details class="ctrl-panel" open>
+              <summary>Labels &amp; Display</summary>
+              <div class="ctrl-panel-body">
+                <button class="ctrl-btn" id="btn-og-labels" onclick="toggleOGLabels()" title="Show OG name at the MRCA (deepest shared ancestor) of each orthogroup">OG labels</button>
+                <button class="ctrl-btn" id="btn-support" onclick="toggleSupport()" title="Show bootstrap / SH-aLRT support values at internal nodes">Support</button>
+                <button class="ctrl-btn" id="btn-ds-nodes" onclick="toggleDSNodes()" title="Show duplication (D) and speciation (S) node types — requires POSSVM to be run first">D/S nodes</button>
+                <button class="ctrl-btn" id="btn-lengths" onclick="toggleLengths()" title="Draw branches proportional to evolutionary distance instead of a cladogram">Branch lengths</button>
+                <span class="ctrl-field">
+                  Tip:
+                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show gene identifier in tip labels"><input type="checkbox" id="chk-geneid"> ID</label>
+                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show orthogroup name in tip labels"><input type="checkbox" id="chk-og"> OG</label>
+                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Show reference orthologue in tip labels"><input type="checkbox" id="chk-ref"> ref</label>
+                  <label style="display:flex;align-items:center;gap:2px;cursor:pointer" title="Hide tip labels for species not in the current highlight set"><input type="checkbox" id="chk-hide-nonhl"> hide non-hl</label>
+                </span>
+                <div class="ctrl-inline-group">
+                  <span class="ctrl-subtle">Non-highlighted branches</span>
+                  <button id="btn-focus-collapse-style" class="ctrl-btn active-btn" onclick="toggleFocusCollapseStyle()" title="Toggle how non-highlighted branches are collapsed: MRCA triangle or single circle node" style="padding:1px 6px;font-size:10px">&#9660; MRCA</button>
+                </div>
+              </div>
+            </details>
+
+            <details class="ctrl-panel">
+              <summary>Style</summary>
+              <div class="ctrl-panel-body">
+                <label class="ctrl-field" title="Colour leaves by species, by orthogroup, or by a predefined clade grouping">Color:
+                  <select id="color-by" style="font-size:11px;padding:2px 4px;border:1px solid #bbb;border-radius:3px">
+                    <option value="species">by species</option>
+                  </select>
+                </label>
+                <label class="ctrl-field" title="Font size of tip labels">
+                  Label:
+                  <input type="range" id="tip-font-slider" min="6" max="24" step="1" value="11" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+                  <span id="tip-font-val" style="width:20px;text-align:right">11</span>px
+                </label>
+                <label class="ctrl-field" title="Thickness of tree branches">
+                  Lines:
+                  <input type="range" id="line-width-slider" min="1" max="8" step="0.5" value="1.3" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+                  <span id="line-width-val" style="width:20px;text-align:right">1.3</span>px
+                </label>
+                <label class="ctrl-field" title="Vertical spacing multiplier — increase to spread leaves further apart">
+                  Height:
+                  <input type="range" id="tree-height-slider" min="0.5" max="5" step="0.1" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+                  <span id="tree-height-val" style="width:24px;text-align:right">1</span>&times;
+                </label>
+                <label class="ctrl-field" title="Horizontal branch-length multiplier — increase to extend branches">
+                  Width:
+                  <input type="range" id="tree-width-slider" min="0.3" max="4" step="0.1" value="0.5" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+                  <span id="tree-width-val" style="width:24px;text-align:right">0.5</span>&times;
+                </label>
+                <label class="ctrl-field" title="Vertical space (as a fraction of normal row height) reserved for collapsed OG triangles">
+                  Collapsed:
+                  <input type="range" id="collapsed-frac-slider" min="0.1" max="1" step="0.05" value="1" style="width:60px;cursor:pointer;accent-color:#4a90d9">
+                  <span id="collapsed-frac-val" style="width:28px;text-align:right">1.0</span>
+                </label>
+                <label class="ctrl-field" title="Opacity of clade highlight rectangles (right-click a node → Highlight to add one)">
+                  Hl&#945;:
+                  <input type="range" id="clade-hl-alpha-slider" min="0.05" max="0.8" step="0.05" value="0.22" style="width:55px;cursor:pointer;accent-color:#e67e22">
+                  <span id="clade-hl-alpha-val" style="width:28px;text-align:right">0.22</span>
+                </label>
+                <label class="ctrl-field" title="How far (px) the clade highlight rectangle extends past the rightmost leaf">
+                  Hl&#8594;:
+                  <input type="range" id="clade-hl-extend-slider" min="0" max="300" step="10" value="20" style="width:55px;cursor:pointer;accent-color:#e67e22">
+                  <span id="clade-hl-extend-val" style="width:28px;text-align:right">20</span>
+                </label>
+              </div>
+            </details>
+
+            <details class="ctrl-panel">
+              <summary>Highlights</summary>
+              <div class="ctrl-panel-body vert">
+                <div class="ctrl-inline-group">
+                  <span class="ctrl-subtle">Species</span>
+                  <input id="hl-search" list="hl-list" placeholder="Species… (Enter)" title="Type a species name and press Enter to highlight it">
+                  <datalist id="hl-list"></datalist>
+                  <button id="hl-clear" onclick="clearHighlight()" title="Remove all species highlights">&#10005;</button>
+                  <button class="ctrl-btn" id="btn-mini-sp" data-mini-sp-btn="tree" onclick="toggleMiniSpPanel(event,'tree')" title="Open a mini species tree — click a named node to highlight that entire clade at once">&#x1F333; Species tree</button>
+                  <button class="ctrl-btn" id="btn-focus-hl" onclick="focusHighlighted()" style="display:none" title="Collapse all branches not leading to highlighted tips, keeping only the relevant subtree visible">Focus</button>
+                </div>
+                <div id="hl-tags"></div>
+                <div class="ctrl-inline-group">
+                  <span class="ctrl-subtle">Orthogroups</span>
+                  <div style="position:relative;display:inline-block">
+                    <input id="og-hl-search" autocomplete="off" placeholder="OG name… (Enter)" title="Type an OG name and press Enter to highlight it"
+                      style="width:180px;font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px"
+                      oninput="ogHlSearchInput(this.value)" onkeydown="ogHlSearchKey(event)">
+                    <div id="og-hl-dd" style="display:none;position:absolute;top:100%;left:0;z-index:520;background:#fff;border:1px solid #ccc;border-radius:0 0 4px 4px;max-height:200px;overflow-y:auto;min-width:200px;box-shadow:0 3px 8px rgba(0,0,0,.12);font-size:11px"></div>
+                  </div>
+                  <button id="og-hl-clear" onclick="clearOgHighlight()" title="Remove all OG highlights">&#10005;</button>
+                </div>
+                <div id="og-hl-tags"></div>
+              </div>
+            </details>
+          </div>
+        </div>
+        <div id="tree-wrap">
+          <svg id="tree-svg"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Families pane ── -->
+  <div class="tab-pane" id="pane-families" style="flex-direction:column;overflow:hidden">
+    <div id="fam-controls" style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:#fafafa;border-bottom:1px solid #ddd;flex-shrink:0;flex-wrap:wrap">
+      <div class="fam-search-wrap">
+        <input id="fam-search" type="text" placeholder="&#128269; Search family, PFAM domain, category, OG&#8230;" autocomplete="off"
+          style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;width:320px"
+          oninput="filterFamilyTable(this.value)" onkeydown="famSearchKey(event)">
+        <div id="fam-search-dd" class="fam-search-dd"></div>
+      </div>
+      <span id="fam-count" style="font-size:11px;color:#888"></span>
+    </div>
+    <div id="fam-table-wrap" style="flex:1;overflow:auto;padding:0 12px 12px">
+      <table id="fam-table" style="border-collapse:collapse;width:100%;font-size:12px;margin-top:8px">
+        <thead>
+          <tr style="background:#f0f0f0;position:sticky;top:0;z-index:10">
+            <th class="fam-th" data-col="family"   style="text-align:left;padding:6px 8px;cursor:pointer;white-space:nowrap">Category / Family &#8597;</th>
+            <th class="fam-th" data-col="pfam"     style="text-align:left;padding:6px 8px;cursor:pointer">PFAM Domain(s)</th>
+            <th class="fam-th" data-col="category" style="text-align:left;padding:6px 8px;cursor:pointer;white-space:nowrap">Class &#8597;</th>
+            <th class="fam-th" data-col="n_species"style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap" title="Number of species">Species &#8597;</th>
+            <th style="text-align:right;padding:6px 8px;white-space:nowrap;color:#888;font-weight:600">Fam.</th>
+            <th class="fam-th" data-col="n_hgs"    style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap">HGs &#8597;</th>
+            <th class="fam-th" data-col="n_trees"  style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap" title="HGs with any gene tree">Trees &#8597;</th>
+            <th class="fam-th fam-th-generax" data-col="n_generax" style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap" title="HGs with a GeneRax tree">GeneRax &#8597;</th>
+            <th class="fam-th" data-col="total"    style="text-align:right;padding:6px 8px;cursor:pointer;white-space:nowrap">Genes &#8597;</th>
+          </tr>
+        </thead>
+        <tbody id="fam-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Alignment pane ── -->
+  <div class="tab-pane" id="pane-align">
+    <div id="aln-sidebar">
+      <div id="aln-sidebar-top">
+        <input id="aln-search" type="text" placeholder="Search HG / family…" oninput="renderAlnSidebar(this.value)">
+      </div>
+      <div id="aln-list"></div>
+    </div>
+    <div id="aln-main">
+      <div id="aln-controls">
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Cell:
+          <input type="range" id="aln-cell-slider" min="4" max="18" step="1" value="9" style="width:70px;cursor:pointer;accent-color:#4a90d9" oninput="alnCellW=+this.value;alnCellH=Math.round(alnCellW*1.6);document.getElementById('aln-cell-val').textContent=alnCellW;renderAlignment()">
+          <span id="aln-cell-val">9</span>px
+        </label>
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Structure Height:
+          <input type="range" id="aln-domain-chip-slider" min="0.6" max="2.2" step="0.1" value="2.0" style="width:78px;cursor:pointer;accent-color:#48a868" oninput="alnSetDomainChipScale(this.value)">
+          <span id="aln-domain-chip-val">2.0</span>x
+        </label>
+        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">Species:
+          <input type="text" id="aln-seq-filter" placeholder="Enter to add…" style="font-size:11px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;width:120px" onkeydown="_alnSpFilterKey(event)">
+        </label>
+        <button class="ctrl-btn" id="btn-aln-mini-sp" data-mini-sp-btn="align" onclick="toggleMiniSpPanel(event,'align')" title="Open a mini species tree — click a named node to filter the alignment to that clade">&#x1F333; Species tree</button>
+        <span id="aln-sp-tags" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px"></span>
+        <button class="ctrl-btn active-btn" onclick="alnToggleBrLen()" id="btn-aln-brlen" title="Toggle branch lengths on/off">Br. len</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleSeqPanel()" id="btn-aln-seqpanel" title="Show/hide sequence alignment pane">Alignment</button>
+        <button class="ctrl-btn" onclick="alnToggleConsensus()" id="btn-aln-cons" title="Show/hide consensus row">Consensus</button>
+        <button class="ctrl-btn" onclick="alnToggleCollapseAllOGs()" id="btn-aln-collapse-ogs" title="Collapse all orthogroups to single rows">Collapse OGs</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleSeqId()" id="btn-aln-seqid" title="Show/hide sequence ID column">ID</button>
+        <button class="ctrl-btn" onclick="alnToggleRefCol()" id="btn-aln-ref" title="Show/hide reference ortholog name column">Ref</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleSpeciesCol()" id="btn-aln-species" title="Show/hide species column">Species</button>
+        <button class="ctrl-btn" onclick="alnToggleSpeciesGroupCol()" id="btn-aln-species-group" title="Show/hide species-group column" style="display:none">Species Group</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleMrcaCol()" id="btn-aln-mrca" title="Show/hide MRCA clade column">MRCA</button>
+        <button class="ctrl-btn active-btn" onclick="alnToggleRangeCol()" id="btn-aln-range" title="Show/hide compact domain-architecture column">Domain Architecture</button>
+        <button class="ctrl-btn" onclick="alnToggleSource()" id="btn-aln-src" title="Toggle GeneRax / IQ-TREE tree source" style="display:none">IQ-TREE</button>
+        <button class="ctrl-btn" onclick="alnDownload()" title="Download alignment as FASTA">&#11015; FASTA</button>
+        <button class="ctrl-btn" onclick="alnDownloadPng()" title="Download alignment as PNG">&#11015; PNG</button>
+        <span id="aln-info" style="font-size:11px;color:#888;margin-left:8px"></span>
+      </div>
+      <div id="aln-viewer">
+        <div id="aln-corner"></div>
+        <div id="aln-resize-bar"></div>
+        <div id="aln-ruler-wrap"><canvas id="aln-ruler"></canvas></div>
+        <div id="aln-names-wrap" onscroll="_alnSyncFromNamesWrap(this)" onmousemove="_alnHandleNameHover(event)" onmouseleave="_alnHideTip()" onclick="_alnHandleNameClick(event)"><canvas id="aln-names-canvas"></canvas><div id="aln-tree-resize-bar" style="display:none"></div><div id="aln-ref-resize-bar" style="display:none"></div><div id="aln-species-resize-bar" style="display:none"></div><div id="aln-group-resize-bar" style="display:none"></div><div id="aln-mrca-resize-bar" style="display:none"></div><div id="aln-range-resize-bar" style="display:none"></div></div>
+        <div id="aln-seq-wrap" onscroll="syncAlnScroll(this)" onclick="_alnHandleSeqClick(event)"><canvas id="aln-seq-canvas"></canvas></div>
+      </div>
+      <div id="aln-empty">
+        <div style="font-size:32px">&#9644;</div>
+        <div>Select an HG to view its alignment</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Domain-architecture pane ── -->
+  <div class="tab-pane" id="pane-architectures">
+    <div id="arch-fam-sidebar">
+      <div id="arch-fam-top">
+        <input id="arch-family-search" type="text" placeholder="Search family…" oninput="renderArchitectureFamilySidebar(this.value)">
+        <div id="arch-family-count"></div>
+      </div>
+      <div id="arch-family-list"></div>
+    </div>
+    <div id="arch-list-sidebar">
+      <div id="arch-list-top">
+        <div id="arch-singletons-wrap">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input id="arch-show-singletons" type="checkbox" onchange="architectureShowSingletons=this.checked;renderArchitectureList();renderArchitectureDetail()"> Include singletons</label>
+        </div>
+        <div id="arch-arch-count"></div>
+      </div>
+      <div id="arch-arch-list"></div>
+    </div>
+    <div id="arch-main">
+      <div id="arch-empty">
+        <div style="font-size:34px">&#9776;</div>
+        <div>Select a family to explore its PFAM co-occurrence network</div>
+      </div>
+      <div id="arch-view" style="display:none">
+        <div id="arch-summary"></div>
+        <div id="arch-network-wrap">
+          <div style="font-size:12px;font-weight:700;color:#234">PFAM co-occurrence network</div>
+          <div id="arch-network"></div>
+        </div>
+        <div id="arch-detail-empty" style="display:none;color:#71808f;font-size:12px;background:#fff;border:1px dashed #cfd8e3;border-radius:12px;padding:18px 16px;text-align:center">Click a PFAM node to list architectures, then select an architecture to inspect its consensus and HG distribution</div>
+        <div id="arch-detail" style="display:none">
+          <div id="arch-svg-wrap"></div>
+          <div id="arch-hgs-wrap">
+            <div style="font-size:12px;font-weight:700;color:#234">Homology groups carrying this architecture</div>
+            <div id="arch-hgs"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Species tree pane ── -->
+  <div class="tab-pane active" id="pane-sptree">
+    <div id="sptree-controls">
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:6px">
+        Tree width:
+        <input type="range" id="sptree-width-slider" min="20" max="100" step="5" value="50" style="width:90px;cursor:pointer;accent-color:#4a90d9">
+        <span id="sptree-width-val">50</span>%
+      </label>
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:6px">
+        Species colours:
+        <select id="sp-palette-select" style="font-size:11px;padding:2px 4px;border:1px solid #bbb;border-radius:3px;background:#fff">
+          <option value="turbo">Turbo</option>
+          <option value="viridis">Viridis</option>
+          <option value="warm">Warm</option>
+          <option value="cool">Cool</option>
+          <option value="tableau" selected>Tableau</option>
+          <option value="set3">Set3</option>
+        </select>
+      </label>
+      <span id="sp-palette-preview" style="display:inline-flex;align-items:center;gap:2px;min-height:16px"></span>
+      <button class="ctrl-btn" id="btn-sp-apply-palette" onclick="applySelectedSpeciesPalette()" title="Apply the selected multi-colour palette to all species">Apply palette</button>
+      <button class="ctrl-btn active-btn" id="btn-sp-logos" onclick="toggleSpeciesTreeLogos()" title="Show/hide species logos in the species-tree views">Logos</button>
+      <button class="ctrl-btn" id="btn-sp-names" onclick="toggleSpeciesTreeNames()" title="Toggle species labels between prefixes and full names when metadata is available">Names: Prefix</button>
+      <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px">
+        Triangle fill:
+        <input type="color" id="col-tri-fill" value="#ffffff" style="width:28px;height:22px;cursor:pointer;border:1px solid #bbb;border-radius:3px;padding:1px">
+      </label>
+      <button class="ctrl-btn" id="btn-prune-sptree" onclick="toggleSpPrune()" title="Toggle pruning the tree to only species present in the gene-tree data">Prune to data</button>
+      <button class="ctrl-btn" id="btn-dl-anno" onclick="downloadAnnotations()">&#11015; Annotations TSV</button>
+      <button class="ctrl-btn" id="btn-dl-newick" onclick="downloadNewick()">&#11015; Newick</button>
+    </div>
+    <div id="sptree-layout">
+      <div id="sp-tree-wrap"></div>
+      <aside id="sp-info-panel"></aside>
+    </div>
+  </div>
+
+</div>
+
+<div id="hm-open-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:320;min-width:160px">
+  <div style="font-size:10px;color:#888;margin-bottom:6px;font-weight:600" id="hm-open-popup-title">Open in</div>
+  <div style="display:flex;flex-direction:column;gap:5px">
+    <button id="hm-open-tree" style="padding:4px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer;text-align:left">Show Tree</button>
+    <button id="hm-open-align" style="padding:4px 10px;font-size:11px;border:1px solid #27ae60;border-radius:4px;background:#f0fff4;color:#1a7a42;cursor:pointer;text-align:left">Show Alignment</button>
+  </div>
+</div>
+<div id="mini-sp-panel">
+  <div class="msp-title" id="mini-sp-title">Species tree</div>
+  <div id="mini-sp-svg-wrap"></div>
+</div>
+<div id="tooltip"></div>
+<div id="collapse-choice-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:250;display:none;gap:6px;flex-direction:column">
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="ccp-title">Node options</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button id="ccp-triangle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a filled triangle (proportional size)">&#x25BD; Triangle</button>
+    <button id="ccp-circle" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer" title="Collapse to a circle with leaf count">&#x25EF; Circle</button>
+    <button id="ccp-reroot" style="padding:4px 10px;font-size:11px;border:1px solid #27ae60;border-radius:4px;background:#f0fff4;color:#1a7a42;cursor:pointer" title="Reroot the tree at this node (the selected node becomes one child of the new root)">&#x21C5; Reroot here</button>
+    <button id="ccp-focus" style="padding:4px 10px;font-size:11px;border:1px solid #8e44ad;border-radius:4px;background:#faf5ff;color:#6c3483;cursor:pointer" title="Limit the tree view to this subtree">⌕ Focus subtree</button>
+    <button id="ccp-compare" style="padding:4px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer" title="Compare species coverage with another node">&#x2316; Compare</button>
+    <button id="ccp-highlight" style="padding:4px 10px;font-size:11px;border:1px solid #e67e22;border-radius:4px;background:#fff8f0;color:#c0622a;cursor:pointer" title="Highlight subtree background with a colour">&#x25A0; Highlight</button>
+  </div>
+</div>
+<div id="tri-action-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="tri-popup-title"></div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap">
+    <button id="tap-expand" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x25B7; Expand</button>
+    <button id="tap-focus" style="padding:3px 10px;font-size:11px;border:1px solid #8e44ad;border-radius:4px;background:#faf5ff;color:#6c3483;cursor:pointer">⌕ Focus</button>
+    <button id="tap-rename" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x270F; Rename</button>
+    <button id="tap-color"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Color</button>
+    <button id="tap-compare" style="padding:3px 10px;font-size:11px;border:1px solid #4a90d9;border-radius:4px;background:#f0f6ff;color:#2c6090;cursor:pointer">&#x2316; Compare</button>
+    <input id="tap-color-input" type="color" style="display:none">
+  </div>
+</div>
+<!-- POSSVM interactive orthogroup calling panel -->
+<div id="possvm-panel" style="position:fixed;display:none;background:#fff;border:1px solid #27ae60;border-radius:6px;box-shadow:0 3px 14px rgba(0,0,0,.22);z-index:320;padding:10px 12px;min-width:270px;max-width:350px;font-size:11px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span style="font-weight:700;font-size:12px;color:#1a6b4a">POSSVM Orthogroup Calling</span>
+    <button onclick="document.getElementById('possvm-panel').style.display='none'" style="border:none;background:none;cursor:pointer;font-size:15px;color:#888;padding:0 2px;line-height:1">&#x2715;</button>
+  </div>
+  <!-- SOS threshold -->
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #eee">
+    <span style="color:#555;white-space:nowrap">SOS threshold:</span>
+    <input type="range" id="possvm-sos" min="0" max="1" step="0.05" value="0" style="flex:1;cursor:pointer;accent-color:#27ae60" oninput="document.getElementById('possvm-sos-val').textContent=parseFloat(this.value).toFixed(2)">
+    <span id="possvm-sos-val" style="width:30px;font-weight:600;text-align:right">0.00</span>
+    <span style="color:#bbb;cursor:help;font-size:12px" title="Species Overlap Score threshold. 0 = strict: any species overlap → duplication node. Higher values allow overlap before calling a duplication.">&#x24D8;</span>
+  </div>
+  <!-- Ingroup species -->
+  <div style="margin-bottom:6px">
+    <div style="color:#555;font-weight:600;margin-bottom:5px">Ingroup species <span id="possvm-sel-count" style="font-weight:normal;color:#888"></span></div>
+    <div style="display:flex;gap:4px;margin-bottom:5px;flex-wrap:wrap">
+      <button onclick="pvmSelectAll(true)"  style="padding:2px 7px;font-size:10px;border:1px solid #aaa;border-radius:3px;cursor:pointer;background:#f5f5f5">All</button>
+      <button onclick="pvmSelectAll(false)" style="padding:2px 7px;font-size:10px;border:1px solid #aaa;border-radius:3px;cursor:pointer;background:#f5f5f5">None</button>
+      <button id="possvm-clade-btn" onclick="pvmToggleCladeTree()" style="padding:2px 7px;font-size:10px;border:1px solid #27ae60;border-radius:3px;cursor:pointer;background:#f0fff6;color:#1a6b4a" title="Click a clade in the species tree to use as ingroup">&#x1F333; Pick clade</button>
+    </div>
+    <!-- mini clade-picker tree (shown on demand) -->
+    <div id="possvm-clade-wrap" style="display:none;border:1px solid #d5ead5;border-radius:4px;padding:4px;margin-bottom:5px;overflow:auto;background:#f6fbf6;max-height:170px"></div>
+    <!-- species checkboxes -->
+    <div id="possvm-sp-list" style="max-height:150px;overflow-y:auto;border:1px solid #e8e8e8;border-radius:3px;padding:3px 5px;background:#fafafa;line-height:1.8"></div>
+  </div>
+  <!-- Buttons row -->
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-top:6px;border-top:1px solid #eee">
+    <button onclick="pvmMidpointRoot()" style="padding:3px 10px;font-size:11px;border:1px solid #2980b9;border-radius:4px;background:#eaf4fb;color:#1a5276;cursor:pointer" title="Reroot tree at midpoint of longest leaf-to-leaf path (recommended before running POSSVM)">&#x21BB; Midpoint root</button>
+    <button onclick="runPossvm()" style="padding:4px 14px;font-size:11px;border:1px solid #27ae60;border-radius:4px;background:#e8f8f0;color:#1a6b4a;cursor:pointer;font-weight:600">&#x25BA; Run</button>
+    <button id="possvm-reset-btn" onclick="pvmReset()" style="padding:3px 9px;font-size:11px;border:1px solid #bbb;border-radius:4px;background:#fff;cursor:pointer;display:none">&#x21BA; Reset OGs</button>
+  </div>
+  <div id="possvm-result" style="margin-top:5px;color:#1a6b4a;font-size:10px;min-height:14px"></div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid #eee">
+    <details id="hog-details">
+      <summary style="color:#555;font-weight:600;cursor:pointer;user-select:none">Hierarchical orthogroups</summary>
+      <div style="margin-top:8px">
+        <div style="font-size:10px;color:#7b8a93;line-height:1.45;margin-bottom:6px">
+          Pick named species-tree clades and run POSSVM on each nested ingroup. The resulting hOG map shows how OGs split or merge across clade levels.
+        </div>
+        <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <input id="hog-node-search" list="hog-node-list" placeholder="Species-tree node…" style="flex:1;min-width:140px;font-size:11px;padding:3px 6px;border:1px solid #bbb;border-radius:3px">
+          <datalist id="hog-node-list"></datalist>
+          <button onclick="addHogNodeFromInput()" style="padding:3px 8px;font-size:10px;border:1px solid #aaa;border-radius:3px;background:#f5f5f5;cursor:pointer">Add</button>
+          <button id="hog-clade-btn" onclick="pvmToggleHogTree()" style="padding:3px 8px;font-size:10px;border:1px solid #2980b9;border-radius:3px;background:#edf6fd;color:#1a5276;cursor:pointer" title="Pick named clades from the species tree">&#x1F333; Pick from tree</button>
+          <button onclick="clearHogNodes()" style="padding:3px 8px;font-size:10px;border:1px solid #aaa;border-radius:3px;background:#f5f5f5;cursor:pointer">Clear</button>
+          <button onclick="runHierPossvm()" style="padding:3px 8px;font-size:10px;border:1px solid #2980b9;border-radius:3px;background:#edf6fd;color:#1a5276;cursor:pointer">Run hOGs</button>
+        </div>
+        <div id="hog-clade-wrap" style="display:none;border:1px solid #d7e7f5;border-radius:4px;padding:4px;margin-bottom:6px;overflow:auto;background:#f7fbff;height:170px;min-height:80px;min-width:200px;resize:both"></div>
+        <div id="hog-node-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
+        <div id="hog-result" style="color:#1a5276;font-size:10px;min-height:14px"></div>
+      </div>
+    </details>
+  </div>
+</div>
+<div id="hog-map-panel" style="position:fixed;display:none;top:72px;right:18px;width:min(760px,calc(100vw - 80px));height:min(460px,calc(100vh - 110px));background:#fff;border:1px solid #cfd8de;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);z-index:330;overflow:hidden">
+  <div id="hog-map-header" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid #e8edf1;background:#f7fafc;cursor:move;user-select:none">
+    <div>
+      <div style="font-weight:700;font-size:12px;color:#314553">Hierarchical orthogroups</div>
+      <div id="hog-map-subtitle" style="font-size:10px;color:#7c8b95;margin-top:2px"></div>
+    </div>
+    <button onclick="closeHogMapPanel()" style="border:none;background:none;cursor:pointer;font-size:16px;color:#8896a0;line-height:1">&times;</button>
+  </div>
+  <div id="hog-map-wrap" style="width:100%;height:calc(100% - 52px);overflow:auto;background:#fff"></div>
+  <div id="hog-map-resize" title="Drag to resize" style="position:absolute;bottom:0;right:0;width:16px;height:16px;cursor:nwse-resize;opacity:.5"
+    onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=.5">
+    <svg width="16" height="16"><polyline points="6,14 14,6" stroke="#88a" stroke-width="1.5" stroke-linecap="round"/><polyline points="10,14 14,10" stroke="#88a" stroke-width="1.5" stroke-linecap="round"/></svg>
+  </div>
+</div>
+<div id="clade-hl-popup" style="position:fixed;display:none;background:#fff;border:1px solid #e67e22;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:270;flex-direction:column;gap:5px">
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600">Clade highlight</div>
+  <div style="display:flex;gap:5px">
+    <button id="chl-rename" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x270F; Label</button>
+    <button id="chl-recolor" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Colour</button>
+    <button id="chl-remove" style="padding:3px 10px;font-size:11px;border:1px solid #c0392b;border-radius:4px;background:#fff0ee;color:#c0392b;cursor:pointer">&#x2715; Remove</button>
+  </div>
+</div>
+<div id="clado-action-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="clado-popup-title"></div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap">
+    <button id="cap-expand"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x25B7; Expand</button>
+    <button id="cap-rename"  style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x270F; Rename</button>
+    <button id="cap-color"   style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x1F3A8; Color</button>
+    <input id="cap-color-input" type="color" style="display:none">
+  </div>
+</div>
+<div id="sptree-node-popup" style="position:fixed;display:none;background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:260;flex-direction:column;gap:5px">
+  <div style="font-size:10px;color:#888;margin-bottom:2px;font-weight:600" id="snp-title"></div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap">
+    <button id="snp-collapse" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x25B7; Collapse</button>
+    <button id="snp-flip"     style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:#f8f8f8;cursor:pointer">&#x21C5; Flip</button>
+  </div>
+</div>
+<div id="collapsed-popup">
+  <div class="cp-title">Collapsed node</div>
+  <div class="cp-row"><span>Name:</span><input id="cp-name" type="text"></div>
+  <div class="cp-genes-label" id="cp-genes-label"></div>
+  <textarea id="cp-genes" readonly></textarea>
+  <div class="cp-actions">
+    <button class="cp-btn" onclick="cpRename()">Rename</button>
+    <button class="cp-btn" onclick="cpCopy()">Copy genes</button>
+    <button class="cp-btn" onclick="cpExpand()">Expand</button>
+    <button class="cp-btn" onclick="cpCompare()" title="Compare species coverage with another node">&#x2316; Compare</button>
+    <button class="cp-btn" onclick="cpClose()">Close</button>
+  </div>
+</div>
+
+<!-- ── Species compare banner + result panel ── -->
+<div id="sp-compare-banner" style="display:none;position:fixed;z-index:400;bottom:28px;left:50%;transform:translateX(-50%);background:#fffbea;border:1px solid #e8c840;border-radius:20px;padding:5px 16px;font-size:11px;color:#7a5c00;box-shadow:0 2px 8px rgba(0,0,0,.18);align-items:center;gap:10px;white-space:nowrap">
+  <span>&#x2316; Click a second node to compare species&hellip;</span>
+  <button onclick="exitCompareMode()" style="padding:1px 8px;font-size:10px;border:1px solid #c8a030;border-radius:10px;background:#fff;cursor:pointer;color:#7a5c00">Cancel</button>
+</div>
+<div id="sp-compare-panel" style="display:none;position:fixed;z-index:410;top:30%;left:50%;transform:translate(-50%,0);background:#fff;border:1px solid #bbb;border-radius:8px;padding:12px 16px;font-size:11px;box-shadow:0 6px 20px rgba(0,0,0,.22);min-width:240px;max-width:380px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <b style="font-size:12px;color:#333">Species overlap</b>
+    <span onclick="document.getElementById('sp-compare-panel').style.display='none'" style="cursor:pointer;color:#aaa;font-size:16px;line-height:1;padding:0 2px" title="Close">&times;</span>
+  </div>
+  <div id="scp-legend" style="font-size:10px;color:#666;margin-bottom:8px;line-height:1.6"></div>
+  <div id="scp-content"></div>
+</div>
+
+<!-- ── Per-HG lazy data ── -->
+<div id="lazy-data" style="display:none">
+%%LAZY_SCRIPTS%%
+</div>
+
+<!-- ── Per-HG alignment data ── -->
+<div id="aln-data" style="display:none">
+%%ALN_SCRIPTS%%
+</div>
+
+<!-- ── Protein-domain catalog ── -->
+<div id="protein-domain-data-wrap" style="display:none">
+%%PROTEIN_DOMAIN_SCRIPT%%
+</div>
+
+<!-- ── Domain-architecture catalog ── -->
+<div id="architecture-data-wrap" style="display:none">
+%%ARCHITECTURE_SCRIPT%%
+</div>
+
+<script>%%JS%%</script>
+</body>
+</html>

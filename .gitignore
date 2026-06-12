@@ -31,3 +31,6 @@ pep2hg
 __pycache__
 demo/
 WHATIDID.md
+
+# report template asset is source — keep it despite the *html rule above
+!workflow/report_assets/report.html
