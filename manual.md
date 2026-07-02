@@ -22,7 +22,7 @@ It takes a multi-species proteome and a gene-family definition file and produces
 7. [Step 2 — Phylogenies](#step-2--phylogenies-step2nf)
    - [Resource prediction (optional)](#resource-prediction-optional)
    - [Running the pipeline](#running-the-pipeline)
-8. [GeneRax-only pipeline](#generax-only-pipeline-generaxnf)
+8. [GeneRax-only pipeline](#generax-only-pipeline-workflowgeneraxnf)
 9. [Gathering annotations](#gathering-annotations)
 10. [Monitoring jobs](#monitoring-jobs)
 11. [Tree utilities](#tree-utilities)
@@ -51,9 +51,16 @@ mamba env create -f workflow/environment.yaml
 mamba activate phylo
 ```
 
-The `phylo` environment includes all bioinformatics tools used by the pipeline
-(HMMER, DIAMOND, MCL, MAFFT, IQ-TREE 2, FastTree, GeneRax, POSSVM, ETE3,
-NumPy, pandas, …).
+The `phylo` environment includes most bioinformatics tools used by the pipeline
+(HMMER, DIAMOND, MCL, MAFFT, IQ-TREE 2, FastTree, PastML, ETE3, NumPy, pandas, …).
+
+Two dependencies live outside the conda environment:
+
+- **POSSVM** ships with the `phylogeny/` git submodule, so clone the repository
+  with `--recurse-submodules`.
+- **GeneRax** is *not* bundled: the `--run_generax` steps call `mpirun` and the
+  `generax` binary directly, so both must be on your `PATH`. On the CRG HPC,
+  `module load OpenMPI` provides `mpirun`; make a GeneRax install available too.
 
 ---
 
@@ -61,41 +68,65 @@ NumPy, pandas, …).
 
 ```
 phylohpc/
-├── step1.nf              # PFAM search + MCL clustering pipeline
-├── step2.nf              # Alignment, phylogeny, POSSVM, GeneRax pipeline
-├── generax.nf            # GeneRax-only re-run pipeline
-├── nextflow.config       # Default parameters and execution profiles
-├── submit_nf.sh          # SLURM wrapper for launching Nextflow itself
+├── step1.nf                     # PFAM search + MCL clustering pipeline (Nextflow)
+├── step1.smk                    # Snakemake twin of step 1
+├── step2.nf                     # Alignment, phylogeny, POSSVM, GeneRax pipeline
+├── step2.smk                    # Snakemake twin of step 2
+├── nextflow.config              # Default parameters and execution profiles
+├── submit_nf.sh                 # SLURM wrapper for launching Nextflow itself
+├── make_report.sh               # Build the interactive step-2 HTML report
+├── config/
+│   ├── step1.yaml               # Step 1 configuration (Snakemake)
+│   ├── step2.yaml               # Step 2 configuration (Snakemake)
+│   ├── step4.yaml               # Ancestry configuration (Snakemake)
+│   ├── species_list             # One species prefix per line; defines analysis set
+│   ├── sps_annotate             # Species prefixes to gather annotations for
+│   └── ancestry_ids.txt         # HG ids for the ancestry pipeline
 ├── data/
-│   ├── input.fasta           # Multi-species proteome (user-provided)
-│   ├── species_tree.newick   # Pruned, strictly binary species tree
-│   ├── species_tree.full.newick  # Full species tree (before pruning)
-│   └── Mmus_gene_names.csv   # Reference species gene name table
-├── configs/
-│   └── config.txt        # Legacy config (no longer read by pipelines)
+│   ├── input.fasta                  # Multi-species proteome (user-provided)
+│   ├── species_tree.newick          # Pruned, strictly binary species tree
+│   ├── species_tree.full.newick     # Full species tree (before pruning)
+│   ├── Mmus_gene_names.csv          # Reference species gene name table
+│   ├── species_info.tsv             # Species prefix → metadata table
+│   └── gene_families_searchinfo.csv # Reference gene-family definitions
 ├── workflow/
-│   ├── remove_gaponly.py     # Gap-only column removal (used by step2.nf)
-│   ├── select_hgs.py         # Filter HGs → ids.txt
-│   ├── get_seqstat.py        # FASTA sequence statistics
-│   ├── predict_resources.py  # Predict SLURM memory/time per HG
-│   ├── gather_annotations.py # Gather per-species ortholog annotations
-│   ├── check_job.py          # Inspect individual SLURM job stats
-│   ├── check_job.v2.py       # Inspect a batch of SLURM job stats
-│   ├── check_tree.py         # Prune & validate species tree
-│   ├── helper.py             # Shared Python utilities
-│   ├── prune_tree.py         # Prune tree to a tip subset
-│   ├── strip_len.py          # Strip branch lengths from Newick
-│   ├── strip_support.py      # Strip bootstrap support from Newick
-│   ├── get_tips.py           # List all tip labels in a tree
+│   ├── step4.ancestry.nf        # Clade ancestral gene-content pipeline (Nextflow)
+│   ├── step4_ancestry.smk       # Snakemake twin of step 4
+│   ├── generax.nf               # GeneRax-only re-run pipeline
+│   ├── select_hgs.py            # Filter HGs → ids.txt
+│   ├── get_seqstat.py           # FASTA sequence statistics
+│   ├── remove_gaponly.py        # Gap-only column removal (used by step2.nf)
+│   ├── predict_resources.py     # Predict SLURM memory/time per HG
+│   ├── gather_annotations.py    # Gather per-species ortholog annotations
+│   ├── check_tree.py            # Prune & validate species tree
+│   ├── check_job.py            # Inspect individual SLURM job stats
+│   ├── check_job.v2.py         # Inspect a batch of SLURM job stats
+│   ├── extract_clade.py         # Extract clade-scoped subtrees (step 4)
+│   ├── build_pam.py             # Build presence/absence matrix (step 4)
+│   ├── ancestral_reconstruction.py # PastML ancestral state reconstruction (step 4)
+│   ├── link_hog_levels.py       # Link HOG hierarchy levels
+│   ├── build_hog_report.py      # Build the HOG hierarchy report
+│   ├── visualize_hog_hierarchy.py  # HOG hierarchy visualisation
+│   ├── visualize_ancestry.py    # Ancestry visualisation (D3.js HTML)
+│   ├── report_step1.py          # Step 1 report
+│   ├── report_step2.py          # Step 2 interactive HTML report
+│   ├── tree_viewer.py           # Interactive gene-tree viewer
+│   ├── alignment_viewer.py      # Interactive alignment viewer
+│   ├── prepare_fasta.sh         # Fetch proteomes into data/input.fasta
+│   ├── download_phylopic.py     # Fetch PhyloPic silhouettes
+│   ├── helper.py                # Shared Python utilities
+│   ├── train.R                  # Fit resource-prediction models
+│   ├── environment.yaml         # Conda/mamba environment (Linux/HPC)
+│   ├── environment.macos-x86_64.yaml  # macOS (Rosetta/x86_64) environment
 │   └── models/
-│       ├── models.json       # Fitted resource-prediction coefficients
-│       └── defaults.json     # Per-job default and large-family resources
-├── phylogeny/
-│   └── main.py               # Core computation engine (called by NF processes)
-├── tests/                    # Pytest test suite
-├── docs/
-│   └── manual.md             # This file
-└── *.R                       # Post-run analysis scripts
+│       ├── models.json          # Fitted resource-prediction coefficients
+│       └── defaults.json        # Per-job default and large-family resources
+├── phylogeny/                   # Core computation engine (git submodule)
+│   ├── main.py                  # Search, cluster, align, tree, POSSVM, GeneRax
+│   └── submodules/possvm-orthology/  # POSSVM ortholog caller
+├── R/                           # Post-run analysis scripts (resources.R, …)
+└── docs/
+    └── manual.md                # This file
 ```
 
 ---
@@ -161,7 +192,7 @@ nextflow run step2.nf -profile local,precise --run_generax
 python workflow/gather_annotations.py \
   --search-dir results/search \
   --tree-dir results/possvm results/possvm_prev \
-  --id sps_annotate --outdir results/annotations --split-prefix
+  --id config/sps_annotate --outdir results/annotations --split-prefix
 ```
 
 ---
@@ -293,7 +324,7 @@ python workflow/get_seqstat.py results/clusters/*.fasta > seq_stat.tab
 Requires a Nextflow trace file from a previous run:
 
 ```bash
-Rscript train.R \
+Rscript workflow/train.R \
   --trace    reports/trace.step2.txt \
   --seq_stats seq_stat.tab \
   --outfile  workflow/models/models.json \
@@ -431,14 +462,14 @@ results/
 
 ---
 
-## GeneRax-only pipeline (`generax.nf`)
+## GeneRax-only pipeline (`workflow/generax.nf`)
 
 Use when you already have alignments and gene trees and only want to
 (re-)run GeneRax + POSSVM — for example, after changing `--MAX_SPR` or the
 substitution model.
 
 ```bash
-nextflow run generax.nf \
+nextflow run workflow/generax.nf \
   -profile local,precise \
   -resume \
   --ids ids.txt \
@@ -466,14 +497,14 @@ output files.
 python workflow/gather_annotations.py \
   --search-dir results/search \
   --tree-dir   results/possvm results/possvm_prev \
-  --id         sps_annotate \
+  --id         config/sps_annotate \
   --outdir     results/annotations \
   --split-prefix
 ```
 
 `--id` accepts either:
 - A single species prefix: `--id Hsap`
-- A file of prefixes, one per line: `--id sps_annotate`
+- A file of prefixes, one per line: `--id config/sps_annotate`
 
 `--tree-dir` accepts multiple directories in **priority order** — a gene
 annotation found in the first directory is kept and later directories are
@@ -542,28 +573,12 @@ Before running GeneRax, ensure the species tree:
 ```bash
 python workflow/check_tree.py \
   data/species_tree.full.newick \
-  species_list \
+  config/species_list \
   data/species_tree.newick
 ```
 
-- `species_list` — one species prefix per line
+- `config/species_list` — one species prefix per line
 - Output is written to the third argument and validated as strictly binary
-
-### Other tree utilities
-
-```bash
-# List all tip labels
-python workflow/get_tips.py tree.newick
-
-# Prune to a subset of tips
-python workflow/prune_tree.py input.newick tips.txt output.newick
-
-# Strip branch lengths from a Newick
-python workflow/strip_len.py tree.newick > tree.topology.newick
-
-# Strip support values from a Newick
-python workflow/strip_support.py tree.newick > tree.nosupport.newick
-```
 
 ---
 
@@ -574,11 +589,10 @@ Nextflow workflow:
 
 | Script | Purpose |
 |---|---|
-| `resources.R` | Plot memory/time usage scaling with sequence count |
-| `downstream_stats.R` | Explore annotation completeness across species |
-| `generax_stats.R` | GeneRax log-likelihood gain vs SPR radius and runtime breakdown |
-| `train.R` | Fit quantile regression models from trace + sequence stats |
-| `_export_models.R` | Export fitted R models to `workflow/models/models.json` |
+| `R/resources.R` | Plot memory/time usage scaling with sequence count |
+| `R/downstream_stats.R` | Explore annotation completeness across species |
+| `R/generax_stats.R` | GeneRax log-likelihood gain vs SPR radius and runtime breakdown |
+| `workflow/train.R` | Fit quantile regression models from trace + sequence stats |
 
 ---
 
@@ -601,11 +615,11 @@ by a profile.
 | `max_n` | `2000` | step1.nf |
 | `search_dir` | `results/search` | step1.nf |
 | `cluster_dir` | `results/clusters` | step1.nf |
-| `REFSPECIES` | `Mmus` | step2.nf, generax.nf |
-| `REFNAMES` | `data/Mmus_gene_names.csv` | step2.nf, generax.nf |
-| `SPECIES_TREE` | `data/species_tree.newick` | step2.nf, generax.nf |
+| `REFSPECIES` | `Mmus` | step2.nf, workflow/generax.nf |
+| `REFNAMES` | `data/Mmus_gene_names.csv` | step2.nf, workflow/generax.nf |
+| `SPECIES_TREE` | `data/species_tree.newick` | step2.nf, workflow/generax.nf |
 | `IQTREE2_MODEL` | `TEST` | step2.nf |
-| `SUBS_MODEL` | `LG` | step2.nf, generax.nf |
+| `SUBS_MODEL` | `LG` | step2.nf, workflow/generax.nf |
 
 ---
 
