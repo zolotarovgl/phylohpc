@@ -2,7 +2,7 @@
 # Override any key on the command line: --config key=value
 
 genefam_info:  genefam.csv
-species_list:  species_list
+species_list:  config/species_list
 infasta:       data/input.fasta
 use_prepare:   0
 prepare_db_dir: /users/asebe/xgraubove/genomes/data/

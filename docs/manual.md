@@ -161,7 +161,7 @@ nextflow run step2.nf -profile local,precise --run_generax
 python workflow/gather_annotations.py \
   --search-dir results/search \
   --tree-dir results/possvm results/possvm_prev \
-  --id sps_annotate --outdir results/annotations --split-prefix
+  --id config/sps_annotate --outdir results/annotations --split-prefix
 ```
 
 ---
@@ -466,14 +466,14 @@ output files.
 python workflow/gather_annotations.py \
   --search-dir results/search \
   --tree-dir   results/possvm results/possvm_prev \
-  --id         sps_annotate \
+  --id         config/sps_annotate \
   --outdir     results/annotations \
   --split-prefix
 ```
 
 `--id` accepts either:
 - A single species prefix: `--id Hsap`
-- A file of prefixes, one per line: `--id sps_annotate`
+- A file of prefixes, one per line: `--id config/sps_annotate`
 
 `--tree-dir` accepts multiple directories in **priority order** — a gene
 annotation found in the first directory is kept and later directories are
@@ -542,11 +542,11 @@ Before running GeneRax, ensure the species tree:
 ```bash
 python workflow/check_tree.py \
   data/species_tree.full.newick \
-  species_list \
+  config/species_list \
   data/species_tree.newick
 ```
 
-- `species_list` — one species prefix per line
+- `config/species_list` — one species prefix per line
 - Output is written to the third argument and validated as strictly binary
 
 ### Other tree utilities

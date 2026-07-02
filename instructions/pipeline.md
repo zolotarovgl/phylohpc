@@ -25,7 +25,7 @@
 ## Pipeline layout
 - Inputs:
   - `data/input.fasta` — concatenated proteomes
-  - `species_list` — species prefixes included in the run
+  - `config/species_list` — species prefixes included in the run
   - `genefam.csv` — family definitions for step 1 and step 2
   - `data/species_tree.full.newick` — named internal nodes; canonical full species tree
   - `data/species_tree.newick` — binary/pruned tree used in some downstream contexts

@@ -105,26 +105,26 @@ module load OpenMPI
 | `data/species_tree.full.newick` | Full species tree with **named internal nodes** (required for GeneRax and ancestral reconstruction). |
 | `data/species_tree.newick` | Strictly binary species tree (no polytomies) used by GeneRax. Generated from the full tree — see below. |
 | `data/Mmus_gene_names.csv` | Reference species gene name mapping (`protein_id<TAB>gene_name`). |
-| `genefam.csv` | Gene family definitions (HMM profiles, clustering parameters — see `Gene_families.md`). |
-| `species_list` | One species prefix per line; defines the analysis set. |
+| `genefam.csv` | Gene family definitions (HMM profiles, clustering parameters — see `docs/Gene_families.md`). |
+| `config/species_list` | One species prefix per line; defines the analysis set. |
 
 ### Prepare the binary species tree
 
 Note: `--random-resolve` is for the cases where the tree contains polytomies
 
 ```bash
-python workflow/check_tree.py --random-resolve data/species_tree.full.newick species_list data/species_tree.newick
+python workflow/check_tree.py --random-resolve data/species_tree.full.newick config/species_list data/species_tree.newick
 ```
 
-This validates the full tree, prunes it to the species in `species_list`, and resolves any polytomies, writing a GeneRax-compatible binary tree to `data/species_tree.newick`.
+This validates the full tree, prunes it to the species in `config/species_list`, and resolves any polytomies, writing a GeneRax-compatible binary tree to `data/species_tree.newick`.
 
 ### Fetch proteomes from a sequence database
 
 Here, use the database from Xavi. 
 
 ```bash
-bash workflow/prepare_fasta.sh species_list data/input.fasta
-bash workflow/prepare_fasta.sh species_list data/input.fasta /path/to/proteome_db
+bash workflow/prepare_fasta.sh config/species_list data/input.fasta
+bash workflow/prepare_fasta.sh config/species_list data/input.fasta /path/to/proteome_db
 ```
 
 Or concatenate custom proteomes into `data/input.fasta` directly.
