@@ -52,14 +52,16 @@ mamba activate phylo
 ```
 
 The `phylo` environment includes the bioinformatics tools used by the pipeline
-(HMMER, DIAMOND, MCL, MAFFT, IQ-TREE 2, FastTree, GeneRax, OpenMPI, PastML, ETE3,
-NumPy, pandas, …).
+(HMMER, DIAMOND, MCL, MAFFT, IQ-TREE 2, FastTree, PastML, ETE3, NumPy, pandas,
+and POSSVM's Python stack …).
 
 **POSSVM** lives outside the conda environment — it ships with the `phylogeny/`
 git submodule, so clone the repository with `--recurse-submodules`.
 
-GeneRax + OpenMPI are bundled, so `--run_generax` works out of the box; on the
-CRG HPC you may prefer the system MPI via `module load OpenMPI`.
+**GeneRax** is *not* in the conda env. The `--run_generax` reconciliation needs an
+MPI-compiled GeneRax + `mpirun` (the bioconda build is non-MPI and crashes). Run it
+on HPC (`module load OpenMPI` + an MPI GeneRax), or run locally without
+`--run_generax` (POSSVM uses the raw gene trees).
 
 ---
 
