@@ -6,6 +6,7 @@ A Nextflow pipeline for large-scale gene family phylogenomics: from raw proteome
 
 ---
 
+
 ## Overview
 
 ```
@@ -33,6 +34,14 @@ Multi-species proteomes
 ```
 
 ---
+
+## Clone 
+
+
+```bash
+git clone --recurse-submodules https://github.com/zolotarovgl/phylohpc.git
+```
+
 
 ## Requirements
 
