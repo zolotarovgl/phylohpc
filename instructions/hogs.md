@@ -17,7 +17,7 @@
   - `workflow/visualize_hog_hierarchy.py`
   - `workflow/link_hog_levels.py`
   - `workflow/extract_clade.py`
-  - `config_ancestry.yaml`
+  - `config/step4.yaml`
   - `ancestry_ids.txt`
   - related tests and `results/ancestry/` outputs
 - Do not broaden into `pipeline` or `report` unless:
@@ -54,7 +54,7 @@
 - `workflow/visualize_hog_hierarchy.py`
 - `workflow/link_hog_levels.py`
 - `workflow/extract_clade.py`
-- `config_ancestry.yaml`
+- `config/step4.yaml`
 - `ancestry_ids.txt`
 - `data/species_tree.full.newick`
 

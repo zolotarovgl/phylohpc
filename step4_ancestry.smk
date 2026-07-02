@@ -6,17 +6,17 @@ Usage:
 
 Override any config value on the command line:
     snakemake -s step4_ancestry.smk --cores 24 \
-        --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=ancestry_ids.txt
+        --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=config/ancestry_ids.txt
 """
 
 import os
 from pathlib import Path
 
-configfile: "config_ancestry.yaml"
+configfile: "config/step4.yaml"
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 NODE_NAMES  = config.get("node_names",      "Metazoa,Bilateria,Euarchontoglires")
-IDS_FILE    = config.get("ids",             "ancestry_ids.txt")
+IDS_FILE    = config.get("ids",             "config/ancestry_ids.txt")
 OUTDIR      = config.get("outdir",          "results")
 SPEC_TREE   = config.get("species_tree",    "data/species_tree.full.newick")
 REFSPECIES  = config.get("refspecies",      "Mmus")

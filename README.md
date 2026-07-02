@@ -299,7 +299,7 @@ Determines which orthogroups were likely present in the last common ancestor (LC
 ### Run
 
 ```bash
-cat ids.txt | grep -E 'RFX' > ancestry_ids.txt
+cat ids.txt | grep -E 'RFX' > config/ancestry_ids.txt
 # Single clade
 
 mamba activate phylo
@@ -307,7 +307,7 @@ module load Java          # for Nextflow
 module load OpenMPI       # for GeneRax only
 
 # Multiple clades in one run
-nextflow run step4.ancestry.nf -profile local,fast --node_names "Metazoa,Bilateria,Euarchontoglires" --ids ancestry_ids.txt --max_cpus 24 -resume
+nextflow run step4.ancestry.nf -profile local,fast --node_names "Metazoa,Bilateria,Euarchontoglires" --ids config/ancestry_ids.txt --max_cpus 24 -resume
 
 
 python workflow/visualize_hog_hierarchy.py \
@@ -320,7 +320,7 @@ python workflow/visualize_hog_hierarchy.py \
 
 ```bash
 snakemake -s step4_ancestry.smk --cores 24 \
-    --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=ancestry_ids.txt
+    --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=config/ancestry_ids.txt
 ```
 
 
