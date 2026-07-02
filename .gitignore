@@ -31,6 +31,8 @@ trace*.txt
 
 # Large / per-run inputs (user-provided, not tracked)
 data/input*
+# ...except the committed 7-species test dataset:
+!data/input.fasta
 genefam.csv
 
 # Python
