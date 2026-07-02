@@ -1,18 +1,9 @@
 nextflow.enable.dsl=2
 
 
-// Defaults 
+// Single source of truth for these params is nextflow.config.
+// Only pref_family (not in the config) keeps an inline default here.
 params.pref_family   = null
-params.genefam_info  = "genefam.csv"
-params.infasta       = "data/input.fasta"
-params.search_dir    = "results/search"
-params.cluster_dir   = "results/clusters"
-params.max_n         = 3000
-params.pfam_db       = "/users/asebe/xgraubove/data/pfam/Pfam-A.hmm"
-params.domain_expand = 30
-params.s1_ncpu       = 4
-params.s2_ncpu       = 4
-params.s2_inflation  = 1.1
 
 workflow {
 
