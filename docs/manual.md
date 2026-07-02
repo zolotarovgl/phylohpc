@@ -63,7 +63,7 @@ NumPy, pandas, …).
 phylohpc/
 ├── step1.nf              # PFAM search + MCL clustering pipeline
 ├── step2.nf              # Alignment, phylogeny, POSSVM, GeneRax pipeline
-├── generax.nf            # GeneRax-only re-run pipeline
+├── workflow/generax.nf            # GeneRax-only re-run pipeline
 ├── nextflow.config       # Default parameters and execution profiles
 ├── submit_nf.sh          # SLURM wrapper for launching Nextflow itself
 ├── data/
@@ -426,14 +426,14 @@ results/
 
 ---
 
-## GeneRax-only pipeline (`generax.nf`)
+## GeneRax-only pipeline (`workflow/generax.nf`)
 
 Use when you already have alignments and gene trees and only want to
 (re-)run GeneRax + POSSVM — for example, after changing `--MAX_SPR` or the
 substitution model.
 
 ```bash
-nextflow run generax.nf \
+nextflow run workflow/generax.nf \
   -profile local,precise \
   -resume \
   --ids ids.txt \
@@ -579,11 +579,11 @@ by a profile.
 | `max_n` | `2000` | step1.nf |
 | `search_dir` | `results/search` | step1.nf |
 | `cluster_dir` | `results/clusters` | step1.nf |
-| `REFSPECIES` | `Mmus` | step2.nf, generax.nf |
-| `REFNAMES` | `data/Mmus_gene_names.csv` | step2.nf, generax.nf |
-| `SPECIES_TREE` | `data/species_tree.newick` | step2.nf, generax.nf |
+| `REFSPECIES` | `Mmus` | step2.nf, workflow/generax.nf |
+| `REFNAMES` | `data/Mmus_gene_names.csv` | step2.nf, workflow/generax.nf |
+| `SPECIES_TREE` | `data/species_tree.newick` | step2.nf, workflow/generax.nf |
 | `IQTREE2_MODEL` | `TEST` | step2.nf |
-| `SUBS_MODEL` | `LG` | step2.nf, generax.nf |
+| `SUBS_MODEL` | `LG` | step2.nf, workflow/generax.nf |
 
 ---
 

@@ -1,9 +1,9 @@
 nextflow.enable.dsl=2
 
 params.resources_tsv = null
-params.ALIGN_DIR     = "${projectDir}/results/align"
-params.TREE_DIR      = "${projectDir}/results/gene_trees"
-params.OUTDIR        = "${projectDir}/results"
+params.ALIGN_DIR     = "${projectDir}/../results/align"
+params.TREE_DIR      = "${projectDir}/../results/gene_trees"
+params.OUTDIR        = "${projectDir}/../results"
 
 
 species_tree_ch = Channel.fromPath(params.SPECIES_TREE)
@@ -128,7 +128,7 @@ process GR_watcher {
 			done
 		}
 
-		python ${projectDir}/phylogeny/main.py generax \
+		python ${projectDir}/../phylogeny/main.py generax \
 			--name ${id} \
 			--alignment ${aln} \
 			--gene_tree ${tree} \
@@ -213,7 +213,7 @@ process GR {
 	"""
 	set -euo pipefail
 	touch ${id}.progress.tree
-	python ${projectDir}/phylogeny/main.py generax \
+	python ${projectDir}/../phylogeny/main.py generax \
 		--name ${id} \
 		--alignment ${aln} \
 		--gene_tree ${tree} \
@@ -267,7 +267,7 @@ process PVM {
 
     script:
     """
-    python ${projectDir}/phylogeny/main.py possvm \
+    python ${projectDir}/../phylogeny/main.py possvm \
         -t ${tree} \
         --refsps ${params.REFSPECIES} \
         -r ${refnames_file} \
