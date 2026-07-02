@@ -83,19 +83,14 @@ phylohpc/
 │   ├── check_job.v2.py       # Inspect a batch of SLURM job stats
 │   ├── check_tree.py         # Prune & validate species tree
 │   ├── helper.py             # Shared Python utilities
-│   ├── prune_tree.py         # Prune tree to a tip subset
-│   ├── strip_len.py          # Strip branch lengths from Newick
-│   ├── strip_support.py      # Strip bootstrap support from Newick
-│   ├── get_tips.py           # List all tip labels in a tree
 │   └── models/
 │       ├── models.json       # Fitted resource-prediction coefficients
 │       └── defaults.json     # Per-job default and large-family resources
 ├── phylogeny/
 │   └── main.py               # Core computation engine (called by NF processes)
-├── tests/                    # Pytest test suite
 ├── docs/
 │   └── manual.md             # This file
-└── *.R                       # Post-run analysis scripts
+└── R/                        # Post-run analysis scripts
 ```
 
 ---
@@ -548,22 +543,6 @@ python workflow/check_tree.py \
 
 - `config/species_list` — one species prefix per line
 - Output is written to the third argument and validated as strictly binary
-
-### Other tree utilities
-
-```bash
-# List all tip labels
-python workflow/get_tips.py tree.newick
-
-# Prune to a subset of tips
-python workflow/prune_tree.py input.newick tips.txt output.newick
-
-# Strip branch lengths from a Newick
-python workflow/strip_len.py tree.newick > tree.topology.newick
-
-# Strip support values from a Newick
-python workflow/strip_support.py tree.newick > tree.nosupport.newick
-```
 
 ---
 

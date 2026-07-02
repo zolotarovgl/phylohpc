@@ -87,16 +87,6 @@ module load Java
 module load OpenMPI       
 ```
 
----
-
-
-
-
----
-
-
----
-
 ## Input data
 
 | File | Description |
