@@ -47,9 +47,10 @@ git clone --recurse-submodules https://github.com/zolotarovgl/phylohpc.git
 
 ## Requirements
 
-**Environment:** `workflow/environment.yaml` is the original Linux/HPC export.
-For local macOS work on Apple Silicon, use the Rosetta/x86_64 environment in
-`workflow/environment.macos-x86_64.yaml`.
+**Environment:** `workflow/environment.yaml` is a minimal, portable spec — only
+the direct tools, loosely pinned, so it solves across machines. It bundles
+GeneRax + OpenMPI. For local macOS work on Apple Silicon, use the Rosetta/x86_64
+environment in `workflow/environment.macos-x86_64.yaml`.
 
 ```bash
 mamba env create -f workflow/environment.yaml
@@ -89,10 +90,9 @@ module load Java
 module load OpenMPI       
 ```
 
-GeneRax is not bundled in the `phylo` environment: the `--run_generax` steps
-invoke `mpirun` and the `generax` binary directly, so both must be on your
-`PATH` (this is why `OpenMPI` is loaded above). POSSVM ships with the
-`phylogeny/` submodule cloned above.
+GeneRax + OpenMPI are included in the `phylo` environment, so `--run_generax`
+works out of the box. On the CRG HPC you may prefer the system MPI via
+`module load OpenMPI`. POSSVM ships with the `phylogeny/` submodule cloned above.
 
 ## Input data
 
