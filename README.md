@@ -215,7 +215,7 @@ Before submitting large runs, predict memory and runtime requirements from a pre
 ```bash
 python workflow/get_seqstat.py results/clusters/*.fasta > seq_stat.tab
 
-Rscript train.R \
+Rscript workflow/train.R \
     --trace     reports/trace.step2.txt \
     --seq_stats seq_stat.tab \
     --outfile   workflow/models/models.json \
@@ -393,7 +393,7 @@ cat reports/trace.step2.txt | grep -E "COMPLETED|CACHED" | cut -f3 | grep -v nat
 python workflow/check_job.v2.py -f job_ids > job_stats.tab
 ```
 
-`downstream_stats.R` and `resources.R` plot CPU/memory efficiency across jobs. `generax_stats.R` analyses GeneRax runtime scaling with SPR radius.
+`R/downstream_stats.R` and `R/resources.R` plot CPU/memory efficiency across jobs. `R/generax_stats.R` analyses GeneRax runtime scaling with SPR radius.
 
 
 

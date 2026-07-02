@@ -293,7 +293,7 @@ python workflow/get_seqstat.py results/clusters/*.fasta > seq_stat.tab
 Requires a Nextflow trace file from a previous run:
 
 ```bash
-Rscript train.R \
+Rscript workflow/train.R \
   --trace    reports/trace.step2.txt \
   --seq_stats seq_stat.tab \
   --outfile  workflow/models/models.json \
@@ -574,11 +574,10 @@ Nextflow workflow:
 
 | Script | Purpose |
 |---|---|
-| `resources.R` | Plot memory/time usage scaling with sequence count |
-| `downstream_stats.R` | Explore annotation completeness across species |
-| `generax_stats.R` | GeneRax log-likelihood gain vs SPR radius and runtime breakdown |
-| `train.R` | Fit quantile regression models from trace + sequence stats |
-| `_export_models.R` | Export fitted R models to `workflow/models/models.json` |
+| `R/resources.R` | Plot memory/time usage scaling with sequence count |
+| `R/downstream_stats.R` | Explore annotation completeness across species |
+| `R/generax_stats.R` | GeneRax log-likelihood gain vs SPR radius and runtime breakdown |
+| `workflow/train.R` | Fit quantile regression models from trace + sequence stats |
 
 ---
 

@@ -1,7 +1,7 @@
 ##########################
 # HG sequence info - number of seqs, median length
 ##########################
-source('helper.R')
+source('R/helper.R')
 trace_fn = 'reports/trace.step2.txt'
 ids = read.table(trace_fn,sep = '\t')[[4]]
 ids = gsub("\\(|\\)","",str_split(ids,' ',simplify = T)[,2])
