@@ -9,7 +9,7 @@ Logic (mirrors the R explore_hOGs.R script and link_hog_levels.py):
   Non-zero intersections become Sankey edges; per-OG stats are computed from
   the filtered (in-clade) gene sets.
 
-Expected directory layout produced by step4_ancestry.smk:
+Expected directory layout produced by workflow/step4_ancestry.smk:
   {ancestry_dir}/{node}/possvm/{hg}.ortholog_groups.csv
   {ancestry_dir}/{node}/{node}.in_species.txt
   {ancestry_dir}/{node}/{node}.pruned.tree

@@ -3,11 +3,11 @@ nextflow.enable.dsl=2
 // ── Parameters ────────────────────────────────────────────────────────────────
 
 params.node_names      = null
-params.ids             = "${projectDir}/ids.txt"
-params.OUTDIR          = "${projectDir}/results"
-params.SPECIES_TREE    = "${projectDir}/data/species_tree.full.newick"
+params.ids             = "${projectDir}/../ids.txt"
+params.OUTDIR          = "${projectDir}/../results"
+params.SPECIES_TREE    = "${projectDir}/../data/species_tree.full.newick"
 params.REFSPECIES      = "Mmus"
-params.REFNAMES        = "${projectDir}/data/Mmus_gene_names.csv"
+params.REFNAMES        = "${projectDir}/../data/Mmus_gene_names.csv"
 params.gene_trees_dir  = "${params.OUTDIR}/gene_trees"
 
 if (!params.node_names) {
@@ -55,7 +55,7 @@ process EXTRACT_CLADE {
 
     script:
     """
-    python ${projectDir}/workflow/extract_clade.py \
+    python ${projectDir}/extract_clade.py \
         --tree   ${species_tree} \
         --node   "${node}" \
         --out_prefix ${node}
@@ -88,7 +88,7 @@ process PVM_CLADE {
 
     script:
     """
-    python ${projectDir}/phylogeny/main.py possvm \
+    python ${projectDir}/../phylogeny/main.py possvm \
         -t          ${treefile} \
         --refsps    ${params.REFSPECIES} \
         -r          ${refnames} \
@@ -124,7 +124,7 @@ process LINK_HOGS {
 
     script:
     """
-    python ${projectDir}/workflow/link_hog_levels.py \
+    python ${projectDir}/link_hog_levels.py \
         --hg         '${id}' \
         --levels     '${levels_str}' \
         --csvs       ${csvs} \
@@ -153,7 +153,7 @@ process VISUALIZE_HIERARCHY {
 
     script:
     """
-    python ${projectDir}/workflow/visualize_hog_hierarchy.py \
+    python ${projectDir}/visualize_hog_hierarchy.py \
         --links  ${all_links} \
         --stats  ${all_stats} \
         --trees  ${all_trees} \

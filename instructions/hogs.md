@@ -5,14 +5,14 @@
 - Prioritize correctness of clade extraction, clade-level POSSVM outputs, cross-level OG linking, output layout, and `hog_hierarchy.html`.
 
 ## Active implementation
-- Treat `step4_ancestry.smk` as the active implementation for step 4.
-- Ignore `step4.ancestry.nf` unless the user explicitly asks about it.
+- Treat `workflow/step4_ancestry.smk` as the active implementation for step 4.
+- Ignore `workflow/step4.ancestry.nf` unless the user explicitly asks about it.
 - Prefer Snakemake here because it preserves the full output layout, not only declared outputs, while the Nextflow step-4 implementation is still incomplete.
-- If `README.md`, `step4.ancestry.nf`, and the active step-4 code disagree, follow `step4_ancestry.smk` and the Python scripts it calls.
+- If `README.md`, `workflow/step4.ancestry.nf`, and the active step-4 code disagree, follow `workflow/step4_ancestry.smk` and the Python scripts it calls.
 
 ## Stream boundaries
 - Start with:
-  - `step4_ancestry.smk`
+  - `workflow/step4_ancestry.smk`
   - `workflow/build_hog_report.py`
   - `workflow/visualize_hog_hierarchy.py`
   - `workflow/link_hog_levels.py`
@@ -49,7 +49,7 @@
 - Species tree node names must match exactly; `"Filosoa"` does not exist.
 
 ## Key files
-- `step4_ancestry.smk`
+- `workflow/step4_ancestry.smk`
 - `workflow/build_hog_report.py`
 - `workflow/visualize_hog_hierarchy.py`
 - `workflow/link_hog_levels.py`

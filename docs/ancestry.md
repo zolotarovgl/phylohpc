@@ -1,4 +1,4 @@
-# Ancestral Gene Content Reconstruction — `step4.ancestry.nf`
+# Ancestral Gene Content Reconstruction — `workflow/step4.ancestry.nf`
 
 This document explains what the ancestral reconstruction pipeline does, how to run it, and how to interpret its outputs and the interactive visualisation.
 
@@ -8,7 +8,7 @@ This document explains what the ancestral reconstruction pipeline does, how to r
 
 After running `step2.nf` you have, for each Homology Group, a set of ortholog groups (OGs) — clusters of genes inferred to descend from a single ancestral copy. What you don't yet know is: **was a given OG already present in the last common ancestor (LCA) of a particular clade, or did it arise later within that clade?**
 
-`step4.ancestry.nf` answers this by:
+`workflow/step4.ancestry.nf` answers this by:
 
 1. Calling OGs scoped only to the species within the target clade (ignoring outgroups during ortholog assignment)
 2. Building a presence/absence matrix across those species
@@ -22,7 +22,7 @@ After running `step2.nf` you have, for each Homology Group, a set of ortholog gr
 ```bash
 mamba activate phylo
 TREE=data/species_tree.full.newick
-nextflow run step4.ancestry.nf \
+nextflow run workflow/step4.ancestry.nf \
 	--SPECIES_TREE $TREE \
     -profile local,precise \
     --node_names Bilateria \
@@ -33,7 +33,7 @@ For multiple clades in one run:
 
 ```bash
 TREE=data/species_tree.full.newick
-nextflow run step4.ancestry.nf \
+nextflow run workflow/step4.ancestry.nf \
 	--SPECIES_TREE $TREE \
     -profile slurm,precise \
     --node_names "Bilateria,Protostomia,Deuterostomia,Vertebrata" \
@@ -198,7 +198,7 @@ By default `--ids ids.txt` includes all HGs selected in step 2. To analyse only 
 ```bash
 grep "^tfs\." ids.txt > ids_tfs.txt
 
-nextflow run step4.ancestry.nf \
+nextflow run workflow/step4.ancestry.nf \
     -profile local,precise \
     --node_names Bilateria \
     --ids ids_tfs.txt
@@ -250,3 +250,106 @@ Ishikawa SA, Zhukova A, Iwasaki W, Gascuel O (2019).
 A fast likelihood method to reconstruct and visualize ancestral scenarios.
 *Molecular Biology and Evolution* 36(9): 2069–2085.
 doi: [10.1093/molbev/msz131](https://doi.org/10.1093/molbev/msz131)
+
+
+
+## DEV: Step 4 — Ancestral gene content reconstruction
+
+Determines which orthogroups were likely present in the last common ancestor (LCA) of a named clade, using clade-scoped ortholog calling and probabilistic ancestral state reconstruction.
+
+### What it does
+
+1. **`EXTRACT_CLADE`** — finds the named node (e.g. `Bilateria`) in the full species tree with named internal nodes, and outputs the in-clade species list, the out-of-clade ignore list for POSSVM, and the pruned subtree.
+
+2. **`PVM_CLADE`** — re-runs POSSVM on the **raw gene trees** (not GeneRax-reconciled, to avoid circularity) with `--ignoretips` pointing at out-of-clade species, scoping ortholog group definitions to the target clade.
+
+3. **`BUILD_PAM`** — aggregates all per-HG POSSVM outputs into a binary species × OG presence/absence matrix (PAM).
+
+4. **`ANCESTRAL_RECON`** — runs [PastML](https://pastml.pasteur.fr) (MPPA + F81 model) on the PAM against the pruned species tree. The F81 model allows asymmetric gain/loss rates via estimated stationary frequencies; MPPA integrates over model parameter uncertainty for more reliable probability estimates. Outputs `P(present)` at every internal node.
+
+5. **`VISUALIZE`** — generates a self-contained interactive HTML file for exploring the results (see below).
+
+### Run
+
+```bash
+cat ids.txt | grep -E 'RFX' > config/ancestry_ids.txt
+# Single clade
+
+mamba activate phylo
+module load Java          # for Nextflow
+module load OpenMPI       # for GeneRax only
+
+# Multiple clades in one run
+nextflow run workflow/step4.ancestry.nf -profile local,fast --node_names "Metazoa,Bilateria,Euarchontoglires" --ids config/ancestry_ids.txt --max_cpus 24 -resume
+
+
+python workflow/visualize_hog_hierarchy.py \
+  --links results/ancestry/hog_links/*.og_links.tsv \
+  --stats results/ancestry/hog_links/*.og_stats.tsv \
+  --levels "Metazoa,Bilateria,Chordata,Euarchontoglires" \
+  --output results/ancestry/hog_hierarchy.html
+
+```
+
+```bash
+snakemake -s workflow/step4_ancestry.smk --cores 24 \
+    --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=config/ancestry_ids.txt
+```
+
+
+```bash
+
+python /users/asebe/gzolotarov/projects/2025_phylogeny/phylohpc/phylogeny/main.py possvm -t         results/gene_trees/tfs.Homeodomains.HG3.treefile --refsps   Mmus -r data/Mmus_gene_names.csv  --outgroup results/ancestry/Metazoa/Metazoa.ignore_species.txt -o Metazoa.tfs.Homeodomains.HG3 -p  results/ancestry/Metazoa/possvm/tfs.Homeodomains.HG3.
+
+
+mkdir -p results/hOGs
+python phylogeny/submodules/possvm-orthology/possvm.py -i results/gene_trees/tfs.Homeodomains.HG3.treefile --refsps   Mmus -r data/Mmus_gene_names.csv  --outgroup results/ancestry/Metazoa/Metazoa.ignore_species.txt -o Metazoa.tfs.Homeodomains.HG3 -p  results/hOGs/Metazoa.tfs.Homeodomains.HG3. -method lpa
+
+
+```
+
+`--node_names` must match named internal nodes in `data/species_tree.full.newick`.
+
+**Key parameters**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--node_names` | — | Comma-separated clade node name(s) **(required)** |
+| `--ids` | `ids.txt` | HG IDs to process |
+| `--SPECIES_TREE` | `data/species_tree.full.newick` | Full tree with named internal nodes |
+| `--REFSPECIES` | `Mmus` | Reference species for POSSVM |
+| `--gene_trees_dir` | `results/gene_trees` | Directory of raw `.treefile` outputs |
+| `--min_presence` | `2` | Minimum species required to retain an OG in the PAM |
+
+**Outputs** (under `results/ancestry/{node}/`):
+
+| File | Description |
+|---|---|
+| `{node}.in_species.txt` | Species within the clade |
+| `{node}.pruned.tree` | Pruned species subtree used for ASR |
+| `{node}.pam.tsv` | Binary presence/absence matrix (species × OGs) |
+| `{node}.ancestral_states.tsv` | Per-OG summary: `P_at_root`, gain/loss support, species counts |
+| `{node}.node_probs.tsv` | `P(present)` at every internal node for every OG |
+| `{node}.html` | Interactive visualisation (open in any browser) |
+
+**`ancestral_states.tsv` columns**
+
+| Column | Description |
+|---|---|
+| `og` | Orthogroup identifier |
+| `n_present` | Number of in-clade species carrying the OG |
+| `n_total` | Total in-clade species with data |
+| `P_at_root` | Marginal posterior probability of presence at the LCA |
+| `support` | Classification: `present` (≥0.9), `likely_present` (≥0.5), `likely_absent` (≥0.1), `absent` |
+
+The visualisation can also be generated independently from existing outputs:
+
+```bash
+python workflow/visualize_ancestry.py \
+    --tree       results/ancestry/Bilateria/Bilateria.pruned.tree \
+    --node_probs results/ancestry/Bilateria/Bilateria.node_probs.tsv \
+    --states     results/ancestry/Bilateria/Bilateria.ancestral_states.tsv \
+    --pam        results/ancestry/Bilateria/Bilateria.pam.tsv \
+    --output     Bilateria.html \
+    --node       Bilateria
+```

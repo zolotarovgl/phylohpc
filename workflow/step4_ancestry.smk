@@ -2,10 +2,10 @@
 Snakemake re-implementation of step4.ancestry.nf
 
 Usage:
-    snakemake -s step4_ancestry.smk --cores 24
+    snakemake -s workflow/step4_ancestry.smk --cores 24
 
 Override any config value on the command line:
-    snakemake -s step4_ancestry.smk --cores 24 \
+    snakemake -s workflow/step4_ancestry.smk --cores 24 \
         --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=config/ancestry_ids.txt
 """
 
@@ -55,7 +55,7 @@ rule extract_clade:
         ign_sp = f"{OUTDIR}/ancestry/{{node}}/{{node}}.ignore_species.txt",
         ptree  = f"{OUTDIR}/ancestry/{{node}}/{{node}}.pruned.tree"
     params:
-        script    = os.path.join(PDIR, "workflow/extract_clade.py"),
+        script    = os.path.join(PDIR, "extract_clade.py"),
         outprefix = lambda wc, output: str(Path(output.in_sp).parent / wc.node)
     shell:
         """
@@ -75,7 +75,7 @@ rule pvm_clade:
     output:
         csv = f"{OUTDIR}/ancestry/{{node}}/possvm/{{hg}}.ortholog_groups.csv"
     params:
-        script     = os.path.join(PDIR, "phylogeny/main.py"),
+        script     = os.path.join(PDIR, "..", "phylogeny/main.py"),
         refspecies = REFSPECIES,
         outdir     = lambda wc, output: str(Path(output.csv).parent)
     retries: 3
@@ -109,7 +109,7 @@ rule link_hogs:
         links = f"{OUTDIR}/ancestry/hog_links/{{hg}}.og_links.tsv",
         stats = f"{OUTDIR}/ancestry/hog_links/{{hg}}.og_stats.tsv"
     params:
-        script = os.path.join(PDIR, "workflow/link_hog_levels.py"),
+        script = os.path.join(PDIR, "link_hog_levels.py"),
         levels = NODE_NAMES
     shell:
         """
@@ -133,8 +133,8 @@ rule build_report:
             node=NODES, hg=HG_IDS
         ),
         trees = expand(f"{OUTDIR}/ancestry/{{node}}/{{node}}.pruned.tree", node=NODES),
-        report_script = os.path.join(PDIR, "workflow/build_hog_report.py"),
-        viz_script    = os.path.join(PDIR, "workflow/visualize_hog_hierarchy.py")
+        report_script = os.path.join(PDIR, "build_hog_report.py"),
+        viz_script    = os.path.join(PDIR, "visualize_hog_hierarchy.py")
     output:
         html = f"{OUTDIR}/ancestry/hog_hierarchy.html"
     params:
@@ -157,7 +157,7 @@ rule visualize_hierarchy:
         links = expand(f"{OUTDIR}/ancestry/hog_links/{{hg}}.og_links.tsv", hg=HG_IDS),
         stats = expand(f"{OUTDIR}/ancestry/hog_links/{{hg}}.og_stats.tsv", hg=HG_IDS),
         trees = expand(f"{OUTDIR}/ancestry/{{node}}/{{node}}.pruned.tree",  node=NODES),
-        viz_script = os.path.join(PDIR, "workflow/visualize_hog_hierarchy.py")
+        viz_script = os.path.join(PDIR, "visualize_hog_hierarchy.py")
     output:
         html = f"{OUTDIR}/ancestry/hog_hierarchy_linked.html"
     params:
