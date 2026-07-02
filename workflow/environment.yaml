@@ -4,9 +4,10 @@
 # A full `conda env export` pins every transitive package to a build hash and
 # fails to resolve on another machine — this spec avoids that.
 #
-# Includes GeneRax + OpenMPI, so `--run_generax` works with no extra PATH setup.
-# NOT included: Nextflow + Java (use `module load` on HPC, or install
-# `nextflow`/`openjdk` separately). POSSVM ships with the phylogeny/ submodule.
+# NOT included: Nextflow + Java, and GeneRax. GeneRax reconciliation
+# (`--run_generax`) needs an MPI-compiled GeneRax + mpirun (e.g. HPC
+# `module load OpenMPI`); the bioconda GeneRax build is non-MPI and crashes, so
+# it is left out. POSSVM ships with the phylogeny/ submodule.
 name: phylo
 channels:
   - conda-forge
@@ -22,12 +23,18 @@ dependencies:
   - clipkit
   - fasttree
   - iqtree
-  # Gene tree–species tree reconciliation
-  - generax
-  - openmpi
   # Step 4 (ancestral reconstruction) + Python scripts
   - pastml
   - ete3
   - biopython
   - numpy
   - pandas
+  # phylogeny/main.py config parsing
+  - pyyaml
+  # POSSVM (phylogeny submodule): orthology clustering + tree plotting
+  - networkx
+  - scipy
+  - scikit-learn
+  - markov_clustering
+  - python-louvain
+  - matplotlib-base
