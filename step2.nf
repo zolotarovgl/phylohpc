@@ -195,8 +195,7 @@ process PHY {
             --outprefix ${id} \
             -c ${task.cpus} \
             --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL} \
-            --logfile ${id}.log
+            --iqtree2_model ${params.IQTREE2_MODEL}
         """
     }
 	    else {
@@ -207,8 +206,7 @@ process PHY {
 	            --outprefix ${id} \
             -c ${task.cpus} \
             --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL} \
-            --logfile ${id}.log
+            --iqtree2_model ${params.IQTREE2_MODEL}
         """
     }
 }
