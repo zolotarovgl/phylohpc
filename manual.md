@@ -51,16 +51,15 @@ mamba env create -f workflow/environment.yaml
 mamba activate phylo
 ```
 
-The `phylo` environment includes most bioinformatics tools used by the pipeline
-(HMMER, DIAMOND, MCL, MAFFT, IQ-TREE 2, FastTree, PastML, ETE3, NumPy, pandas, …).
+The `phylo` environment includes the bioinformatics tools used by the pipeline
+(HMMER, DIAMOND, MCL, MAFFT, IQ-TREE 2, FastTree, GeneRax, OpenMPI, PastML, ETE3,
+NumPy, pandas, …).
 
-Two dependencies live outside the conda environment:
+**POSSVM** lives outside the conda environment — it ships with the `phylogeny/`
+git submodule, so clone the repository with `--recurse-submodules`.
 
-- **POSSVM** ships with the `phylogeny/` git submodule, so clone the repository
-  with `--recurse-submodules`.
-- **GeneRax** is *not* bundled: the `--run_generax` steps call `mpirun` and the
-  `generax` binary directly, so both must be on your `PATH`. On the CRG HPC,
-  `module load OpenMPI` provides `mpirun`; make a GeneRax install available too.
+GeneRax + OpenMPI are bundled, so `--run_generax` works out of the box; on the
+CRG HPC you may prefer the system MPI via `module load OpenMPI`.
 
 ---
 
