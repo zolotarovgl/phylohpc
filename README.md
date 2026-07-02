@@ -13,7 +13,7 @@ A Nextflow pipeline for large-scale gene family phylogenomics: from raw proteome
 Multi-species proteomes
         │
         ▼
-  step1.nf ── PFAM domain search (HMMER)
+  step1.nf ── PFAM domain search (HMMER) - **genefam.csv**
               MCL clustering
               → Homology Groups (HGs)
         │
@@ -89,33 +89,7 @@ module load OpenMPI
 
 ---
 
-Re-run search to generate domain arrangement info:
 
-```bash
-comm <(comm <(basename -a results/search/*genes.list | cut -f 1,2 -d . | sort | uniq) <(awk '{print $7"."$1}' genefam.csv  | sort | uniq) -12) <(basename -a results/search/*.domains_ummerged.csv  | cut -f 1,2 -d . | sort | uniq) -23  > tmp/tosearch
-
-for ID in $(cat tmp/tosearch); do
-  echo "$ID"
-  snakemake -s step1.smk --allowed-rules search --cores 22 --set-threads search=22 -- "results/search/${ID}.domains_ummerged.csv"
-done
-```
-
-Download phylopics
-
-
-```bash
-comm <(cut -f 1 data/species_info.tsv | sort | uniq ) <(basename -a img/phylo/*.png | sed 's/.png//g' | sort | uniq) -32 | awk -F '\t' 'FNR==NR{d[$1]=$2;next}{print $1"\t"d[$1]}' data/species_info.tsv  - > tmp/phylopic_missing
-wc -l tmp/phylopic_missing
-
-
-for PREF in $(cat tmp/phylopic_missing | cut -f 1 ); do
-SPECIES_NAME=$(awk -F '\t' -v ID=$PREF '$1==ID{print $2}' data/species_info.tsv )
-echo $PREF
-echo $SPECIES_NAME
-python workflow/download_phylopic.py "${SPECIES_NAME}" -o img/phylo/${PREF}.png
-done
-
-```
 
 
 ---
@@ -422,12 +396,33 @@ python workflow/check_job.v2.py -f job_ids > job_stats.tab
 `downstream_stats.R` and `resources.R` plot CPU/memory efficiency across jobs. `generax_stats.R` analyses GeneRax runtime scaling with SPR radius.
 
 
-# hOGs   
 
+# Misc   
 
-The ancestry step attempts to implement the hierarchical orthogroups 
+Re-run search to generate domain arrangement info:
 
 ```bash
-F=results/ancestry/Bilateria/possvm/Bilateria.tfs.Homeodomains.HG3.ortholog_groups.csv 
+comm <(comm <(basename -a results/search/*genes.list | cut -f 1,2 -d . | sort | uniq) <(awk '{print $7"."$1}' genefam.csv  | sort | uniq) -12) <(basename -a results/search/*.domains_ummerged.csv  | cut -f 1,2 -d . | sort | uniq) -23  > tmp/tosearch
+
+for ID in $(cat tmp/tosearch); do
+  echo "$ID"
+  snakemake -s step1.smk --allowed-rules search --cores 22 --set-threads search=22 -- "results/search/${ID}.domains_ummerged.csv"
+done
+```
+
+Download phylopics
+
+
+```bash
+comm <(cut -f 1 data/species_info.tsv | sort | uniq ) <(basename -a img/phylo/*.png | sed 's/.png//g' | sort | uniq) -32 | awk -F '\t' 'FNR==NR{d[$1]=$2;next}{print $1"\t"d[$1]}' data/species_info.tsv  - > tmp/phylopic_missing
+wc -l tmp/phylopic_missing
+
+
+for PREF in $(cat tmp/phylopic_missing | cut -f 1 ); do
+SPECIES_NAME=$(awk -F '\t' -v ID=$PREF '$1==ID{print $2}' data/species_info.tsv )
+echo $PREF
+echo $SPECIES_NAME
+python workflow/download_phylopic.py "${SPECIES_NAME}" -o img/phylo/${PREF}.png
+done
 
 ```
