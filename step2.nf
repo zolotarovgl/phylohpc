@@ -318,15 +318,15 @@ process REPORT {
 
 	    script:
         def reportRefArgs = []
-        if (params.refnames) reportRefArgs << "--refnames ${params.refnames}"
+        if (params.refnames) reportRefArgs << "--refnames ${file(params.refnames)}"
         if (params.refsps)   reportRefArgs << "--refsps ${params.refsps}"
         def refArgs = reportRefArgs.join(' ')
 	    """
 		    export PYTHONNOUSERSITE=1
 		    python ${projectDir}/workflow/report_step2.py \
 		        --results_dir     ${params.OUTDIR} \
-		        --family_info     ${params.family_info} \
-		        --species_tree    ${params.species_tree} \
+		        --family_info     ${file(params.family_info)} \
+		        --species_tree    ${file(params.species_tree)} \
 		        --species_info    ${projectDir}/data/species_info.tsv \
 	            ${refArgs} \
 	        --output          report_step2.html
