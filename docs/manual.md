@@ -22,7 +22,7 @@ It takes a multi-species proteome and a gene-family definition file and produces
 7. [Step 2 — Phylogenies](#step-2--phylogenies-step2nf)
    - [Resource prediction (optional)](#resource-prediction-optional)
    - [Running the pipeline](#running-the-pipeline)
-8. [GeneRax-only pipeline](#generax-only-pipeline-generaxnf)
+8. [GeneRax-only pipeline](#generax-only-pipeline-workflowgeneraxnf)
 9. [Gathering annotations](#gathering-annotations)
 10. [Monitoring jobs](#monitoring-jobs)
 11. [Tree utilities](#tree-utilities)
@@ -51,9 +51,16 @@ mamba env create -f workflow/environment.yaml
 mamba activate phylo
 ```
 
-The `phylo` environment includes all bioinformatics tools used by the pipeline
-(HMMER, DIAMOND, MCL, MAFFT, IQ-TREE 2, FastTree, GeneRax, POSSVM, ETE3,
-NumPy, pandas, …).
+The `phylo` environment includes most bioinformatics tools used by the pipeline
+(HMMER, DIAMOND, MCL, MAFFT, IQ-TREE 2, FastTree, PastML, ETE3, NumPy, pandas, …).
+
+Two dependencies live outside the conda environment:
+
+- **POSSVM** ships with the `phylogeny/` git submodule, so clone the repository
+  with `--recurse-submodules`.
+- **GeneRax** is *not* bundled: the `--run_generax` steps call `mpirun` and the
+  `generax` binary directly, so both must be on your `PATH`. On the CRG HPC,
+  `module load OpenMPI` provides `mpirun`; make a GeneRax install available too.
 
 ---
 
@@ -61,36 +68,65 @@ NumPy, pandas, …).
 
 ```
 phylohpc/
-├── step1.nf              # PFAM search + MCL clustering pipeline
-├── step2.nf              # Alignment, phylogeny, POSSVM, GeneRax pipeline
-├── workflow/generax.nf            # GeneRax-only re-run pipeline
-├── nextflow.config       # Default parameters and execution profiles
-├── submit_nf.sh          # SLURM wrapper for launching Nextflow itself
+├── step1.nf                     # PFAM search + MCL clustering pipeline (Nextflow)
+├── step1.smk                    # Snakemake twin of step 1
+├── step2.nf                     # Alignment, phylogeny, POSSVM, GeneRax pipeline
+├── step2.smk                    # Snakemake twin of step 2
+├── nextflow.config              # Default parameters and execution profiles
+├── submit_nf.sh                 # SLURM wrapper for launching Nextflow itself
+├── make_report.sh               # Build the interactive step-2 HTML report
+├── config/
+│   ├── step1.yaml               # Step 1 configuration (Snakemake)
+│   ├── step2.yaml               # Step 2 configuration (Snakemake)
+│   ├── step4.yaml               # Ancestry configuration (Snakemake)
+│   ├── species_list             # One species prefix per line; defines analysis set
+│   ├── sps_annotate             # Species prefixes to gather annotations for
+│   └── ancestry_ids.txt         # HG ids for the ancestry pipeline
 ├── data/
-│   ├── input.fasta           # Multi-species proteome (user-provided)
-│   ├── species_tree.newick   # Pruned, strictly binary species tree
-│   ├── species_tree.full.newick  # Full species tree (before pruning)
-│   └── Mmus_gene_names.csv   # Reference species gene name table
-├── configs/
-│   └── config.txt        # Legacy config (no longer read by pipelines)
+│   ├── input.fasta                  # Multi-species proteome (user-provided)
+│   ├── species_tree.newick          # Pruned, strictly binary species tree
+│   ├── species_tree.full.newick     # Full species tree (before pruning)
+│   ├── Mmus_gene_names.csv          # Reference species gene name table
+│   ├── species_info.tsv             # Species prefix → metadata table
+│   └── gene_families_searchinfo.csv # Reference gene-family definitions
 ├── workflow/
-│   ├── remove_gaponly.py     # Gap-only column removal (used by step2.nf)
-│   ├── select_hgs.py         # Filter HGs → ids.txt
-│   ├── get_seqstat.py        # FASTA sequence statistics
-│   ├── predict_resources.py  # Predict SLURM memory/time per HG
-│   ├── gather_annotations.py # Gather per-species ortholog annotations
-│   ├── check_job.py          # Inspect individual SLURM job stats
-│   ├── check_job.v2.py       # Inspect a batch of SLURM job stats
-│   ├── check_tree.py         # Prune & validate species tree
-│   ├── helper.py             # Shared Python utilities
+│   ├── step4.ancestry.nf        # Clade ancestral gene-content pipeline (Nextflow)
+│   ├── step4_ancestry.smk       # Snakemake twin of step 4
+│   ├── generax.nf               # GeneRax-only re-run pipeline
+│   ├── select_hgs.py            # Filter HGs → ids.txt
+│   ├── get_seqstat.py           # FASTA sequence statistics
+│   ├── remove_gaponly.py        # Gap-only column removal (used by step2.nf)
+│   ├── predict_resources.py     # Predict SLURM memory/time per HG
+│   ├── gather_annotations.py    # Gather per-species ortholog annotations
+│   ├── check_tree.py            # Prune & validate species tree
+│   ├── check_job.py            # Inspect individual SLURM job stats
+│   ├── check_job.v2.py         # Inspect a batch of SLURM job stats
+│   ├── extract_clade.py         # Extract clade-scoped subtrees (step 4)
+│   ├── build_pam.py             # Build presence/absence matrix (step 4)
+│   ├── ancestral_reconstruction.py # PastML ancestral state reconstruction (step 4)
+│   ├── link_hog_levels.py       # Link HOG hierarchy levels
+│   ├── build_hog_report.py      # Build the HOG hierarchy report
+│   ├── visualize_hog_hierarchy.py  # HOG hierarchy visualisation
+│   ├── visualize_ancestry.py    # Ancestry visualisation (D3.js HTML)
+│   ├── report_step1.py          # Step 1 report
+│   ├── report_step2.py          # Step 2 interactive HTML report
+│   ├── tree_viewer.py           # Interactive gene-tree viewer
+│   ├── alignment_viewer.py      # Interactive alignment viewer
+│   ├── prepare_fasta.sh         # Fetch proteomes into data/input.fasta
+│   ├── download_phylopic.py     # Fetch PhyloPic silhouettes
+│   ├── helper.py                # Shared Python utilities
+│   ├── train.R                  # Fit resource-prediction models
+│   ├── environment.yaml         # Conda/mamba environment (Linux/HPC)
+│   ├── environment.macos-x86_64.yaml  # macOS (Rosetta/x86_64) environment
 │   └── models/
-│       ├── models.json       # Fitted resource-prediction coefficients
-│       └── defaults.json     # Per-job default and large-family resources
-├── phylogeny/
-│   └── main.py               # Core computation engine (called by NF processes)
-├── docs/
-│   └── manual.md             # This file
-└── R/                        # Post-run analysis scripts
+│       ├── models.json          # Fitted resource-prediction coefficients
+│       └── defaults.json        # Per-job default and large-family resources
+├── phylogeny/                   # Core computation engine (git submodule)
+│   ├── main.py                  # Search, cluster, align, tree, POSSVM, GeneRax
+│   └── submodules/possvm-orthology/  # POSSVM ortholog caller
+├── R/                           # Post-run analysis scripts (resources.R, …)
+└── docs/
+    └── manual.md                # This file
 ```
 
 ---
