@@ -1,32 +1,41 @@
-.snakemake
-work/*
-work_*
-test/*
-*.tsv
-*.pdf
-ids*
-species*
-*html
-report-*
-timeline*
-trace*
+# Nextflow / Snakemake run state
 .nextflow*
-results*
-tmp/*
-results/*
-hmms/*
-logs/*
-data/input*
-slurm*
-*.tab
-*_list
-*.json
-*.log
-species_list
-*.json
-*.tab
-genefam.csv
-workflow/__pycache__/
-pep2hg
-__pycache__
+work/
+work_*/
+.snakemake/
+
+# Pipeline output dirs
+results/
+downstream/
+reports/
+logs/
+hmms/
+pep2hg/
 demo/
+tmp/
+test/
+
+# Generated reports / traces / timelines
+report-*.html
+timeline*.html
+trace*.txt
+
+# Generated intermediate tables at repo root
+/ids.txt
+/ids_*.txt
+/*.tab
+/resources.tsv
+/seq_stat*
+/job_ids
+/job_stats*
+
+# Large / per-run inputs (user-provided, not tracked)
+data/input*
+genefam.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS noise
+*.log
