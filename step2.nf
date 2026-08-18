@@ -540,24 +540,29 @@ process GR_watcher {
 //
 // Precedence now: --species_tree (or a params-file / YAML key) wins; SPECIES_TREE is
 // honoured only as a legacy fallback, and the tree is checked before the DAG is built.
-def species_tree_file = file(params.species_tree)
-if( params.containsKey('SPECIES_TREE') && !params.containsKey('species_tree') )
-    species_tree_file = file(params.SPECIES_TREE)
+// ⚠ params.species_tree has NO default in this file (the merged branch renamed the old
+// default to params.species_tree_report, which is the REPORT tree, not GeneRax's). So
+// resolve explicitly and fall back, or file() is handed null on the common path -- caught
+// by `nextflow run step2.nf -preview` on 2026-08-18: "Argument of `file()` cannot be null".
+def _st = params.containsKey('species_tree') && params.species_tree ? params.species_tree
+        : params.containsKey('SPECIES_TREE') && params.SPECIES_TREE ? params.SPECIES_TREE
+        : "${projectDir}/data/species_tree.newick"
+if( !(params.containsKey('species_tree') && params.species_tree) && params.containsKey('SPECIES_TREE') )
+    log.warn "DEPRECATED parameter 'SPECIES_TREE' -- rename it to 'species_tree' in your params file"
+def species_tree_file = file(_st)
 
 if( params.run_generax ) {
     if( !species_tree_file.exists() )
         error "species tree not found: ${species_tree_file} (--species_tree)"
-    def nwk = species_tree_file.text.trim()
-    def kids = []
-    def bad = 0
-    nwk.each { ch ->
-        if( ch == '(' )      { kids << 1 }
-        else if( ch == ',' ) { if( kids ) kids[-1] = kids[-1] + 1 }
-        else if( ch == ')' ) { def n = kids ? kids.pop() : 0 ; if( n > 2 ) bad++ }
-    }
+    // Delegate to the ONE tested implementation. An inline Groovy re-implementation was
+    // tried first and disagreed with it (20 vs 4 multifurcations on the tree that killed
+    // the 2026-08-14 run, 1 vs 0 on data/species_tree.newick) -- caught by running both.
+    def _cm = ["python3", "${projectDir}/workflow/count_multifurcations.py", species_tree_file.toString()].execute()
+    _cm.waitFor()
+    def bad = _cm.text.trim() as Integer
     if( bad > 0 )
         error "species tree ${species_tree_file} has ${bad} multifurcating node(s); GeneRax needs a strictly binary tree. Resolve it first:  python workflow/check_tree.py <in.newick> <ids> <out.newick> --random-resolve --seed 1   and pass that file with --species_tree. This is exactly what killed the 2026-08-14 run."
-    log.info "species tree: ${species_tree_file} -- strictly binary, ${nwk.count('(')} internal nodes"
+    log.info "species tree: ${species_tree_file} -- strictly binary"
 }
 
 species_tree_ch = Channel.value( species_tree_file )
