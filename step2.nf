@@ -8,8 +8,8 @@ params.family_info   = params.containsKey('family_info')
         : (file("${projectDir}/genefam.csv").exists()
             ? "${projectDir}/genefam.csv"
             : "${projectDir}/data/gene_families_searchinfo.csv"))
-params.species_tree  = params.containsKey('species_tree')
-    ? params.species_tree
+params.species_tree_report = params.containsKey('species_tree_report')
+    ? params.species_tree_report
     : "${projectDir}/data/species_tree.full.newick"
 params.refnames      = params.containsKey('refnames')
     ? params.refnames
@@ -25,6 +25,57 @@ params.OUTDIR        = params.containsKey('OUTDIR')
 
 
 params.tag_prefix = ''
+
+// ── Failure diagnostics ───────────────────────────────────────────────────────
+// Log the work dir + tail of .command.err whenever a task fails (any attempt).
+def errReport(task) {
+    def errf = task.workDir?.resolve('.command.err')
+    def tail = (errf && errf.exists()) ? errf.text.readLines().takeRight(15).join('\n  ')
+                                       : '(.command.err not found)'
+    log.warn "✗ ${task.process} [${task.tag ?: task.index}] exit=${task.exitStatus} attempt=${task.attempt}\n" +
+             "  workDir: ${task.workDir}\n  ${tail}"
+}
+
+workflow.onError {
+    log.error "Pipeline stopped: ${workflow.errorMessage ?: 'see the failed task above'}"
+}
+
+workflow.onComplete {
+    log.info "step2 ${workflow.success ? 'completed OK' : 'FAILED'} after ${workflow.duration}"
+    if( !workflow.success )
+        log.info "List failed tasks:  nextflow log ${workflow.runName} -f name,status,exit,workdir -F \"status=='FAILED'\""
+}
+
+// ── Environment preflight ─────────────────────────────────────────────────────
+// Runs once before alignment/tree building; fails fast with one clear message if
+// Python deps or core tools are missing (e.g. the conda env wasn't activated).
+process PREFLIGHT {
+
+    tag 'env_check'
+    cpus 1
+    memory '500.MB'
+    time '5.min'
+    cache false
+
+    output:
+    path 'preflight.ok'
+
+    script:
+    """
+    export PYTHONNOUSERSITE=1
+    missing=0
+    python -c 'import Bio, ete3, yaml' 2>/dev/null || { echo "PREFLIGHT: missing Python deps (Bio/ete3/yaml)." >&2; missing=1; }
+    for tool in mafft; do
+        command -v \$tool >/dev/null 2>&1 || { echo "PREFLIGHT: '\$tool' not on PATH." >&2; missing=1; }
+    done
+    if [ "\$missing" -ne 0 ]; then
+        echo "PREFLIGHT FAILED: environment not ready -- run 'mamba activate phylo' (and 'module load ...' on the HPC) before launching." >&2
+        exit 1
+    fi
+    echo "PREFLIGHT OK"
+    touch preflight.ok
+    """
+}
 
 def countFastaSeqs(path) {
     def n = 0
@@ -104,7 +155,7 @@ process ALN {
 
     cpus 4
 
-    errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
+    errorStrategy = { errReport(task); task.attempt <= 10 ? 'retry' : 'ignore' }
     maxRetries 10
     maxErrors -1
 
@@ -159,7 +210,7 @@ process PHY {
         return base + (task.attempt - 1) * 6.h
     }
 
-    errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
+    errorStrategy = { errReport(task); task.attempt <= 10 ? 'retry' : 'ignore' }
     maxRetries 10
     maxErrors -1
 
@@ -195,7 +246,10 @@ process PHY {
             --outprefix ${id} \
             -c ${task.cpus} \
             --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL} > ${id}.log 2>&1
+            --iqtree2_model ${params.IQTREE2_MODEL} \
+            > ${id}.phy_run.log 2>&1
+        # iqtree2 writes ${id}.log natively (-pre); fasttree does not — fall back
+        [ -s ${id}.log ] || cp ${id}.phy_run.log ${id}.log
         """
     }
 	    else {
@@ -206,7 +260,10 @@ process PHY {
 	            --outprefix ${id} \
             -c ${task.cpus} \
             --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL} > ${id}.log 2>&1
+            --iqtree2_model ${params.IQTREE2_MODEL} \
+            > ${id}.phy_run.log 2>&1
+        # iqtree2 writes ${id}.log natively (-pre); fasttree does not — fall back
+        [ -s ${id}.log ] || cp ${id}.phy_run.log ${id}.log
         """
     }
 }
@@ -228,7 +285,7 @@ process PVM {
 	}
 
 	errorStrategy {
-		return task.attempt <= 3 ? 'retry' : 'ignore'
+		errReport(task); return task.attempt <= 3 ? 'retry' : 'ignore'
 	}
 
 	maxRetries 3
@@ -272,7 +329,7 @@ process PVM_PREV {
 	}
 
 	errorStrategy {
-		return task.attempt <= 3 ? 'retry' : 'ignore'
+		errReport(task); return task.attempt <= 3 ? 'retry' : 'ignore'
 	}
 
 	maxRetries 3
@@ -318,15 +375,15 @@ process REPORT {
 
 	    script:
         def reportRefArgs = []
-        if (params.refnames) reportRefArgs << "--refnames ${file(params.refnames)}"
+        if (params.refnames) reportRefArgs << "--refnames ${params.refnames}"
         if (params.refsps)   reportRefArgs << "--refsps ${params.refsps}"
         def refArgs = reportRefArgs.join(' ')
 	    """
 		    export PYTHONNOUSERSITE=1
 		    python ${projectDir}/workflow/report_step2.py \
 		        --results_dir     ${params.OUTDIR} \
-		        --family_info     ${file(params.family_info)} \
-		        --species_tree    ${file(params.species_tree)} \
+		        --family_info     ${params.family_info} \
+		        --species_tree    ${params.species_tree_report} \
 		        --species_info    ${projectDir}/data/species_info.tsv \
 	            ${refArgs} \
 	        --output          report_step2.html
@@ -357,6 +414,7 @@ process GR_watcher {
     }
 
     errorStrategy {
+        errReport(task)
         def max_attempts = 5
         if( task.exitStatus == 10 ) {
             log.warn "GeneRax | ${id} | Exit 10 | Family parsing error — ignored"
@@ -468,46 +526,16 @@ process GR_watcher {
 //	hg_fastas|ALN|PHY|map { id, tree, aln -> tuple(id, tree, aln, refnames_file) } | PVM
 //}
 
-// ---------------------------------------------------------------------------------
-// SPECIES TREE -- one parameter, validated before anything runs.
-//
-// BUG FIXED 2026-08-18. This channel used to read `params.SPECIES_TREE` (uppercase),
-// which is set ONLY in nextflow.config and defaults to data/species_tree.newick. The
-// documented switch, `--species_tree` (lowercase, resolved at the top of this file and
-// used by the ancestral step), therefore had NO EFFECT ON GENERAX. On 2026-08-14 that
-// silently handed GeneRax the UNRESOLVED tree and all 475 GR_watcher tasks died with
-//     [Error] Cannot parse species tree file (species_tree.newick)
-// which the errorStrategy relabelled "Family parsing error", sending the diagnosis at
-// the family files for four days. GeneRax requires a STRICTLY BINARY species tree.
-//
-// Precedence now: --species_tree (or a params-file / YAML key) wins; SPECIES_TREE is
-// honoured only as a legacy fallback, and the tree is checked before the DAG is built.
-def species_tree_file = file(params.species_tree)
-if( params.containsKey('SPECIES_TREE') && !params.containsKey('species_tree') )
-    species_tree_file = file(params.SPECIES_TREE)
-
-if( params.run_generax ) {
-    if( !species_tree_file.exists() )
-        error "species tree not found: ${species_tree_file} (--species_tree)"
-    def nwk = species_tree_file.text.trim()
-    def kids = []
-    def bad = 0
-    nwk.each { ch ->
-        if( ch == '(' )      { kids << 1 }
-        else if( ch == ',' ) { if( kids ) kids[-1] = kids[-1] + 1 }
-        else if( ch == ')' ) { def n = kids ? kids.pop() : 0 ; if( n > 2 ) bad++ }
-    }
-    if( bad > 0 )
-        error "species tree ${species_tree_file} has ${bad} multifurcating node(s); GeneRax needs a strictly binary tree. Resolve it first:  python workflow/check_tree.py <in.newick> <ids> <out.newick> --random-resolve --seed 1   and pass that file with --species_tree. This is exactly what killed the 2026-08-14 run."
-    log.info "species tree: ${species_tree_file} -- strictly binary, ${nwk.count('(')} internal nodes"
-}
-
-species_tree_ch = Channel.value( species_tree_file )
+species_tree_ch = Channel.value( file(params.SPECIES_TREE) )
 refnames_ch     = Channel.value( file(params.REFNAMES) )
 
 workflow {
 
-    PHY(hg_fastas | ALN)
+    // Fail fast if the environment is not ready.
+    def ready = PREFLIGHT()
+    def hg_in = hg_fastas.combine(ready).map { id, fasta, ok -> tuple(id, fasta) }
+
+    PHY(hg_in | ALN)
     phy_out = PHY.out.trees
 
     if (params.run_generax) {

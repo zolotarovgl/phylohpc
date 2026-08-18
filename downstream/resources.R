@@ -1,7 +1,11 @@
 ##########################
 # HG sequence info - number of seqs, median length
 ##########################
+<<<<<<<< HEAD:R/resources.R
 source('R/helper.R')
+========
+source('downstream/helper.R')
+>>>>>>>> origin/claude/pipeline-cleanup-fixes-observability:downstream/resources.R
 trace_fn = 'reports/trace.step2.txt'
 ids = read.table(trace_fn,sep = '\t')[[4]]
 ids = gsub("\\(|\\)","",str_split(ids,' ',simplify = T)[,2])

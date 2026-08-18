@@ -6,14 +6,13 @@ A Nextflow pipeline for large-scale gene family phylogenomics: from raw proteome
 
 ---
 
-
 ## Overview
 
 ```
 Multi-species proteomes
         │
         ▼
-  step1.nf ── PFAM domain search (HMMER) - **genefam.csv**
+  step1.nf ── PFAM domain search (HMMER)
               MCL clustering
               → Homology Groups (HGs)
         │
@@ -24,32 +23,21 @@ Multi-species proteomes
               [optional] Gene tree–species tree reconciliation (GeneRax)
         │
         ▼
-  workflow/gather_annotations.py ── Per-species ortholog annotation tables
+  gather_annotations.py ── Per-species ortholog annotation tables
         │
         ▼
-  workflow/step4.ancestry.nf ── Clade-scoped ortholog calling (POSSVM + --ignoretips)
+  step4.ancestry.nf ── Clade-scoped ortholog calling (POSSVM + --ignoretips)
                         Presence/absence matrix
                         Ancestral state reconstruction (PastML, MPPA + F81)
                         Interactive visualisation (D3.js HTML)
 ```
 
-**Documentation:** full user manual → [`docs/manual.md`](docs/manual.md) · Step 4 ancestral reconstruction → [`docs/ancestry.md`](docs/ancestry.md)
-
 ---
-
-## Clone 
-
-
-```bash
-git clone --recurse-submodules https://github.com/zolotarovgl/phylohpc.git
-```
-
 
 ## Requirements
 
-**Environment:** `workflow/environment.yaml` is a minimal, portable spec — only
-the direct tools, loosely pinned, so it solves across machines. For local macOS
-work on Apple Silicon, use the Rosetta/x86_64 environment in
+**Environment:** `workflow/environment.yaml` is the original Linux/HPC export.
+For local macOS work on Apple Silicon, use the Rosetta/x86_64 environment in
 `workflow/environment.macos-x86_64.yaml`.
 
 ```bash
@@ -90,11 +78,41 @@ module load Java
 module load OpenMPI       
 ```
 
-**GeneRax reconciliation (`--run_generax`) is optional and not in the conda env.**
-It needs an MPI-compiled GeneRax + `mpirun` (the bioconda build is non-MPI and
-crashes). Use it on the CRG HPC via `module load OpenMPI` with an MPI GeneRax, or
-run locally without `--run_generax` (POSSVM runs on the raw trees). POSSVM ships
-with the `phylogeny/` submodule cloned above.
+---
+
+Re-run search to generate domain arrangement info:
+
+```bash
+comm <(comm <(basename -a results/search/*genes.list | cut -f 1,2 -d . | sort | uniq) <(awk '{print $7"."$1}' genefam.csv  | sort | uniq) -12) <(basename -a results/search/*.domains_ummerged.csv  | cut -f 1,2 -d . | sort | uniq) -23  > tmp/tosearch
+
+for ID in $(cat tmp/tosearch); do
+  echo "$ID"
+  snakemake -s step1.smk --allowed-rules search --cores 22 --set-threads search=22 -- "results/search/${ID}.domains_ummerged.csv"
+done
+```
+
+Download phylopics
+
+
+```bash
+comm <(cut -f 1 data/species_info.tsv | sort | uniq ) <(basename -a img/phylo/*.png | sed 's/.png//g' | sort | uniq) -32 | awk -F '\t' 'FNR==NR{d[$1]=$2;next}{print $1"\t"d[$1]}' data/species_info.tsv  - > tmp/phylopic_missing
+wc -l tmp/phylopic_missing
+
+
+for PREF in $(cat tmp/phylopic_missing | cut -f 1 ); do
+SPECIES_NAME=$(awk -F '\t' -v ID=$PREF '$1==ID{print $2}' data/species_info.tsv )
+echo $PREF
+echo $SPECIES_NAME
+python workflow/download_phylopic.py "${SPECIES_NAME}" -o img/phylo/${PREF}.png
+done
+
+```
+
+
+---
+
+
+---
 
 ## Input data
 
@@ -104,37 +122,29 @@ with the `phylogeny/` submodule cloned above.
 | `data/species_tree.full.newick` | Full species tree with **named internal nodes** (required for GeneRax and ancestral reconstruction). |
 | `data/species_tree.newick` | Strictly binary species tree (no polytomies) used by GeneRax. Generated from the full tree — see below. |
 | `data/Mmus_gene_names.csv` | Reference species gene name mapping (`protein_id<TAB>gene_name`). |
-| `genefam.csv` | Gene family definitions (HMM profiles, clustering parameters — see `docs/Gene_families.md`). |
-| `config/species_list` | One species prefix per line; defines the analysis set. |
-
-
-
-## Test data
-
-### Fetch proteomes from a sequence database
-```bash
-DB_PATH=~/ant/xgraubove/genomes/data/ # path to Xavi's database 
-bash workflow/prepare_fasta.sh config/species_list data/input.fasta $DB_PATH
-```
+| `genefam.csv` | Gene family definitions (HMM profiles, clustering parameters — see `Gene_families.md`). |
+| `species_list` | One species prefix per line; defines the analysis set. |
 
 ### Prepare the binary species tree
 
 Note: `--random-resolve` is for the cases where the tree contains polytomies
-```bash
-python workflow/check_tree.py --random-resolve data/species_tree.full.newick config/species_list data/species_tree.newick
-```
-
-This validates the full tree, prunes it to the species in `config/species_list`, and resolves any polytomies, writing a GeneRax-compatible binary tree to `data/species_tree.newick`.
-
-
-### Test genefam.csv 
 
 ```bash
-cat data/gene_families_searchinfo.csv | grep -E 'Forkhead|T-box' > genefam.csv
+python workflow/check_tree.py --random-resolve data/species_tree.full.newick species_list data/species_tree.newick
 ```
 
+This validates the full tree, prunes it to the species in `species_list`, and resolves any polytomies, writing a GeneRax-compatible binary tree to `data/species_tree.newick`.
 
+### Fetch proteomes from a sequence database
 
+Here, use the database from Xavi. 
+
+```bash
+bash workflow/prepare_fasta.sh species_list data/input.fasta
+bash workflow/prepare_fasta.sh species_list data/input.fasta /path/to/proteome_db
+```
+
+Or concatenate custom proteomes into `data/input.fasta` directly.
 
 ---
 
@@ -166,16 +176,12 @@ Searches the input proteome with HMMER against the defined PFAM profiles, then c
 
 ```bash
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1/
-WORKDIR=work
-PROFILE=local,fast
-
-# NB: do not forget to set the path to pfam_db Pfam-A.hmm file!
+PROFILE=local,precise
 # Interactive
 nextflow run step1.nf \
     -profile $PROFILE \
     -resume \
     -w $WORKDIR \
-	--pfam_db /home/grygoriyzolotarov/ant/xgraubove/data/pfam/Pfam-A.hmm \
     --genefam_info genefam.csv \
     --infasta data/input.fasta \
     -with-report reports/report.step1.html \
@@ -226,7 +232,7 @@ Before submitting large runs, predict memory and runtime requirements from a pre
 ```bash
 python workflow/get_seqstat.py results/clusters/*.fasta > seq_stat.tab
 
-Rscript workflow/train.R \
+Rscript downstream/train.R \
     --trace     reports/trace.step2.txt \
     --seq_stats seq_stat.tab \
     --outfile   workflow/models/models.json \
@@ -247,14 +253,13 @@ python workflow/predict_resources.py \
 ```bash
 # Interactive
 WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2/
-WORKDIR=work/
 PROFILE=local,fast
 nextflow run step2.nf \
     -profile $PROFILE \
     -resume -w $WORKDIR \
-    --run_generax \
+    --rungenerax \
     --family_info genefam.csv \
-    --species_tree data/species_tree.full.newick \
+    --species_tree_report data/species_tree.full.newick \
     -with-report reports/report.step2.html \
     -with-trace  reports/trace.step2.txt
 
@@ -265,7 +270,7 @@ sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf \
     -resume -w $WORKDIR \
     --run_generax \
     --family_info genefam.csv \
-    --species_tree data/species_tree.full.newick \
+    --species_tree_report data/species_tree.full.newick \
     --report   reports/report.step2.html \
     --trace    reports/trace.step2.txt \
     --timeline reports/timeline.step2.html
@@ -279,7 +284,7 @@ sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf \
 - `results/possvm/` — POSSVM ortholog groups (when `--run_generax`)
 - `results/possvm_prev/` — POSSVM on raw trees (when `--run_generax`)
 - `results/generax/` — reconciled gene trees (when `--run_generax`)
-- `results/report_step2.html` - an interactive html report 
+
 ---
 
 
@@ -292,6 +297,111 @@ python workflow/report_step2.py --results_dir results --species_tree data/specie
 
 ---
 
+## Step 4 — Ancestral gene content reconstruction
+
+Determines which orthogroups were likely present in the last common ancestor (LCA) of a named clade, using clade-scoped ortholog calling and probabilistic ancestral state reconstruction.
+
+### What it does
+
+1. **`EXTRACT_CLADE`** — finds the named node (e.g. `Bilateria`) in the full species tree with named internal nodes, and outputs the in-clade species list, the out-of-clade ignore list for POSSVM, and the pruned subtree.
+
+2. **`PVM_CLADE`** — re-runs POSSVM on the **raw gene trees** (not GeneRax-reconciled, to avoid circularity) with `--ignoretips` pointing at out-of-clade species, scoping ortholog group definitions to the target clade.
+
+3. **`BUILD_PAM`** — aggregates all per-HG POSSVM outputs into a binary species × OG presence/absence matrix (PAM).
+
+4. **`ANCESTRAL_RECON`** — runs [PastML](https://pastml.pasteur.fr) (MPPA + F81 model) on the PAM against the pruned species tree. The F81 model allows asymmetric gain/loss rates via estimated stationary frequencies; MPPA integrates over model parameter uncertainty for more reliable probability estimates. Outputs `P(present)` at every internal node.
+
+5. **`VISUALIZE`** — generates a self-contained interactive HTML file for exploring the results (see below).
+
+### Run
+
+```bash
+cat ids.txt | grep -E 'RFX' > ancestry_ids.txt
+# Single clade
+
+mamba activate phylo
+module load Java          # for Nextflow
+module load OpenMPI       # for GeneRax only
+
+# Multiple clades in one run
+nextflow run step4.ancestry.nf -profile local,fast --node_names "Metazoa,Bilateria,Euarchontoglires" --ids ancestry_ids.txt --max_cpus 24 -resume
+
+
+python workflow/visualize_hog_hierarchy.py \
+  --links results/ancestry/hog_links/*.og_links.tsv \
+  --stats results/ancestry/hog_links/*.og_stats.tsv \
+  --levels "Metazoa,Bilateria,Chordata,Euarchontoglires" \
+  --output results/ancestry/hog_hierarchy.html
+
+```
+
+```bash
+snakemake -s step4_ancestry.smk --cores 24 \
+    --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=ancestry_ids.txt
+```
+
+
+```bash
+
+python /users/asebe/gzolotarov/projects/2025_phylogeny/phylohpc/phylogeny/main.py possvm -t         results/gene_trees/tfs.Homeodomains.HG3.treefile --refsps   Mmus -r data/Mmus_gene_names.csv  --outgroup results/ancestry/Metazoa/Metazoa.ignore_species.txt -o Metazoa.tfs.Homeodomains.HG3 -p  results/ancestry/Metazoa/possvm/tfs.Homeodomains.HG3.
+
+
+mkdir -p results/hOGs
+python phylogeny/submodules/possvm-orthology/possvm.py -i results/gene_trees/tfs.Homeodomains.HG3.treefile --refsps   Mmus -r data/Mmus_gene_names.csv  --outgroup results/ancestry/Metazoa/Metazoa.ignore_species.txt -o Metazoa.tfs.Homeodomains.HG3 -p  results/hOGs/Metazoa.tfs.Homeodomains.HG3. -method lpa
+
+
+```
+
+
+
+`--node_names` must match named internal nodes in `data/species_tree.full.newick`.
+
+**Key parameters**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--node_names` | — | Comma-separated clade node name(s) **(required)** |
+| `--ids` | `ids.txt` | HG IDs to process |
+| `--SPECIES_TREE` | `data/species_tree.full.newick` | Full tree with named internal nodes |
+| `--REFSPECIES` | `Mmus` | Reference species for POSSVM |
+| `--gene_trees_dir` | `results/gene_trees` | Directory of raw `.treefile` outputs |
+| `--min_presence` | `2` | Minimum species required to retain an OG in the PAM |
+
+**Outputs** (under `results/ancestry/{node}/`):
+
+| File | Description |
+|---|---|
+| `{node}.in_species.txt` | Species within the clade |
+| `{node}.pruned.tree` | Pruned species subtree used for ASR |
+| `{node}.pam.tsv` | Binary presence/absence matrix (species × OGs) |
+| `{node}.ancestral_states.tsv` | Per-OG summary: `P_at_root`, gain/loss support, species counts |
+| `{node}.node_probs.tsv` | `P(present)` at every internal node for every OG |
+| `{node}.html` | Interactive visualisation (open in any browser) |
+
+**`ancestral_states.tsv` columns**
+
+| Column | Description |
+|---|---|
+| `og` | Orthogroup identifier |
+| `n_present` | Number of in-clade species carrying the OG |
+| `n_total` | Total in-clade species with data |
+| `P_at_root` | Marginal posterior probability of presence at the LCA |
+| `support` | Classification: `present` (≥0.9), `likely_present` (≥0.5), `likely_absent` (≥0.1), `absent` |
+
+The visualisation can also be generated independently from existing outputs:
+
+```bash
+python workflow/visualize_ancestry.py \
+    --tree       results/ancestry/Bilateria/Bilateria.pruned.tree \
+    --node_probs results/ancestry/Bilateria/Bilateria.node_probs.tsv \
+    --states     results/ancestry/Bilateria/Bilateria.ancestral_states.tsv \
+    --pam        results/ancestry/Bilateria/Bilateria.pam.tsv \
+    --output     Bilateria.html \
+    --node       Bilateria
+```
+
+---
+
 ## Monitoring resource usage
 
 ```bash
@@ -300,23 +410,15 @@ cat reports/trace.step2.txt | grep -E "COMPLETED|CACHED" | cut -f3 | grep -v nat
 python workflow/check_job.v2.py -f job_ids > job_stats.tab
 ```
 
-`R/downstream_stats.R` and `R/resources.R` plot CPU/memory efficiency across jobs. `R/generax_stats.R` analyses GeneRax runtime scaling with SPR radius.
+`downstream/downstream_stats.R` and `downstream/resources.R` plot CPU/memory efficiency across jobs. `downstream/generax_stats.R` analyses GeneRax runtime scaling with SPR radius.
 
 
+# hOGs   
 
-## Misc
 
-Download phylopics
+The ancestry step attempts to implement the hierarchical orthogroups 
+
 ```bash
-comm <(cut -f 1 data/species_info.tsv | sort | uniq ) <(basename -a img/phylo/*.png | sed 's/.png//g' | sort | uniq) -32 | awk -F '\t' 'FNR==NR{d[$1]=$2;next}{print $1"\t"d[$1]}' data/species_info.tsv  - > tmp/phylopic_missing
-wc -l tmp/phylopic_missing
-
-
-for PREF in $(cat tmp/phylopic_missing | cut -f 1 ); do
-SPECIES_NAME=$(awk -F '\t' -v ID=$PREF '$1==ID{print $2}' data/species_info.tsv )
-echo $PREF
-echo $SPECIES_NAME
-python workflow/download_phylopic.py "${SPECIES_NAME}" -o img/phylo/${PREF}.png
-done
+F=results/ancestry/Bilateria/possvm/Bilateria.tfs.Homeodomains.HG3.ortholog_groups.csv 
 
 ```
