@@ -1,4 +1,32 @@
 nextflow.enable.dsl=2
+
+// ── Canonical parameter names ─────────────────────────────────────────────────
+// One canonical name per parameter, lower_snake_case. The uppercase twin
+// (SPECIES_TREE, OUTDIR, REFNAMES, REFSPECIES, SUBS_MODEL, MAX_SPR, NCPU_GENERAX,
+// TREE_METHOD, MAFFT_OPT, IQTREE2_MODEL) is accepted only when the lowercase key is
+// absent, and logs a deprecation warning naming this file.
+//
+// WHY THIS EXISTS: the uppercase SPECIES_TREE param (nextflow.config only) and
+// params.species_tree (lowercase, the documented --species_tree flag) both existed and
+// the GeneRax channel read the uppercase one. The documented flag therefore could not
+// affect GeneRax, and on 2026-08-14 that handed it a multifurcating tree and killed all
+// 475 tasks. Read every parameter through canonical() so a name can never fork again.
+//
+// NOTE: `evaluate(new File("${projectDir}/workflow/params.nf"))` does not put the
+// defined function into script scope under DSL2 (measured: "Unknown method invocation
+// `canonical`" even though evaluate() itself succeeds) -- so canonical() is defined
+// once here, directly in step2.nf, rather than shared via a file. step1.nf does not
+// read any of these ten parameters and therefore does not need its own copy.
+def canonical(String name, String upper, Object fallback = null) {
+    if( params.containsKey(name) && params[name] != null )
+        return params[name]
+    if( params.containsKey(upper) && params[upper] != null ) {
+        log.warn "DEPRECATED parameter '${upper}' -- rename it to '${name}' in your params file / nextflow.config"
+        return params[upper]
+    }
+    return fallback
+}
+
 params.ids           = "${projectDir}/ids.txt"
 params.resources_tsv = "${projectDir}/resources.tsv"
 params.family_info   = params.containsKey('family_info')
@@ -11,17 +39,16 @@ params.family_info   = params.containsKey('family_info')
 params.species_tree_report = params.containsKey('species_tree_report')
     ? params.species_tree_report
     : "${projectDir}/data/species_tree.full.newick"
-params.refnames      = params.containsKey('refnames')
-    ? params.refnames
-    : (params.containsKey('REFNAMES') ? params.REFNAMES : null)
-params.refsps        = params.containsKey('refsps')
-    ? params.refsps
-    : (params.containsKey('REFSPECIES') ? params.REFSPECIES : null)
+params.refnames      = canonical('refnames', 'REFNAMES', "${projectDir}/data/Mmus_gene_names.csv")
+params.refsps         = canonical('refsps', 'REFSPECIES', 'Mmus')
 params.run_generax   = params.containsKey('run_generax') ? params.run_generax : false
-params.OUTDIR        = params.containsKey('OUTDIR')
-    ? params.OUTDIR
-    : (params.containsKey('outdir') ? params.outdir : "${projectDir}/results")
-//params.MAFFT_OPT = "--maxiterate 1000 --localpair"
+params.outdir         = canonical('outdir', 'OUTDIR', "${projectDir}/results")
+params.mafft_opt      = canonical('mafft_opt', 'MAFFT_OPT', '')
+params.tree_method    = canonical('tree_method', 'TREE_METHOD', 'iqtree2')
+params.iqtree2_model  = canonical('iqtree2_model', 'IQTREE2_MODEL', 'TEST')
+params.subs_model     = canonical('subs_model', 'SUBS_MODEL', 'LG')
+params.max_spr        = canonical('max_spr', 'MAX_SPR', 3)
+params.ncpu_generax   = canonical('ncpu_generax', 'NCPU_GENERAX', 2)
 
 
 params.tag_prefix = ''
@@ -135,13 +162,13 @@ if( params.ids && file(params.ids).exists() ) {
         .splitText()
         .map { it.trim() }
         .filter { it }
-        .map { id -> tuple(id, file("${params.OUTDIR}/clusters/${id}.fasta")) }
+        .map { id -> tuple(id, file("${params.outdir}/clusters/${id}.fasta")) }
         .filter { id, fasta -> countFastaSeqs(fasta) >= 2 }
         .set { hg_fastas }
 }
 else {
     Channel
-        .fromPath("${params.OUTDIR}/clusters/*.fasta")
+        .fromPath("${params.outdir}/clusters/*.fasta")
         .map { fasta -> tuple(fasta.baseName, fasta) }
         .filter { id, fasta -> countFastaSeqs(fasta) >= 2 }
         .set { hg_fastas }
@@ -151,7 +178,7 @@ process ALN {
 
     tag "${id}"
 
-    publishDir "${params.OUTDIR}/align", mode: 'copy'
+    publishDir "${params.outdir}/align", mode: 'copy'
 
     cpus 4
 
@@ -166,7 +193,7 @@ process ALN {
     tuple val(id), path("${id}.aln.fasta")
 
     script:
-    def existing = file("${params.OUTDIR}/align/${id}.aln.fasta")
+    def existing = file("${params.outdir}/align/${id}.aln.fasta")
 
     if (existing.exists()) {
         """
@@ -185,7 +212,7 @@ process ALN {
 	            echo "clipkit is required for Step 2 trimming but is not runnable in the current environment." >&2
 	            exit 1
 	        fi
-	        python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.MAFFT_OPT}"
+	        python ${projectDir}/phylogeny/main.py align -f ${fasta} -o ${id}.aln.fasta -c ${task.cpus} -m "${params.mafft_opt}"
 	        python ${projectDir}/workflow/remove_gaponly.py ${id}.aln.fasta ${id}.aln.fasta_tmp
 	        mv ${id}.aln.fasta_tmp ${id}.aln.fasta
 	        """
@@ -196,7 +223,7 @@ process PHY {
     maxForks 50
     tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
 
-    publishDir "${params.OUTDIR}/gene_trees", mode: 'copy'
+    publishDir "${params.outdir}/gene_trees", mode: 'copy'
 
     cpus 4
 
@@ -223,21 +250,21 @@ process PHY {
 
     script:
 
-    def existing     = file("${params.OUTDIR}/gene_trees/${id}.treefile")
-    def existing_ckp = file("${params.OUTDIR}/gene_trees/${id}.ckp.gz")
+    def existing     = file("${params.outdir}/gene_trees/${id}.treefile")
+    def existing_ckp = file("${params.outdir}/gene_trees/${id}.ckp.gz")
 
     if (existing.exists()) {
         """
         echo "Using existing tree for ${id}"
         ln -sf ${existing} ${id}.treefile
-        if [[ -e ${params.OUTDIR}/gene_trees/${id}.log ]]; then
-            ln -sf ${params.OUTDIR}/gene_trees/${id}.log ${id}.log
+        if [[ -e ${params.outdir}/gene_trees/${id}.log ]]; then
+            ln -sf ${params.outdir}/gene_trees/${id}.log ${id}.log
         else
-            printf "Using existing tree for %s\\nOriginal phylogeny log unavailable in %s\\n" "${id}" "${params.OUTDIR}/gene_trees" > ${id}.log
+            printf "Using existing tree for %s\\nOriginal phylogeny log unavailable in %s\\n" "${id}" "${params.outdir}/gene_trees" > ${id}.log
         fi
         """
     }
-    else if (params.TREE_METHOD == "iqtree2" && existing_ckp.exists()) {
+    else if (params.tree_method == "iqtree2" && existing_ckp.exists()) {
         """
         echo "Resuming IQ-TREE2 from checkpoint for ${id}"
         cp ${existing_ckp} ${id}.ckp.gz
@@ -245,8 +272,8 @@ process PHY {
             -f ${aln} \
             --outprefix ${id} \
             -c ${task.cpus} \
-            --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL} \
+            --method ${params.tree_method} \
+            --iqtree2_model ${params.iqtree2_model} \
             > ${id}.phy_run.log 2>&1
         # iqtree2 writes ${id}.log natively (-pre); fasttree does not — fall back
         [ -s ${id}.log ] || cp ${id}.phy_run.log ${id}.log
@@ -259,8 +286,8 @@ process PHY {
 	            -f ${aln} \
 	            --outprefix ${id} \
             -c ${task.cpus} \
-            --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL} \
+            --method ${params.tree_method} \
+            --iqtree2_model ${params.iqtree2_model} \
             > ${id}.phy_run.log 2>&1
         # iqtree2 writes ${id}.log natively (-pre); fasttree does not — fall back
         [ -s ${id}.log ] || cp ${id}.phy_run.log ${id}.log
@@ -270,7 +297,7 @@ process PHY {
 process PVM {
 
 	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
-	publishDir "${params.OUTDIR}/possvm", mode: 'copy'
+	publishDir "${params.outdir}/possvm", mode: 'copy'
 
 	cpus 1
 
@@ -305,7 +332,7 @@ process PVM {
 		export PYTHONNOUSERSITE=1
 		python ${projectDir}/phylogeny/main.py possvm \
 		    -t ${tree} \
-		    --refsps ${params.REFSPECIES} \
+		    --refsps ${params.refsps} \
 	    -r ${refnames_file} \
 	    -o ${id}.
 	"""
@@ -314,7 +341,7 @@ process PVM {
 process PVM_PREV {
 
 	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
-	publishDir "${params.OUTDIR}/possvm_prev", mode: 'copy'
+	publishDir "${params.outdir}/possvm_prev", mode: 'copy'
 
 	cpus 1
 
@@ -350,7 +377,7 @@ process PVM_PREV {
 		export PYTHONNOUSERSITE=1
 		python ${projectDir}/phylogeny/main.py possvm \
 		    -t ${tree} \
-		    --refsps ${params.REFSPECIES} \
+		    --refsps ${params.refsps} \
 	    -r ${refnames_file} \
 	    -o ${id}.
 	"""
@@ -361,7 +388,7 @@ process PVM_PREV {
 // -----------------------------
 process REPORT {
 
-    publishDir "${params.OUTDIR}", mode: 'copy'
+    publishDir "${params.outdir}", mode: 'copy'
 
     cpus   1
     memory 2.GB
@@ -381,7 +408,7 @@ process REPORT {
 	    """
 		    export PYTHONNOUSERSITE=1
 		    python ${projectDir}/workflow/report_step2.py \
-		        --results_dir     ${params.OUTDIR} \
+		        --results_dir     ${params.outdir} \
 		        --family_info     ${params.family_info} \
 		        --species_tree    ${params.species_tree_report} \
 		        --species_info    ${projectDir}/data/species_info.tsv \
@@ -397,9 +424,9 @@ process GR_watcher {
 
     tag "${id}"
 
-    publishDir "${params.OUTDIR}/generax", mode: 'copy'
+    publishDir "${params.outdir}/generax", mode: 'copy'
 
-    cpus params.NCPU_GENERAX
+    cpus params.ncpu_generax
     maxForks 30
 
     memory {
@@ -450,7 +477,7 @@ process GR_watcher {
 
     script:
 
-    def existing = file("${params.OUTDIR}/generax/${id}.generax.tree")
+    def existing = file("${params.outdir}/generax/${id}.generax.tree")
 
     if (existing.exists()) {
         """
@@ -491,8 +518,8 @@ process GR_watcher {
             --gene_tree ${tree} \
             --species_tree ${species_tree} \
             --output_dir ${id}_generax \
-            --subs_model ${params.SUBS_MODEL} \
-            --max_spr ${params.MAX_SPR} \
+            --subs_model ${params.subs_model} \
+            --max_spr ${params.max_spr} \
             --cpus ${task.cpus} \
             --logfile ${id}.generax.log \
             --outfile ${id}.generax.tree &
@@ -529,7 +556,7 @@ process GR_watcher {
 // ---------------------------------------------------------------------------------
 // SPECIES TREE -- one parameter, validated before anything runs.
 //
-// BUG FIXED 2026-08-18. This channel used to read `params.SPECIES_TREE` (uppercase),
+// BUG FIXED 2026-08-18. This channel used to read the uppercase SPECIES_TREE param,
 // which is set ONLY in nextflow.config and defaults to data/species_tree.newick. The
 // documented switch, `--species_tree` (lowercase, resolved at the top of this file and
 // used by the ancestral step), therefore had NO EFFECT ON GENERAX. On 2026-08-14 that
@@ -539,17 +566,11 @@ process GR_watcher {
 // the family files for four days. GeneRax requires a STRICTLY BINARY species tree.
 //
 // Precedence now: --species_tree (or a params-file / YAML key) wins; SPECIES_TREE is
-// honoured only as a legacy fallback, and the tree is checked before the DAG is built.
-// ⚠ params.species_tree has NO default in this file (the merged branch renamed the old
-// default to params.species_tree_report, which is the REPORT tree, not GeneRax's). So
-// resolve explicitly and fall back, or file() is handed null on the common path -- caught
-// by `nextflow run step2.nf -preview` on 2026-08-18: "Argument of `file()` cannot be null".
-def _st = params.containsKey('species_tree') && params.species_tree ? params.species_tree
-        : params.containsKey('SPECIES_TREE') && params.SPECIES_TREE ? params.SPECIES_TREE
-        : "${projectDir}/data/species_tree.newick"
-if( !(params.containsKey('species_tree') && params.species_tree) && params.containsKey('SPECIES_TREE') )
-    log.warn "DEPRECATED parameter 'SPECIES_TREE' -- rename it to 'species_tree' in your params file"
-def species_tree_file = file(_st)
+// honoured only as a legacy fallback via canonical(), and the tree is checked before
+// the DAG is built. ⚠ params.species_tree has NO default in this file (the merged
+// branch renamed the old default to params.species_tree_report, which is the REPORT
+// tree, not GeneRax's) -- canonical() supplies the fallback below instead.
+def species_tree_file = file(canonical('species_tree', 'SPECIES_TREE', "${projectDir}/data/species_tree.newick"))
 
 if( params.run_generax ) {
     if( !species_tree_file.exists() )
@@ -566,7 +587,7 @@ if( params.run_generax ) {
 }
 
 species_tree_ch = Channel.value( species_tree_file )
-refnames_ch     = Channel.value( file(params.REFNAMES) )
+refnames_ch     = Channel.value( file(params.refnames) )
 
 workflow {
 
