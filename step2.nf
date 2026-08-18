@@ -3,8 +3,7 @@ nextflow.enable.dsl=2
 // ── Canonical parameter names ─────────────────────────────────────────────────
 // One canonical name per parameter, lower_snake_case. The uppercase twin
 // (SPECIES_TREE, OUTDIR, REFNAMES, REFSPECIES, SUBS_MODEL, MAX_SPR, NCPU_GENERAX,
-// TREE_METHOD, MAFFT_OPT, IQTREE2_MODEL) is accepted only when the lowercase key is
-// absent, and logs a deprecation warning naming this file.
+// TREE_METHOD, MAFFT_OPT, IQTREE2_MODEL) is a HARD ERROR if present at all -- see below.
 //
 // WHY THIS EXISTS: the uppercase SPECIES_TREE param (nextflow.config only) and
 // params.species_tree (lowercase, the documented --species_tree flag) both existed and
@@ -12,18 +11,24 @@ nextflow.enable.dsl=2
 // affect GeneRax, and on 2026-08-14 that handed it a multifurcating tree and killed all
 // 475 tasks. Read every parameter through canonical() so a name can never fork again.
 //
-// NOTE: `evaluate(new File("${projectDir}/workflow/params.nf"))` does not put the
-// defined function into script scope under DSL2 (measured: "Unknown method invocation
-// `canonical`" even though evaluate() itself succeeds) -- so canonical() is defined
-// once here, directly in step2.nf, rather than shared via a file. step1.nf does not
-// read any of these ten parameters and therefore does not need its own copy.
+// WHY ERROR, NOT WARN (round 2, 2026-08-18): a warning here can only be reliable if
+// `params.containsKey(upper)` is true exactly when a USER set the uppercase key --
+// which requires nextflow.config to never default it either. But the profiles
+// (`fast`/`precise`) legitimately need to override tree_method/mafft_opt/max_spr/
+// ncpu_generax with real values, and doing that in lowercase makes
+// `params.containsKey(lower)` true from profile load alone, defeating the OTHER branch
+// of the shim the same way the top-level config defaults defeated this one (round 1).
+// There is no config-only-lowercase-there / config-only-uppercase-nowhere split that
+// keeps both directions honest AND lets profiles tune method params. So: nothing may
+// ever define the uppercase keys again (not in nextflow.config, not in a profile) --
+// `containsKey(upper)` is therefore true if and only if a user actually passed one, on
+// the CLI or in a params-file, and a legacy key is refused outright rather than risking
+// a silently-wrong resolution.
 def canonical(String name, String upper, Object fallback = null) {
+    if( params.containsKey(upper) )
+        error "Parameter '${upper}' was renamed to '${name}'. Rename it in your params file / profile and re-run."
     if( params.containsKey(name) && params[name] != null )
         return params[name]
-    if( params.containsKey(upper) && params[upper] != null ) {
-        log.warn "DEPRECATED parameter '${upper}' -- rename it to '${name}' in your params file / nextflow.config"
-        return params[upper]
-    }
     return fallback
 }
 
@@ -52,6 +57,10 @@ params.ncpu_generax   = canonical('ncpu_generax', 'NCPU_GENERAX', 2)
 
 
 params.tag_prefix = ''
+
+// Resolved tree-building method, logged so a profile's choice (fast=fasttree,
+// precise=iqtree2) is visible in the run log -- and testable in preview.
+log.info "tree_method: ${params.tree_method}"
 
 // ── Failure diagnostics ───────────────────────────────────────────────────────
 // Log the work dir + tail of .command.err whenever a task fails (any attempt).

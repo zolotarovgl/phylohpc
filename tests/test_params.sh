@@ -16,54 +16,68 @@ assert_ok grep -q 'species_tree' nextflow.config
 # `canonical`"), so there is no workflow/params.nf; grep the file where it actually lives.
 assert_ok grep -q 'def canonical' step2.nf
 
+# the uppercase keys must never be DEFAULTED anywhere in nextflow.config, in any
+# profile -- that is what makes containsKey(upper) a reliable "user passed a legacy
+# flag" signal for canonical()'s hard-error branch (round 2, 2026-08-18)
+cfg_upper_hits=$(grep -nE '^\s*(SPECIES_TREE|OUTDIR|REFNAMES|REFSPECIES|SUBS_MODEL|MAX_SPR|NCPU_GENERAX|TREE_METHOD|MAFFT_OPT|IQTREE2_MODEL)\s*=' nextflow.config | wc -l)
+assert_eq "0" "$cfg_upper_hits" "nextflow.config never defaults an uppercase key (any profile)"
+
 # ── Runtime cases: actually exercise canonical()'s shim through step2.nf -preview ──
 # (a few seconds each -- these run the real DAG build/params-resolution code, not a grep)
 _NF="nextflow run step2.nf -preview"
 _TMPDIR=$(mktemp -d)
 trap '[[ $_FAILED -eq 0 ]] || exit 1; rm -rf "$_TMPDIR"' EXIT
 
-# 1. uppercase-only: legacy SPECIES_TREE must actually be USED (not silently dropped)
-#    and must warn. Uses the multifurcating fixture so a pass-through failure is loud.
+# 1. uppercase-only: legacy SPECIES_TREE must now be a HARD ERROR (round 2), never a
+#    silent pass-through and never a mere warning. The error must name both spellings.
 cat > "$_TMPDIR/upper_only.yaml" << 'YAML'
 run_generax: true
-SPECIES_TREE: tests/data/multifurcating.newick
+SPECIES_TREE: tests/data/binary.newick
 YAML
 out=$($_NF -params-file "$_TMPDIR/upper_only.yaml" 2>&1)
-assert_contains "$out" "DEPRECATED parameter 'SPECIES_TREE'" "uppercase-only: warns"
-assert_contains "$out" "multifurcating node(s)" "uppercase-only: legacy value was actually used (run failed on it)"
 if echo "$out" | grep -q 'step2 completed OK'; then
-    echo "  FAIL: uppercase-only: run passed -- SPECIES_TREE was silently ignored"
+    echo "  FAIL: uppercase-only: run passed -- legacy SPECIES_TREE was not refused"
     _FAILED=1
 else
-    echo "  ok: uppercase-only: run correctly failed on the legacy tree"
+    echo "  ok: uppercase-only: run correctly failed"
 fi
+assert_contains "$out" "SPECIES_TREE" "uppercase-only: error names the legacy key"
+assert_contains "$out" "species_tree" "uppercase-only: error names the canonical key"
 
-# 2. lowercase wins: both set, opposite trees -- must succeed (lowercase binary tree
-#    used) and must NOT warn about SPECIES_TREE.
+# 2. both keys set: ambiguity is refused too, unconditionally -- lowercase does NOT
+#    silently win any more (round 2 supersedes round 1's precedence rule).
 cat > "$_TMPDIR/both.yaml" << 'YAML'
 run_generax: true
 species_tree: tests/data/binary.newick
 SPECIES_TREE: tests/data/multifurcating.newick
 YAML
 out=$($_NF -params-file "$_TMPDIR/both.yaml" 2>&1)
-if echo "$out" | grep -q "DEPRECATED parameter 'SPECIES_TREE'"; then
-    echo "  FAIL: lowercase-wins: warned even though lowercase was set"
+if echo "$out" | grep -q 'step2 completed OK'; then
+    echo "  FAIL: both-set: run passed -- ambiguous SPECIES_TREE+species_tree was not refused"
     _FAILED=1
 else
-    echo "  ok: lowercase-wins: no deprecation warning"
+    echo "  ok: both-set: run correctly failed (ambiguity refused)"
 fi
-assert_contains "$out" "step2 completed OK" "lowercase-wins: run succeeded on the binary tree"
+assert_contains "$out" "SPECIES_TREE" "both-set: error names the legacy key"
 
-# 3. default applies: neither set -- must resolve the projectDir default and succeed,
-#    with no warning.
+# 3. lowercase only: must succeed, no legacy-key error.
+cat > "$_TMPDIR/lower_only.yaml" << 'YAML'
+run_generax: true
+species_tree: tests/data/binary.newick
+YAML
+out=$($_NF -params-file "$_TMPDIR/lower_only.yaml" 2>&1)
+assert_contains "$out" "step2 completed OK" "lowercase-only: run succeeded on the binary tree"
+
+# 4. default applies: neither set -- must resolve the projectDir default and succeed.
 cat > "$_TMPDIR/neither.yaml" << 'YAML'
 run_generax: true
 YAML
 out=$($_NF -params-file "$_TMPDIR/neither.yaml" 2>&1)
-if echo "$out" | grep -q "DEPRECATED parameter"; then
-    echo "  FAIL: default-applies: warned with neither uppercase nor lowercase set"
-    _FAILED=1
-else
-    echo "  ok: default-applies: no deprecation warning"
-fi
 assert_contains "$out" "step2 completed OK" "default-applies: run succeeded on the projectDir default tree"
+
+# 5. profile-driven method tuning still works: fast -> fasttree, precise -> iqtree2,
+#    exercised via the log.info line added in step2.nf for exactly this purpose.
+out_fast=$($_NF -profile fast -params-file "$_TMPDIR/neither.yaml" 2>&1)
+assert_contains "$out_fast" "tree_method: fasttree" "profile fast resolves tree_method=fasttree"
+out_precise=$($_NF -profile precise -params-file "$_TMPDIR/neither.yaml" 2>&1)
+assert_contains "$out_precise" "tree_method: iqtree2" "profile precise resolves tree_method=iqtree2"
