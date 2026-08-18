@@ -39,9 +39,9 @@ params.family_info   = params.containsKey('family_info')
 params.species_tree_report = params.containsKey('species_tree_report')
     ? params.species_tree_report
     : "${projectDir}/data/species_tree.full.newick"
-params.refnames      = canonical('refnames', 'REFNAMES', "${projectDir}/data/Mmus_gene_names.csv")
+params.refnames       = canonical('refnames', 'REFNAMES', "${projectDir}/data/Mmus_gene_names.csv")
 params.refsps         = canonical('refsps', 'REFSPECIES', 'Mmus')
-params.run_generax   = params.containsKey('run_generax') ? params.run_generax : false
+params.run_generax    = params.containsKey('run_generax') ? params.run_generax : false
 params.outdir         = canonical('outdir', 'OUTDIR', "${projectDir}/results")
 params.mafft_opt      = canonical('mafft_opt', 'MAFFT_OPT', '')
 params.tree_method    = canonical('tree_method', 'TREE_METHOD', 'iqtree2')
