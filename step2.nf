@@ -468,7 +468,41 @@ process GR_watcher {
 //	hg_fastas|ALN|PHY|map { id, tree, aln -> tuple(id, tree, aln, refnames_file) } | PVM
 //}
 
-species_tree_ch = Channel.value( file(params.SPECIES_TREE) )
+// ---------------------------------------------------------------------------------
+// SPECIES TREE -- one parameter, validated before anything runs.
+//
+// BUG FIXED 2026-08-18. This channel used to read `params.SPECIES_TREE` (uppercase),
+// which is set ONLY in nextflow.config and defaults to data/species_tree.newick. The
+// documented switch, `--species_tree` (lowercase, resolved at the top of this file and
+// used by the ancestral step), therefore had NO EFFECT ON GENERAX. On 2026-08-14 that
+// silently handed GeneRax the UNRESOLVED tree and all 475 GR_watcher tasks died with
+//     [Error] Cannot parse species tree file (species_tree.newick)
+// which the errorStrategy relabelled "Family parsing error", sending the diagnosis at
+// the family files for four days. GeneRax requires a STRICTLY BINARY species tree.
+//
+// Precedence now: --species_tree (or a params-file / YAML key) wins; SPECIES_TREE is
+// honoured only as a legacy fallback, and the tree is checked before the DAG is built.
+def species_tree_file = file(params.species_tree)
+if( params.containsKey('SPECIES_TREE') && !params.containsKey('species_tree') )
+    species_tree_file = file(params.SPECIES_TREE)
+
+if( params.run_generax ) {
+    if( !species_tree_file.exists() )
+        error "species tree not found: ${species_tree_file} (--species_tree)"
+    def nwk = species_tree_file.text.trim()
+    def kids = []
+    def bad = 0
+    nwk.each { ch ->
+        if( ch == '(' )      { kids << 1 }
+        else if( ch == ',' ) { if( kids ) kids[-1] = kids[-1] + 1 }
+        else if( ch == ')' ) { def n = kids ? kids.pop() : 0 ; if( n > 2 ) bad++ }
+    }
+    if( bad > 0 )
+        error "species tree ${species_tree_file} has ${bad} multifurcating node(s); GeneRax needs a strictly binary tree. Resolve it first:  python workflow/check_tree.py <in.newick> <ids> <out.newick> --random-resolve --seed 1   and pass that file with --species_tree. This is exactly what killed the 2026-08-14 run."
+    log.info "species tree: ${species_tree_file} -- strictly binary, ${nwk.count('(')} internal nodes"
+}
+
+species_tree_ch = Channel.value( species_tree_file )
 refnames_ch     = Channel.value( file(params.REFNAMES) )
 
 workflow {
