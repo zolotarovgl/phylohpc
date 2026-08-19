@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Failure-accounting policy for step2.nf (GeneRax family failures).
+"""Failure-accounting policy for step2.nf (family failures from ANY of its processes --
+ALN/PHY/PVM/PVM_PREV/GR_watcher, not GeneRax only, since 2026-08-19).
 
 Two pure functions, both unit-testable without Nextflow:
 
@@ -7,8 +8,10 @@ Two pure functions, both unit-testable without Nextflow:
         the number of failures the run tolerates before it is FAILED.
   - decide(n_failed, n_families, max_failed_frac, max_failed_count, strict):
         'ok' | 'fail' -- whether the run passes the tolerance.
-  - write_failures_tsv(path, rows): the exact 4-column
-        family\texit_code\tfirst_error\tworkdir format.
+  - write_failures_tsv(path, rows): the exact 5-column
+        family\texit_code\tfirst_error\tworkdir\tprocess format. The `process` column
+        (added 2026-08-19) records WHICH stage failed -- ALN/PHY/PVM/PVM_PREV/GR_watcher
+        -- because before this every failure looked like a GeneRax failure by omission.
 
 Also usable as a CLI so step2.nf can shell out to the SAME decision rather than
 re-implementing the arithmetic in Groovy (two copies of a threshold is how it drifts):
@@ -17,7 +20,7 @@ re-implementing the arithmetic in Groovy (two copies of a threshold is how it dr
         -> prints "ok" or "fail" and exits 0 either way; the caller reads stdout.
 
     python3 failure_policy.py write-tsv OUTPATH < rows.tsv
-        -> rows.tsv is family\texit_code\tfirst_error\tworkdir, no header;
+        -> rows.tsv is family\texit_code\tfirst_error\tworkdir\tprocess, no header;
            writes OUTPATH with the header prepended.
 """
 import math
@@ -42,14 +45,14 @@ def decide(n_failed, n_families, max_failed_frac, max_failed_count, strict=False
     return 'ok' if n_failed <= limit else 'fail'
 
 
-HEADER = "family\texit_code\tfirst_error\tworkdir"
+HEADER = "family\texit_code\tfirst_error\tworkdir\tprocess"
 
 
 def write_failures_tsv(path, rows):
-    """rows: iterable of (family, exit_code, first_error, workdir) tuples/lists."""
+    """rows: iterable of (family, exit_code, first_error, workdir, process) tuples/lists."""
     lines = [HEADER]
-    for family, exit_code, first_error, workdir in rows:
-        lines.append(f"{family}\t{exit_code}\t{first_error}\t{workdir}")
+    for family, exit_code, first_error, workdir, process in rows:
+        lines.append(f"{family}\t{exit_code}\t{first_error}\t{workdir}\t{process}")
     text = "\n".join(lines) + "\n"
     with open(path, "w") as fh:
         fh.write(text)
@@ -76,8 +79,8 @@ def _main(argv):
             if not line:
                 continue
             parts = line.split('\t')
-            if len(parts) != 4:
-                print(f"malformed row (expected 4 fields, got {len(parts)}): {line!r}", file=sys.stderr)
+            if len(parts) != 5:
+                print(f"malformed row (expected 5 fields, got {len(parts)}): {line!r}", file=sys.stderr)
                 return 1
             rows.append(parts)
         write_failures_tsv(outpath, rows)

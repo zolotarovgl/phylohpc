@@ -38,13 +38,15 @@ check_decide 500 500 0.05 20 false fail
 check_decide 1   500 0.05 20 true  fail
 check_decide 0   500 0.05 20 true  ok
 
-# ── TSV writer: fabricated input -> exact 4-column TSV with header
+# ── TSV writer: fabricated input -> exact 5-column TSV with header. The `process`
+# column (added 2026-08-19) records WHICH stage failed -- see CRITICAL 2, failures used
+# to be recorded from GR_watcher only, so a non-GeneRax failure was invisible.
 tmp=$(mktemp -d)
-printf 'HG0001\t10\tCannot parse species tree file\t/work/ab/cd1234\nHG0002\t137\tOut of memory\t/work/ef/gh5678\n' \
+printf 'HG0001\t10\tCannot parse species tree file\t/work/ab/cd1234\tGR_watcher\nHG0002\t137\tOut of memory\t/work/ef/gh5678\tALN\n' \
     | $PY write-tsv "$tmp/failures.tsv"
-expected=$'family\texit_code\tfirst_error\tworkdir\nHG0001\t10\tCannot parse species tree file\t/work/ab/cd1234\nHG0002\t137\tOut of memory\t/work/ef/gh5678'
+expected=$'family\texit_code\tfirst_error\tworkdir\tprocess\nHG0001\t10\tCannot parse species tree file\t/work/ab/cd1234\tGR_watcher\nHG0002\t137\tOut of memory\t/work/ef/gh5678\tALN'
 got=$(cat "$tmp/failures.tsv")
-assert_eq "$expected" "$got" "failures.tsv exact 4-column content with header"
+assert_eq "$expected" "$got" "failures.tsv exact 5-column content with header"
 
 # malformed row (wrong field count) must be rejected, not silently written
 if printf 'HG0003\t10\tonly-three-fields\n' | $PY write-tsv "$tmp/bad.tsv" >/dev/null 2>&1; then
