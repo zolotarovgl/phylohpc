@@ -29,12 +29,41 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# CRITICAL 1 (2026-08-19 whole-branch review): a FAILED step2 run still exits 0 --
+# workflow.onComplete only ever had log.error to work with, which does not touch
+# nextflow's own exit code. step2.nf now writes reports/run_status.txt ("ok"/"fail") as
+# the last thing it does in onComplete; this is the ONE place that turns that verdict
+# into a real process exit for `phylohpc run`/`submit`/`rerun-failed` alike. Absence of
+# the file (nextflow crashed/was killed before reaching onComplete) is ALSO a failure --
+# never treated as success by omission.
+check_run_status() {
+  local f="reports/run_status.txt"
+  if [[ ! -f "$f" ]]; then
+    echo "phylohpc: no $f -- nextflow did not reach onComplete (crashed/killed); treating as FAILED" >&2
+    return 1
+  fi
+  local status
+  status="$(tr -d '[:space:]' < "$f")"
+  if [[ "$status" != "ok" ]]; then
+    echo "phylohpc: run FAILED (reports/run_status.txt says '$status') -- see reports/failures.tsv" >&2
+    return 1
+  fi
+  return 0
+}
+
 run_nf() {
   local step="$1"; shift
   bash "$HERE/workflow/preflight.sh" "$PARAMS" "$step"
+  [[ "$step" == "step2" ]] && rm -f "reports/run_status.txt"
   nextflow run "$HERE/$step.nf" -ansi-log false -profile "$PROFILE" -resume \
       -w "$WORKDIR" -params-file "$PARAMS" \
       -with-report "reports/report.$step.html" -with-trace "reports/trace.$step.txt" "$@"
+  # Only step2.nf writes reports/run_status.txt today (it is the step the 2026-08-14
+  # incident happened in); other steps do not yet emit a verdict file, so do not fail
+  # them for its absence -- that would be a new false failure, not a fix.
+  if [[ "$step" == "step2" ]]; then
+    check_run_status
+  fi
 }
 
 case "$CMD" in
@@ -55,10 +84,22 @@ case "$CMD" in
     [[ -n "$PARAMS" ]] || usage
     mkdir -p reports logs
     bash "$HERE/workflow/preflight.sh" "$PARAMS" "$STEP"   # fail before queueing
+    # MINOR 9 (2026-08-19 review): ${EXTRA[*]} interpolated unquoted into --wrap loses
+    # argument boundaries -- an EXTRA element containing a space becomes two words (or
+    # worse) once sbatch's shell re-splits it. printf %q round-trips each element through
+    # shell-quoting so --wrap sees back exactly what was passed on this invocation's CLI.
+    extra_q=""
+    if [[ ${#EXTRA[@]} -gt 0 ]]; then
+      extra_q=$(printf ' %q' "${EXTRA[@]}")
+    fi
     sbatch --job-name "$STEP" --output "reports/slurm.$STEP.out" \
-           --wrap "cd $PWD && $HERE/phylohpc run $STEP -p $PARAMS --profile ${PROFILE/local/slurm} -w $WORKDIR ${EXTRA[*]:-}"
+           --wrap "cd $PWD && $HERE/phylohpc run $STEP -p $PARAMS --profile ${PROFILE/local/slurm} -w $WORKDIR$extra_q"
     ;;
   rerun-failed)
+    # MINOR 9 (2026-08-19 review): -p was never validated here -- an omitted -p ran
+    # `nextflow run ... -params-file ""`, an opaque nextflow error far from the real
+    # cause, instead of phylohpc's own usage message.
+    [[ -n "$PARAMS" ]] || usage
     [[ -f reports/failures.tsv ]] || { echo "no reports/failures.tsv here -- run the step first"; exit 1; }
     mkdir -p reports
     tail -n +2 reports/failures.tsv | cut -f1 | sort -u > reports/rerun.ids

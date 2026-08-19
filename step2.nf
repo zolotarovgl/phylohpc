@@ -177,7 +177,20 @@ workflow.onError {
 workflow.onComplete {
     def outdir = canonical('outdir','OUTDIR')
     def n_fail = FAILURES.size()
-    def n_fam  = file("${outdir}/clusters").exists() ? file("${outdir}/clusters").list().findAll{ it.endsWith('.fasta') }.size() : 0
+    // IMPORTANT 5 (2026-08-19 review): when --ids restricts the run, the tolerance
+    // denominator must be the number of ids actually run, not every *.fasta in
+    // ${outdir}/clusters -- otherwise `phylohpc rerun-failed` on 10 failed families,
+    // with all 10 failing again, reports n_fail=10 against n_fam=475 (the FULL cluster
+    // count, most of which were never touched this run) and passes at a 100% failure
+    // rate. Mirrors the same `params.ids && file(...).exists()` condition used above to
+    // build hg_fastas.
+    def n_fam
+    if( params.ids && file(params.ids.toString()).exists() ) {
+        n_fam = file(params.ids.toString()).readLines().collect{ it.trim() }.findAll{ it }.size()
+    }
+    else {
+        n_fam = file("${outdir}/clusters").exists() ? file("${outdir}/clusters").list().findAll{ it.endsWith('.fasta') }.size() : 0
+    }
     // DEVIATION FROM THE BRIEF (disclosed, not hidden -- see task-5-report.md): the
     // tolerance arithmetic and the TSV format are delegated to
     // workflow/failure_policy.py, shelled out via .execute(), rather than reimplemented
@@ -199,11 +212,25 @@ workflow.onComplete {
         else
             log.warn "${n_fail} task(s) failed -- see reports/failures.tsv"
     }
-    // an expected output directory that ends up EMPTY is an error in its own right
-    if( params.run_generax ) {
-        def gr = file("${outdir}/generax")
-        if( !gr.exists() || gr.list().size() == 0 )
-            log.error "run_generax was on but ${outdir}/generax is EMPTY -- treat this run as FAILED"
+    // an expected output directory that ends up EMPTY is an error in its own right.
+    // CRITICAL 2 (2026-08-19 review): this used to check ONLY ${outdir}/generax, and only
+    // when run_generax was on -- so a stage upstream of GeneRax going empty (e.g. every
+    // ALN task 'ignore'd because clipkit/mafft was missing on the compute nodes) produced
+    // n_fail=0 (that FAILURES gap is fixed above) and no empty-output signal either, and
+    // the run reported success with an empty results/possvm/. Every stage the run was
+    // actually supposed to populate is now checked the same way.
+    def emptyOutputFail = false
+    if( n_fam > 0 ) {
+        def expectedDirs = ['align', 'gene_trees', 'possvm']
+        if( params.run_generax )
+            expectedDirs << 'generax'
+        expectedDirs.each { stage ->
+            def d = file("${outdir}/${stage}")
+            if( !d.exists() || d.list().size() == 0 ) {
+                log.error "${n_fam} families were staged but ${outdir}/${stage} is EMPTY -- treat this run as FAILED"
+                emptyOutputFail = true
+            }
+        }
     }
     def decideProc = ["python3", "${projectDir}/workflow/failure_policy.py", "decide",
                        n_fail.toString(), n_fam.toString(),
@@ -225,6 +252,19 @@ workflow.onComplete {
     }
     if( !workflow.success )
         log.info "List failed tasks:  nextflow log ${workflow.runName} -f name,status,exit,workdir -F \"status=='FAILED'\""
+
+    // ── Machine-readable verdict ────────────────────────────────────────────
+    // CRITICAL 1 (2026-08-19 whole-branch review): everything above is log.error, which
+    // does NOT change nextflow's own exit code -- a FAILED run still exits 0 and any
+    // wrapper reading only `$?` calls it a success. Write the actual verdict to a file
+    // phylohpc itself checks after nextflow returns. 'fail' if: nextflow itself did not
+    // succeed, OR the tolerance decision said fail (or could not be computed), OR the
+    // run_generax empty-output guard fired. Otherwise 'ok'.
+    def verdict = (!workflow.success || decision == 'fail' || decideProc.exitValue() != 0 || emptyOutputFail) ? 'fail' : 'ok'
+    def statusFile = file("reports/run_status.txt")
+    statusFile.parent.mkdirs()
+    statusFile.text = verdict + "\n"
+    log.info "run verdict: ${verdict} (reports/run_status.txt)"
 }
 
 // ── Environment preflight ─────────────────────────────────────────────────────
@@ -336,7 +376,18 @@ process ALN {
 
     cpus 4
 
-    errorStrategy = { errReport(task); task.attempt <= 10 ? 'retry' : 'ignore' }
+    // CRITICAL 2 (2026-08-19 review): FAILURES was only ever appended from GR_watcher --
+    // an ALN failure (e.g. clipkit/mafft missing on the compute nodes) silently 'ignore'd
+    // with nothing recorded, n_fail stayed 0, and the run reported success with an empty
+    // results/align/. Same inline-in-the-closure pattern as GR_watcher (a top-level
+    // method is invisible from errorStrategy -- see the comment above FAILURES).
+    errorStrategy = {
+        errReport(task)
+        if( task.attempt <= 10 )
+            return 'retry'
+        FAILURES << [id, task.exitStatus, firstErrorLine(task).take(200), task.workDir, 'ALN']
+        return 'ignore'
+    }
     maxRetries 10
     maxErrors -1
 
@@ -391,7 +442,13 @@ process PHY {
         return base + (task.attempt - 1) * 6.h
     }
 
-    errorStrategy = { errReport(task); task.attempt <= 10 ? 'retry' : 'ignore' }
+    errorStrategy = {
+        errReport(task)
+        if( task.attempt <= 10 )
+            return 'retry'
+        FAILURES << [id, task.exitStatus, firstErrorLine(task).take(200), task.workDir, 'PHY']
+        return 'ignore'
+    }
     maxRetries 10
     maxErrors -1
 
@@ -466,7 +523,11 @@ process PVM {
 	}
 
 	errorStrategy {
-		errReport(task); return task.attempt <= 3 ? 'retry' : 'ignore'
+		errReport(task)
+		if( task.attempt <= 3 )
+			return 'retry'
+		FAILURES << [id, task.exitStatus, firstErrorLine(task).take(200), task.workDir, 'PVM']
+		return 'ignore'
 	}
 
 	maxRetries 3
@@ -510,7 +571,11 @@ process PVM_PREV {
 	}
 
 	errorStrategy {
-		errReport(task); return task.attempt <= 3 ? 'retry' : 'ignore'
+		errReport(task)
+		if( task.attempt <= 3 )
+			return 'retry'
+		FAILURES << [id, task.exitStatus, firstErrorLine(task).take(200), task.workDir, 'PVM_PREV']
+		return 'ignore'
 	}
 
 	maxRetries 3
@@ -602,7 +667,7 @@ process GR_watcher {
         // labelled: no guessed diagnosis, ever. FAILURES appended inline (see comment above).
         if( task.attempt <= max_attempts && task.exitStatus != 10 )
             return 'retry'
-        FAILURES << [id, task.exitStatus, firstErrorLine(task).take(200), task.workDir]
+        FAILURES << [id, task.exitStatus, firstErrorLine(task).take(200), task.workDir, 'GR_watcher']
         return params.strict ? 'terminate' : 'ignore'
     }
 
