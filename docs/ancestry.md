@@ -292,12 +292,6 @@ python workflow/visualize_hog_hierarchy.py \
 ```
 
 ```bash
-snakemake -s workflow/step4_ancestry.smk --cores 24 \
-    --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=config/ancestry_ids.txt
-```
-
-
-```bash
 
 python /users/asebe/gzolotarov/projects/2025_phylogeny/phylohpc/phylogeny/main.py possvm -t         results/gene_trees/tfs.Homeodomains.HG3.treefile --refsps   Mmus -r data/Mmus_gene_names.csv  --outgroup results/ancestry/Metazoa/Metazoa.ignore_species.txt -o Metazoa.tfs.Homeodomains.HG3 -p  results/ancestry/Metazoa/possvm/tfs.Homeodomains.HG3.
 

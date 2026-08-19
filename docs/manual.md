@@ -65,7 +65,7 @@ phylohpc/
 ├── step2.nf              # Alignment, phylogeny, POSSVM, GeneRax pipeline
 ├── generax.nf            # GeneRax-only re-run pipeline
 ├── nextflow.config       # Default parameters and execution profiles
-├── submit_nf.sh          # SLURM wrapper for launching Nextflow itself
+├── phylohpc              # CLI entry point (run/submit/rerun-failed/report/init)
 ├── data/
 │   ├── input.fasta           # Multi-species proteome (user-provided)
 │   ├── species_tree.newick   # Pruned, strictly binary species tree
@@ -190,14 +190,7 @@ nextflow run step1.nf \
 ### SLURM batch run
 
 ```bash
-WORKDIR=/path/to/work/step1
-sbatch -J step1 -o reports/slurm.step1.out submit_nf.sh step1.nf \
-  -profile slurm \
-  -resume \
-  -w $WORKDIR \
-  --report   reports/report.step1.html \
-  --trace    reports/trace.step1.txt \
-  --timeline reports/timeline.step1.html
+phylohpc submit step1 -p run.yaml --profile slurm
 ```
 
 > **Important:** Always use `-profile slurm` when submitting via `sbatch`.
@@ -369,17 +362,7 @@ nextflow run step2.nf \
 **SLURM batch**
 
 ```bash
-WORKDIR=/path/to/work/step2
-PROFILE=slurm,precise
-
-sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf \
-  -profile $PROFILE \
-  -resume \
-  --run_generax \
-  -w $WORKDIR \
-  --report   reports/report.step2.html \
-  --trace    reports/trace.step2.txt \
-  --timeline reports/timeline.step2.html
+phylohpc submit step2 -p run.yaml --profile slurm,precise
 ```
 
 ### Key parameters
