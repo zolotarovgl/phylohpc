@@ -58,9 +58,25 @@ params.ncpu_generax   = canonical('ncpu_generax', 'NCPU_GENERAX', 2)
 
 params.tag_prefix = ''
 
-// Resolved tree-building method, logged so a profile's choice (fast=fasttree,
-// precise=iqtree2) is visible in the run log -- and testable in preview.
-log.info "tree_method: ${params.tree_method}"
+// Print what actually got resolved, BEFORE the DAG is built. The 2026-08-14 failure was
+// invisible partly because nothing ever stated which file configured the run. Absorbs
+// the old standalone "tree_method: ..." log.info line (still asserted by
+// tests/test_params.sh's profile checks, via the "tree_method: <value>" line below).
+def printResolvedConfig(String step) {
+    log.info """
+== resolved configuration (${step})
+   params file   : ${workflow.configFiles.join(', ')}
+   revision      : ${workflow.revision ?: 'local checkout'} (${workflow.commitId ?: 'no commit id'})
+   outdir        : ${canonical('outdir','OUTDIR')}
+   work dir      : ${workflow.workDir}
+   species tree  : ${canonical('species_tree','SPECIES_TREE')}
+   run_generax   : ${params.run_generax}
+   tree_method: ${params.tree_method}
+   family info   : ${params.family_info}
+   ids restrict  : ${params.ids ?: '(all clusters)'}
+"""
+}
+printResolvedConfig('step2')
 
 // ── Failure diagnostics ───────────────────────────────────────────────────────
 // Log the work dir + tail of .command.err whenever a task fails (any attempt).

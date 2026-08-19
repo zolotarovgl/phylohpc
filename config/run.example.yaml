@@ -1,0 +1,38 @@
+# phylohpc run configuration -- THE file that configures a run.
+#   nextflow run zolotarovgl/phylohpc -r v1.0 -params-file run.yaml -profile slurm
+# Copy this next to your data, edit, and COMMIT IT: run.yaml + the pipeline revision
+# printed at start-up are the complete record of what was run.
+
+# ---- inputs
+infasta:       data/input.fasta            # proteomes, one multi-fasta
+family_info:   genefam.csv                 # family table: name, HMMs, inflation, min hits, cutoff, category, class
+ids:           ""                          # optional: file with one HG id per line, restricts the run
+refnames:      data/Mmus_gene_names.csv    # gene-name table for the POSSVM name transfer
+refspecies:    Mmus                        # POSSVM reference species -- EVERY name comes from this species
+
+# ---- outputs
+outdir:        results
+
+# ---- species tree
+# MUST be strictly binary when run_generax is true. Resolve polytomies first:
+#   python workflow/check_tree.py in.newick ids out.newick --random-resolve --seed 1
+# and note that randomly resolved nodes carry no evidence: never read a clade claim off one.
+species_tree:  data/species_tree.newick
+
+# ---- methods
+# These four are the defaults used when NO profile (fast/precise) is selected -- before
+# this refactor they existed only inside the fast/precise profiles in nextflow.config, so
+# a profile-less run had them undefined.
+tree_method:   iqtree2                     # iqtree2 | fasttree
+mafft_opt:     "--maxiterate 1000 --localpair"
+max_spr:       3
+ncpu_generax:  2
+iqtree2_model: TEST
+subs_model:    LG
+
+# ---- reconciliation (optional)
+run_generax:   false                       # needs an MPI GeneRax on PATH; the bioconda build is non-MPI
+
+# ---- failure policy
+max_failed_frac:  0.05                     # fail the run above this fraction of failed families
+max_failed_count: 20                       # ... or this many, whichever is smaller
