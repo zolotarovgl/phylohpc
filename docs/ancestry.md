@@ -23,7 +23,7 @@ After running `step2.nf` you have, for each Homology Group, a set of ortholog gr
 mamba activate phylo
 TREE=data/species_tree.full.newick
 nextflow run workflow/step4.ancestry.nf \
-	--SPECIES_TREE $TREE \
+	--species_tree $TREE \
     -profile local,precise \
     --node_names Bilateria \
     --ids ids.txt
@@ -34,7 +34,7 @@ For multiple clades in one run:
 ```bash
 TREE=data/species_tree.full.newick
 nextflow run workflow/step4.ancestry.nf \
-	--SPECIES_TREE $TREE \
+	--species_tree $TREE \
     -profile slurm,precise \
     --node_names "Bilateria,Protostomia,Deuterostomia,Vertebrata" \
     --ids ids.txt
@@ -56,7 +56,7 @@ print([n.name for n in t.traverse() if not n.is_leaf() and n.name])
 |---|---|---|
 | `--node_names` | — | Comma-separated clade node name(s) **(required)** |
 | `--ids` | `ids.txt` | HG IDs to analyse |
-| `--SPECIES_TREE` | `data/species_tree.full.newick` | Species tree with named internal nodes |
+| `--species_tree` | `data/species_tree.full.newick` | Species tree with named internal nodes |
 | `--REFSPECIES` | `Mmus` | Reference species for POSSVM ortholog naming |
 | `--REFNAMES` | `data/Mmus_gene_names.csv` | Reference gene name mapping |
 | `--gene_trees_dir` | `results/gene_trees` | Location of raw `.treefile` outputs from step2 |
@@ -310,7 +310,7 @@ python phylogeny/submodules/possvm-orthology/possvm.py -i results/gene_trees/tfs
 |---|---|---|
 | `--node_names` | — | Comma-separated clade node name(s) **(required)** |
 | `--ids` | `ids.txt` | HG IDs to process |
-| `--SPECIES_TREE` | `data/species_tree.full.newick` | Full tree with named internal nodes |
+| `--species_tree` | `data/species_tree.full.newick` | Full tree with named internal nodes |
 | `--REFSPECIES` | `Mmus` | Reference species for POSSVM |
 | `--gene_trees_dir` | `results/gene_trees` | Directory of raw `.treefile` outputs |
 | `--min_presence` | `2` | Minimum species required to retain an OG in the PAM |

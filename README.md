@@ -356,7 +356,7 @@ python phylogeny/submodules/possvm-orthology/possvm.py -i results/gene_trees/tfs
 |---|---|---|
 | `--node_names` | — | Comma-separated clade node name(s) **(required)** |
 | `--ids` | `ids.txt` | HG IDs to process |
-| `--SPECIES_TREE` | `data/species_tree.full.newick` | Full tree with named internal nodes |
+| `--species_tree` | `data/species_tree.full.newick` | Full tree with named internal nodes |
 | `--REFSPECIES` | `Mmus` | Reference species for POSSVM |
 | `--gene_trees_dir` | `results/gene_trees` | Directory of raw `.treefile` outputs |
 | `--min_presence` | `2` | Minimum species required to retain an OG in the PAM |

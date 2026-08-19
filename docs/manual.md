@@ -63,7 +63,7 @@ NumPy, pandas, …).
 phylohpc/
 ├── step1.nf              # PFAM search + MCL clustering pipeline
 ├── step2.nf              # Alignment, phylogeny, POSSVM, GeneRax pipeline
-├── generax.nf            # GeneRax-only re-run pipeline
+├── workflow/generax.nf   # GeneRax-only re-run pipeline
 ├── nextflow.config       # Default parameters and execution profiles
 ├── phylohpc              # CLI entry point (run/submit/rerun-failed/report/init)
 ├── data/
@@ -372,16 +372,16 @@ phylohpc submit step2 -p run.yaml --profile slurm,precise
 | `--ids` | `ids.txt` | File listing HG ids to process |
 | `--resources_tsv` | `resources.tsv` | Per-HG resource predictions (optional) |
 | `--run_generax` | `false` | Enable GeneRax reconciliation + second POSSVM |
-| `--OUTDIR` | `results/` | Root output directory |
-| `--REFSPECIES` | `Mmus` | Reference species prefix for POSSVM |
-| `--REFNAMES` | `data/Mmus_gene_names.csv` | Gene name table for reference species |
-| `--SPECIES_TREE` | `data/species_tree.newick` | Species tree for GeneRax |
-| `--MAFFT_OPT` | profile-dependent | MAFFT alignment options |
-| `--TREE_METHOD` | profile-dependent | `fasttree` or `iqtree2` |
-| `--IQTREE2_MODEL` | `TEST` | IQ-TREE 2 substitution model |
-| `--SUBS_MODEL` | `LG` | Substitution model for GeneRax |
-| `--MAX_SPR` | profile-dependent | GeneRax max SPR radius |
-| `--NCPU_GENERAX` | profile-dependent | CPUs per GeneRax job |
+| `--outdir` | `results/` | Root output directory |
+| `--refsps` | `Mmus` | Reference species prefix for POSSVM |
+| `--refnames` | `data/Mmus_gene_names.csv` | Gene name table for reference species |
+| `--species_tree` | `data/species_tree.newick` | Species tree for GeneRax |
+| `--mafft_opt` | profile-dependent | MAFFT alignment options |
+| `--tree_method` | profile-dependent | `fasttree` or `iqtree2` |
+| `--iqtree2_model` | `TEST` | IQ-TREE 2 substitution model |
+| `--subs_model` | `LG` | Substitution model for GeneRax |
+| `--max_spr` | profile-dependent | GeneRax max SPR radius |
+| `--ncpu_generax` | profile-dependent | CPUs per GeneRax job |
 | `--tag_prefix` | *(none)* | Prefix added to Nextflow job tags |
 
 ### Workflow logic
@@ -420,7 +420,7 @@ Use when you already have alignments and gene trees and only want to
 substitution model.
 
 ```bash
-nextflow run generax.nf \
+nextflow run workflow/generax.nf \
   -profile local,precise \
   -resume \
   --ids ids.txt \
@@ -433,7 +433,7 @@ nextflow run generax.nf \
 | `--ids` | `ids.txt` | HG ids to process |
 | `--ALIGN_DIR` | `results/align` | Directory with `*.aln.fasta` files |
 | `--TREE_DIR` | `results/gene_trees` | Directory with `*.treefile` files |
-| `--SPECIES_TREE` | *(from nextflow.config)* | Species tree for GeneRax |
+| `--species_tree` | *(required, no default)* | Species tree for GeneRax -- must be strictly binary |
 | `--REFSPECIES` | *(from nextflow.config)* | Reference species for POSSVM |
 | `--REFNAMES` | *(from nextflow.config)* | Gene name table for reference species |
 
@@ -582,11 +582,14 @@ by a profile.
 | `max_n` | `2000` | step1.nf |
 | `search_dir` | `results/search` | step1.nf |
 | `cluster_dir` | `results/clusters` | step1.nf |
-| `REFSPECIES` | `Mmus` | step2.nf, generax.nf |
-| `REFNAMES` | `data/Mmus_gene_names.csv` | step2.nf, generax.nf |
-| `SPECIES_TREE` | `data/species_tree.newick` | step2.nf, generax.nf |
-| `IQTREE2_MODEL` | `TEST` | step2.nf |
-| `SUBS_MODEL` | `LG` | step2.nf, generax.nf |
+| `refsps` | `Mmus` | step2.nf (lowercase; `REFSPECIES` is a hard error) |
+| `refnames` | `data/Mmus_gene_names.csv` | step2.nf (lowercase; `REFNAMES` is a hard error) |
+| `species_tree` | *(see per-step defaults above)* | step2.nf, generax.nf, step4.ancestry.nf (lowercase; `SPECIES_TREE` is a hard error on all three) |
+| `REFSPECIES` | `Mmus` | generax.nf, step4.ancestry.nf (still uppercase in these two) |
+| `REFNAMES` | `data/Mmus_gene_names.csv` | generax.nf, step4.ancestry.nf (still uppercase in these two) |
+| `iqtree2_model` | `TEST` | step2.nf (lowercase; `IQTREE2_MODEL` is a hard error) |
+| `subs_model` | `LG` | step2.nf (lowercase; `SUBS_MODEL` is a hard error) |
+| `SUBS_MODEL` | `LG` | generax.nf (still uppercase) |
 
 ---
 
