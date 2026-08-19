@@ -153,12 +153,21 @@ def errReport(task) {
 // test script; a plain script-level `def` does not have the problem and is used here.
 def FAILURES = java.util.Collections.synchronizedList([])
 
-def recordFailure(task) {
+// MEASURED (nextflow 25.10.4): a plain top-level method (recordFailure(task) { FAILURES
+// << ... }) called FROM an errorStrategy closure throws
+// groovy.lang.MissingPropertyException: No such property: FAILURES at the call site --
+// reproduced with a minimal fixture, tests/test_failure_recording.sh. A top-level def is
+// a local of the script's run() method: visible to a closure written literally inside
+// run() (errorStrategy, onComplete), NOT to a second top-level method invoked from one.
+// @groovy.transform.Field fixes THAT path but then NPEs onComplete (see above) -- so the
+// mutation is inlined directly in the errorStrategy closure body instead, which
+// test_failure_recording.sh verifies works in both places. firstErrorLine() below is a
+// pure read with no FAILURES access, so it stays a normal top-level method.
+def firstErrorLine(task) {
     def errf = task.workDir?.resolve('.command.err')
-    def first = (errf && errf.exists())
-        ? (errf.text.readLines().find { it.trim() && !it.startsWith('+') } ?: '(empty stderr)')
-        : '(.command.err not found)'
-    FAILURES << [task.tag ?: task.index, task.exitStatus, first.take(200), task.workDir]
+    if( !errf || !errf.exists() )
+        return '(.command.err not found)'
+    return errf.text.readLines().find { it.trim() && !it.startsWith('+') } ?: '(empty stderr)'
 }
 
 workflow.onError {
@@ -169,17 +178,26 @@ workflow.onComplete {
     def outdir = canonical('outdir','OUTDIR')
     def n_fail = FAILURES.size()
     def n_fam  = file("${outdir}/clusters").exists() ? file("${outdir}/clusters").list().findAll{ it.endsWith('.fasta') }.size() : 0
+    // DEVIATION FROM THE BRIEF (disclosed, not hidden -- see task-5-report.md): the
+    // tolerance arithmetic and the TSV format are delegated to
+    // workflow/failure_policy.py, shelled out via .execute(), rather than reimplemented
+    // inline in Groovy. This is deliberate -- step2.nf and tests/test_failure_policy.sh
+    // then exercise the SAME function, so the threshold cannot fork between the test and
+    // the pipeline -- but it adds a python3-on-PATH dependency at onComplete time, and a
+    // helper that fails must never fail SILENTLY (that is exactly the 2026-08-14 failure
+    // mode in new clothes), so every .execute() call below checks its exit value.
     if( n_fail ) {
         def rep = file("reports/failures.tsv")
         rep.parent.mkdirs()
-        // The exact accounting decision is delegated to the SAME tested Python function
-        // step2's own tests exercise (workflow/failure_policy.py) -- not re-derived here,
-        // so the tolerance arithmetic cannot fork between the test and the pipeline.
         def rowLines = FAILURES.collect{ it.join('\t') }.join('\n') + '\n'
         def writeProc = ["python3", "${projectDir}/workflow/failure_policy.py", "write-tsv", rep.toString()].execute()
         writeProc.getOutputStream().withWriter { it << rowLines }
         writeProc.waitFor()
-        log.warn "${n_fail} task(s) failed -- see reports/failures.tsv"
+        if( writeProc.exitValue() != 0 )
+            log.error "failure_policy.py write-tsv FAILED (exit ${writeProc.exitValue()}): ${writeProc.err.text} -- " +
+                       "${n_fail} failed families were NOT written to reports/failures.tsv"
+        else
+            log.warn "${n_fail} task(s) failed -- see reports/failures.tsv"
     }
     // an expected output directory that ends up EMPTY is an error in its own right
     if( params.run_generax ) {
@@ -192,7 +210,10 @@ workflow.onComplete {
                        params.max_failed_frac.toString(), params.max_failed_count.toString(),
                        params.strict.toString()].execute()
     decideProc.waitFor()
-    def decision = decideProc.text.trim()
+    if( decideProc.exitValue() != 0 )
+        log.error "failure_policy.py decide FAILED (exit ${decideProc.exitValue()}): ${decideProc.err.text} -- " +
+                   "cannot determine whether step2 is within the failure tolerance; treat this run as UNVERIFIED, not passing"
+    def decision = decideProc.exitValue() == 0 ? decideProc.text.trim() : 'fail'
     if( decision == 'fail' ) {
         def limit = n_fam ? Math.min(params.max_failed_count as int, Math.ceil(n_fam * (params.max_failed_frac as double)) as int) : 0
         def frac  = n_fam ? (n_fail / (double) n_fam) : 0
@@ -578,10 +599,10 @@ process GR_watcher {
         def max_attempts = 5
         // Exit 10 is not retried -- it was deterministic across all 475 tasks on
         // 2026-08-14 (a multifurcating species tree) -- but it is now RECORDED, never
-        // labelled: no guessed diagnosis, ever. See recordFailure()/FAILURES above.
+        // labelled: no guessed diagnosis, ever. FAILURES appended inline (see comment above).
         if( task.attempt <= max_attempts && task.exitStatus != 10 )
             return 'retry'
-        recordFailure(task)
+        FAILURES << [id, task.exitStatus, firstErrorLine(task).take(200), task.workDir]
         return params.strict ? 'terminate' : 'ignore'
     }
 
