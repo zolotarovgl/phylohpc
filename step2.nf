@@ -34,9 +34,17 @@ def canonical(String name, String upper, Object fallback = null) {
 
 params.ids           = "${projectDir}/ids.txt"
 params.resources_tsv = "${projectDir}/resources.tsv"
+// MEASURED bug, fixed here while adding preflightChecks() below (config-layer only, no
+// DAG/process change): nextflow.config's top-level params{} ALWAYS sets genefam_info =
+// "genefam.csv" (a relative path, no projectDir prefix, and the file does not exist in
+// the repo), so the `containsKey('genefam_info')` branch fired unconditionally and the
+// exists-based fallbacks below it were dead code -- family_info silently resolved to a
+// nonexistent path on every run with no --family_info override. Invisible until
+// preflightChecks() actually checks existence. Now genefam_info is honoured only if it
+// resolves to a real file.
 params.family_info   = params.containsKey('family_info')
     ? params.family_info
-    : (params.containsKey('genefam_info')
+    : (params.containsKey('genefam_info') && file(params.genefam_info.toString()).exists()
         ? params.genefam_info
         : (file("${projectDir}/genefam.csv").exists()
             ? "${projectDir}/genefam.csv"
@@ -77,6 +85,41 @@ def printResolvedConfig(String step) {
 """
 }
 printResolvedConfig('step2')
+
+// ── Pre-flight ─────────────────────────────────────────────────────────────────
+// One named-cause check before the DAG is built -- the in-workflow twin of
+// workflow/preflight.sh (kept word-for-word compatible so the same failure reads the
+// same either way). Exists because the 2026-08-14 run staged a multifurcating species
+// tree, GeneRax said only "Cannot parse species tree file", the errorStrategy
+// relabelled that as a family parsing error, and the run reported success with an
+// empty output directory.
+def species_tree_file = file(canonical('species_tree', 'SPECIES_TREE', "${projectDir}/data/species_tree.newick"))
+
+def preflightChecks(treeFile) {
+    ['infasta', 'family_info', 'refnames'].each { key ->
+        def v = params[key]
+        if( !v )
+            error "'${key}' is not set"
+        if( !file(v.toString()).exists() )
+            error "'${key}' points at a missing file: ${v}"
+    }
+
+    if( params.run_generax ) {
+        if( !treeFile.exists() )
+            error "species tree not found: ${treeFile} (--species_tree)"
+        // Delegate to the ONE tested implementation. An inline Groovy re-implementation
+        // was tried first and disagreed with it (20 vs 4 multifurcations on the tree
+        // that killed the 2026-08-14 run, 1 vs 0 on data/species_tree.newick) -- caught
+        // by running both.
+        def _cm = ["python3", "${projectDir}/workflow/count_multifurcations.py", treeFile.toString()].execute()
+        _cm.waitFor()
+        def bad = _cm.text.trim() as Integer
+        if( bad > 0 )
+            error "species tree ${treeFile} has ${bad} multifurcating node(s); GeneRax needs a strictly binary tree. Resolve it first:  python workflow/check_tree.py <in.newick> <ids> <out.newick> --random-resolve --seed 1   and pass that file with --species_tree. This is exactly what killed the 2026-08-14 run."
+        log.info "species tree: ${treeFile} -- strictly binary"
+    }
+}
+preflightChecks(species_tree_file)
 
 // ── Failure diagnostics ───────────────────────────────────────────────────────
 // Log the work dir + tail of .command.err whenever a task fails (any attempt).
@@ -591,26 +634,10 @@ process GR_watcher {
 // the family files for four days. GeneRax requires a STRICTLY BINARY species tree.
 //
 // Precedence now: --species_tree (or a params-file / YAML key) wins; SPECIES_TREE is
-// honoured only as a legacy fallback via canonical(), and the tree is checked before
-// the DAG is built. ⚠ params.species_tree has NO default in this file (the merged
-// branch renamed the old default to params.species_tree_report, which is the REPORT
-// tree, not GeneRax's) -- canonical() supplies the fallback below instead.
-def species_tree_file = file(canonical('species_tree', 'SPECIES_TREE', "${projectDir}/data/species_tree.newick"))
-
-if( params.run_generax ) {
-    if( !species_tree_file.exists() )
-        error "species tree not found: ${species_tree_file} (--species_tree)"
-    // Delegate to the ONE tested implementation. An inline Groovy re-implementation was
-    // tried first and disagreed with it (20 vs 4 multifurcations on the tree that killed
-    // the 2026-08-14 run, 1 vs 0 on data/species_tree.newick) -- caught by running both.
-    def _cm = ["python3", "${projectDir}/workflow/count_multifurcations.py", species_tree_file.toString()].execute()
-    _cm.waitFor()
-    def bad = _cm.text.trim() as Integer
-    if( bad > 0 )
-        error "species tree ${species_tree_file} has ${bad} multifurcating node(s); GeneRax needs a strictly binary tree. Resolve it first:  python workflow/check_tree.py <in.newick> <ids> <out.newick> --random-resolve --seed 1   and pass that file with --species_tree. This is exactly what killed the 2026-08-14 run."
-    log.info "species tree: ${species_tree_file} -- strictly binary"
-}
-
+// honoured only as a legacy fallback via canonical(), and the tree is checked by
+// preflightChecks() (called right after printResolvedConfig, near the top of this
+// file) before the DAG is built. species_tree_file itself is also defined up there so
+// preflightChecks() can see it; this section just wires it into a channel.
 species_tree_ch = Channel.value( species_tree_file )
 refnames_ch     = Channel.value( file(params.refnames) )
 
