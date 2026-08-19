@@ -80,15 +80,12 @@ module load OpenMPI
 
 ---
 
-Re-run search to generate domain arrangement info:
+Re-run search to generate domain arrangement info for any HG that is missing it, by
+re-running `phylohpc run step1` with `-resume` — Nextflow's own caching skips
+already-completed families:
 
 ```bash
-comm <(comm <(basename -a results/search/*genes.list | cut -f 1,2 -d . | sort | uniq) <(awk '{print $7"."$1}' genefam.csv  | sort | uniq) -12) <(basename -a results/search/*.domains_ummerged.csv  | cut -f 1,2 -d . | sort | uniq) -23  > tmp/tosearch
-
-for ID in $(cat tmp/tosearch); do
-  echo "$ID"
-  snakemake -s step1.smk --allowed-rules search --cores 22 --set-threads search=22 -- "results/search/${ID}.domains_ummerged.csv"
-done
+phylohpc run step1 -p run.yaml
 ```
 
 Download phylopics
@@ -170,32 +167,46 @@ Use `fast` for testing and small families; `precise` for publication-quality tre
 
 ---
 
+### Run
+
+```bash
+phylohpc init                          # writes a commented run.yaml
+$EDITOR run.yaml                       # point it at your data; COMMIT IT
+phylohpc submit step1 -p run.yaml      # search + cluster
+phylohpc submit step2 -p run.yaml      # align + trees + [generax] + possvm
+phylohpc rerun-failed step2 -p run.yaml
+```
+
+Or straight from GitHub, pinned to a revision — `run.yaml` plus that revision is the
+complete record of a run:
+
+```bash
+nextflow run zolotarovgl/phylohpc -r v1.0 -params-file run.yaml -profile slurm
+```
+
+`phylohpc run <step> -p run.yaml` runs the same thing in the foreground (interactive
+`salloc`/`srun`); `phylohpc submit` queues it with `sbatch`. Both go through the same
+pre-flight (`workflow/preflight.sh`) before touching Nextflow, so a bad input (e.g. a
+multifurcating species tree with `run_generax: true`) fails immediately with a named
+cause instead of burning a queued job.
+
+---
+
 ## Step 1 — PFAM search and homology group clustering
 
 Searches the input proteome with HMMER against the defined PFAM profiles, then clusters domain-containing sequences into Homology Groups (HGs) using MCL.
 
 ```bash
-WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step1/
-PROFILE=local,precise
 # Interactive
-nextflow run step1.nf \
-    -profile $PROFILE \
-    -resume \
-    -w $WORKDIR \
-    --genefam_info genefam.csv \
-    --infasta data/input.fasta \
-    -with-report reports/report.step1.html \
-    -with-trace  reports/trace.step1.txt
+phylohpc run step1 -p run.yaml --profile local,precise
 
 # SLURM
-PROFILE=slurm,fast
-sbatch --time=01:00:00 -J step1 submit_nf.sh step1.nf \
-    -resume -profile $PROFILE \
-    -w $WORKDIR \
-    --report  reports/report.step1.html \
-    --trace   reports/trace.step1.txt \
-    --timeline reports/timeline.step1.html
+phylohpc submit step1 -p run.yaml --profile slurm,fast
 ```
+
+`run.yaml` carries `infasta`, `family_info` (renamed from `genefam_info`) and every
+other canonical key — see `config/run.example.yaml`. Reports land in
+`reports/report.step1.html` / `reports/trace.step1.txt` automatically.
 
 **Outputs:** `results/search/` (domain sequences, gene lists) and `results/clusters/` (per-HG FASTA files).
 
@@ -252,31 +263,20 @@ python workflow/predict_resources.py \
 
 ```bash
 # Interactive
-WORKDIR=/no_backup/asebe/gzolotarov/nextflow/phylohpc/work_step2/
-PROFILE=local,fast
-nextflow run step2.nf \
-    -profile $PROFILE \
-    -resume -w $WORKDIR \
-    --rungenerax \
-    --family_info genefam.csv \
-    --species_tree_report data/species_tree.full.newick \
-    -with-report reports/report.step2.html \
-    -with-trace  reports/trace.step2.txt
+phylohpc run step2 -p run.yaml --profile local,fast
 
 # SLURM
-PROFILE=slurm,precise
-sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf \
-    -profile $PROFILE \
-    -resume -w $WORKDIR \
-    --run_generax \
-    --family_info genefam.csv \
-    --species_tree_report data/species_tree.full.newick \
-    --report   reports/report.step2.html \
-    --trace    reports/trace.step2.txt \
-    --timeline reports/timeline.step2.html
+phylohpc submit step2 -p run.yaml --profile slurm,precise
+
+# Only the families that failed last time (reads reports/failures.tsv)
+phylohpc rerun-failed step2 -p run.yaml
 ```
 
-`--run_generax` enables gene tree–species tree reconciliation with GeneRax before POSSVM runs. Without this flag, POSSVM runs directly on the IQ-TREE2/FastTree trees.
+`run_generax: true` in `run.yaml` enables gene tree–species tree reconciliation with
+GeneRax before POSSVM runs; `false` (or unset) runs POSSVM directly on the
+IQ-TREE2/FastTree trees. Pre-flight (`workflow/preflight.sh`, run automatically by
+every `phylohpc` mode) refuses to launch with `run_generax: true` and a
+multifurcating `species_tree` — see `workflow/check_tree.py` for how to resolve one.
 
 **Outputs:**
 - `results/align/` — trimmed alignments
@@ -292,7 +292,7 @@ sbatch -J step2 -o reports/slurm.step2.out submit_nf.sh step2.nf \
 
 The script now takes as input results dir and figures out much of the rest
 ```bash
-python workflow/report_step2.py --results_dir results --species_tree data/species_tree.full.newick --family_info genefam.csv --output report2.html
+phylohpc report --results_dir results --species_tree data/species_tree.full.newick --family_info genefam.csv --output report2.html
 ```
 
 ---
@@ -334,12 +334,6 @@ python workflow/visualize_hog_hierarchy.py \
   --output results/ancestry/hog_hierarchy.html
 
 ```
-
-```bash
-snakemake -s step4_ancestry.smk --cores 24 \
-    --config node_names="Metazoa,Bilateria,Euarchontoglires" ids=ancestry_ids.txt
-```
-
 
 ```bash
 
