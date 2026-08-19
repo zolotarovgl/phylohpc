@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Build the interactive hOG hierarchy Sankey HTML directly from Snakemake
-ancestry pipeline outputs, without requiring separate link/stats TSV files.
+Build the interactive hOG hierarchy Sankey HTML directly from the ancestry
+pipeline outputs, without requiring separate link/stats TSV files.
 
 Logic (mirrors the R explore_hOGs.R script and link_hog_levels.py):
   For each HG and each pair of consecutive nodes, count shared genes between
@@ -9,7 +9,7 @@ Logic (mirrors the R explore_hOGs.R script and link_hog_levels.py):
   Non-zero intersections become Sankey edges; per-OG stats are computed from
   the filtered (in-clade) gene sets.
 
-Expected directory layout produced by workflow/step4_ancestry.smk:
+Expected directory layout produced by workflow/step4.ancestry.nf:
   {ancestry_dir}/{node}/possvm/{hg}.ortholog_groups.csv
   {ancestry_dir}/{node}/{node}.in_species.txt
   {ancestry_dir}/{node}/{node}.pruned.tree
