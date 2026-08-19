@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# phylohpc -- the one entry point.
+#
+# usage: phylohpc {run|submit|rerun-failed|report|init} <step> -p <params.yaml> [-- extra nextflow args]
+#
+#   phylohpc run          step2 -p run.yaml      # foreground (interactive salloc/srun)
+#   phylohpc submit       step2 -p run.yaml      # sbatch
+#   phylohpc rerun-failed step2 -p run.yaml      # only the families in reports/failures.tsv
+#   phylohpc report                              # build the HTML report
+#   phylohpc init                                # write a commented run.yaml here
+#
+# Every mode runs the same pre-flight; there is no second front door that skips it.
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-1}"; }
+[[ $# -ge 1 ]] || usage
+
+CMD="$1"; shift || true
+STEP=""; PARAMS=""; PROFILE="${PROFILE:-local,precise}"; WORKDIR="${WORKDIR:-work/}"; EXTRA=()
+case "$CMD" in run|submit|rerun-failed) STEP="${1:?need a step, e.g. step2}"; shift || true ;; esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--params)  PARAMS="$2"; shift 2 ;;
+    --profile)    PROFILE="$2"; shift 2 ;;
+    -w|--workdir) WORKDIR="$2"; shift 2 ;;
+    --) shift; EXTRA+=("$@"); break ;;
+    *)  EXTRA+=("$1"); shift ;;
+  esac
+done
+
+run_nf() {
+  local step="$1"; shift
+  bash "$HERE/workflow/preflight.sh" "$PARAMS" "$step"
+  nextflow run "$HERE/$step.nf" -ansi-log false -profile "$PROFILE" -resume \
+      -w "$WORKDIR" -params-file "$PARAMS" \
+      -with-report "reports/report.$step.html" -with-trace "reports/trace.$step.txt" "$@"
+}
+
+case "$CMD" in
+  init)
+    [[ -f run.yaml ]] && { echo "run.yaml already exists here"; exit 1; }
+    cp "$HERE/config/run.example.yaml" run.yaml
+    echo "wrote run.yaml -- edit it, commit it: it is the record of what you ran"
+    ;;
+  report)
+    python3 "$HERE/workflow/report_step2.py" "${EXTRA[@]}"
+    ;;
+  run)
+    [[ -n "$PARAMS" ]] || usage
+    mkdir -p reports logs
+    run_nf "$STEP" "${EXTRA[@]}" 2>&1 | tee "logs/$STEP.$(date +%Y%m%d-%H%M%S).log"
+    ;;
+  submit)
+    [[ -n "$PARAMS" ]] || usage
+    mkdir -p reports logs
+    bash "$HERE/workflow/preflight.sh" "$PARAMS" "$STEP"   # fail before queueing
+    sbatch --job-name "$STEP" --output "reports/slurm.$STEP.out" \
+           --wrap "cd $PWD && $HERE/phylohpc run $STEP -p $PARAMS --profile ${PROFILE/local/slurm} -w $WORKDIR ${EXTRA[*]:-}"
+    ;;
+  rerun-failed)
+    [[ -f reports/failures.tsv ]] || { echo "no reports/failures.tsv here -- run the step first"; exit 1; }
+    mkdir -p reports
+    tail -n +2 reports/failures.tsv | cut -f1 | sort -u > reports/rerun.ids
+    echo "re-running $(wc -l < reports/rerun.ids) failed families (reports/rerun.ids)"
+    run_nf "$STEP" --ids reports/rerun.ids "${EXTRA[@]}"
+    ;;
+  *) echo "unknown subcommand: $CMD"; usage ;;
+esac
