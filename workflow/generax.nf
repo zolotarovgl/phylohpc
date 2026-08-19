@@ -5,8 +5,48 @@ params.ALIGN_DIR     = "${projectDir}/../results/align"
 params.TREE_DIR      = "${projectDir}/../results/gene_trees"
 params.OUTDIR        = "${projectDir}/../results"
 
+// ── species_tree resolution ─────────────────────────────────────────────────
+// CRITICAL 4 (2026-08-19 whole-branch review): this file is a second, independent
+// GeneRax implementation with its own workflow{} block (a documented live entry point,
+// docs/manual.md:416-436) and it was still reading params.SPECIES_TREE directly --
+// exactly the parameter that caused the 2026-08-14 incident in step2.nf, and since
+// nextflow.config no longer defaults ANY of the uppercase keys (round 1 of this
+// refactor), that channel now resolves a NULL tree here with no local default either.
+// Same resolution + guard as step2.nf: canonical() makes the uppercase key a hard
+// error rather than a silent null, and the binary-tree check runs before the DAG is
+// built. Reuses the SAME count_multifurcations.py and message template step2.nf uses
+// -- not a third copy of either.
+def canonical(String name, String upper, Object fallback = null) {
+    if( params.containsKey(upper) )
+        error "Parameter '${upper}' was renamed to '${name}'. Rename it in your params file / profile and re-run."
+    if( params.containsKey(name) && params[name] != null )
+        return params[name]
+    return fallback
+}
+def _species_tree_val = canonical('species_tree', 'SPECIES_TREE')
+if( !_species_tree_val )
+    error "'species_tree' is not set -- pass --species_tree <path> (no default in this file, unlike step2.nf)"
+def species_tree_file = file(_species_tree_val)
+if( !species_tree_file.exists() )
+    error "species tree not found: ${species_tree_file} -- pass --species_tree <path>"
+def _cm = ["python3", "${projectDir}/count_multifurcations.py", species_tree_file.toString()].execute()
+_cm.waitFor()
+def _bad = _cm.text.trim() as Integer
+if( _bad > 0 ) {
+    def _msgTpl = file("${projectDir}/messages/species_tree_multifurcating.txt").text
+    error _msgTpl.replace('__TREE__', species_tree_file.toString()).replace('__N__', _bad.toString()).trim()
+}
+// REFSPECIES/REFNAMES are left uppercase in this file deliberately (out of scope for
+// this fix -- see the CRITICAL 4 comment above) but must NOT silently resolve null now
+// that nextflow.config no longer defaults them either: fail loudly rather than let
+// PVM/GR_watcher fail downstream with an opaque error far from the real cause.
+if( !params.REFSPECIES )
+    error "'REFSPECIES' is not set -- pass --REFSPECIES <code>, e.g. Mmus"
+if( !params.REFNAMES || !file(params.REFNAMES.toString()).exists() )
+    error "'REFNAMES' points at a missing file: ${params.REFNAMES} -- pass --REFNAMES <path>"
+log.info "species tree: ${species_tree_file} -- strictly binary"
 
-species_tree_ch = Channel.fromPath(params.SPECIES_TREE)
+species_tree_ch = Channel.fromPath(species_tree_file)
 // -----------------------------
 // Load per-family resources
 // -----------------------------

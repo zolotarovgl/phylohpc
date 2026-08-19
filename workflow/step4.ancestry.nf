@@ -5,10 +5,34 @@ nextflow.enable.dsl=2
 params.node_names      = null
 params.ids             = "${projectDir}/../ids.txt"
 params.OUTDIR          = "${projectDir}/../results"
-params.SPECIES_TREE    = "${projectDir}/../data/species_tree.full.newick"
 params.REFSPECIES      = "Mmus"
 params.REFNAMES        = "${projectDir}/../data/Mmus_gene_names.csv"
 params.gene_trees_dir  = "${params.OUTDIR}/gene_trees"
+
+// ── species_tree resolution ─────────────────────────────────────────────────
+// CRITICAL 4 (2026-08-19 whole-branch review): this file used to default
+// params.SPECIES_TREE (uppercase) itself, so a user following the docs and passing the
+// documented --species_tree (lowercase) flag was silently ignored -- the run just used
+// the built-in default tree instead, a fresh instance of the SAME class of bug as the
+// 2026-08-14 incident (documented flag not reaching the parameter it names), just
+// silently-wrong instead of null. Same NAME resolution as step2.nf: canonical() makes the
+// uppercase key a hard error. Deliberately NOT the binary-tree gate step2.nf/generax.nf
+// also carry -- that requirement is GeneRax's, not ancestry's; this file's own documented
+// default, data/species_tree.full.newick, has 4 multifurcating nodes and step4 runs fine
+// on it (clade extraction/pruning, no GeneRax reconciliation here). Adding that gate was
+// tried and immediately broken the documented quick-start (docs/ancestry.md) -- caught by
+// running it, not assumed.
+def canonical(String name, String upper, Object fallback = null) {
+    if( params.containsKey(upper) )
+        error "Parameter '${upper}' was renamed to '${name}'. Rename it in your params file / profile and re-run."
+    if( params.containsKey(name) && params[name] != null )
+        return params[name]
+    return fallback
+}
+def species_tree_file = file(canonical('species_tree', 'SPECIES_TREE', "${projectDir}/../data/species_tree.full.newick"))
+if( !species_tree_file.exists() )
+    error "species tree not found: ${species_tree_file} -- pass --species_tree <path>"
+log.info "species tree: ${species_tree_file}"
 
 // ── Failure diagnostics ───────────────────────────────────────────────────────
 // Log the work dir + tail of .command.err whenever a task fails (any attempt).
@@ -79,7 +103,7 @@ hg_ids_ch = Channel
     .filter { it }
 
 // Static files as value channels
-species_tree_val = Channel.value( file(params.SPECIES_TREE) )
+species_tree_val = Channel.value( species_tree_file )
 refnames_val     = Channel.value( file(params.REFNAMES) )
 
 // ── Process 1 — Extract clade species lists and pruned subtree ────────────────
