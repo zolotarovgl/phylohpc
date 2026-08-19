@@ -62,6 +62,9 @@ params.iqtree2_model  = canonical('iqtree2_model', 'IQTREE2_MODEL', 'TEST')
 params.subs_model     = canonical('subs_model', 'SUBS_MODEL', 'LG')
 params.max_spr        = canonical('max_spr', 'MAX_SPR', 3)
 params.ncpu_generax   = canonical('ncpu_generax', 'NCPU_GENERAX', 2)
+params.strict           = params.containsKey('strict') ? params.strict : false
+params.max_failed_frac  = params.containsKey('max_failed_frac')  ? params.max_failed_frac  : 0.05
+params.max_failed_count = params.containsKey('max_failed_count') ? params.max_failed_count : 20
 
 
 params.tag_prefix = ''
@@ -140,12 +143,65 @@ def errReport(task) {
              "  workDir: ${task.workDir}\n  ${tail}"
 }
 
+// Failure accounting. A task NEVER gets a guessed diagnosis: errReport() already prints
+// the tail of its own .command.err, and every failure is recorded here so the run cannot
+// end green with an empty output directory (2026-08-14: 475 of 475 GeneRax tasks failed
+// and the run reported success).
+// MEASURED (nextflow 25.10.4): @groovy.transform.Field on this list, as given in the
+// task brief, throws a NullPointerException from workflow.onComplete ("Cannot invoke
+// method size() on null object") -- reproduced in isolation with a two-line onComplete
+// test script; a plain script-level `def` does not have the problem and is used here.
+def FAILURES = java.util.Collections.synchronizedList([])
+
+def recordFailure(task) {
+    def errf = task.workDir?.resolve('.command.err')
+    def first = (errf && errf.exists())
+        ? (errf.text.readLines().find { it.trim() && !it.startsWith('+') } ?: '(empty stderr)')
+        : '(.command.err not found)'
+    FAILURES << [task.tag ?: task.index, task.exitStatus, first.take(200), task.workDir]
+}
+
 workflow.onError {
     log.error "Pipeline stopped: ${workflow.errorMessage ?: 'see the failed task above'}"
 }
 
 workflow.onComplete {
-    log.info "step2 ${workflow.success ? 'completed OK' : 'FAILED'} after ${workflow.duration}"
+    def outdir = canonical('outdir','OUTDIR')
+    def n_fail = FAILURES.size()
+    def n_fam  = file("${outdir}/clusters").exists() ? file("${outdir}/clusters").list().findAll{ it.endsWith('.fasta') }.size() : 0
+    if( n_fail ) {
+        def rep = file("reports/failures.tsv")
+        rep.parent.mkdirs()
+        // The exact accounting decision is delegated to the SAME tested Python function
+        // step2's own tests exercise (workflow/failure_policy.py) -- not re-derived here,
+        // so the tolerance arithmetic cannot fork between the test and the pipeline.
+        def rowLines = FAILURES.collect{ it.join('\t') }.join('\n') + '\n'
+        def writeProc = ["python3", "${projectDir}/workflow/failure_policy.py", "write-tsv", rep.toString()].execute()
+        writeProc.getOutputStream().withWriter { it << rowLines }
+        writeProc.waitFor()
+        log.warn "${n_fail} task(s) failed -- see reports/failures.tsv"
+    }
+    // an expected output directory that ends up EMPTY is an error in its own right
+    if( params.run_generax ) {
+        def gr = file("${outdir}/generax")
+        if( !gr.exists() || gr.list().size() == 0 )
+            log.error "run_generax was on but ${outdir}/generax is EMPTY -- treat this run as FAILED"
+    }
+    def decideProc = ["python3", "${projectDir}/workflow/failure_policy.py", "decide",
+                       n_fail.toString(), n_fam.toString(),
+                       params.max_failed_frac.toString(), params.max_failed_count.toString(),
+                       params.strict.toString()].execute()
+    decideProc.waitFor()
+    def decision = decideProc.text.trim()
+    if( decision == 'fail' ) {
+        def limit = n_fam ? Math.min(params.max_failed_count as int, Math.ceil(n_fam * (params.max_failed_frac as double)) as int) : 0
+        def frac  = n_fam ? (n_fail / (double) n_fam) : 0
+        log.error "step2 FAILED: ${n_fail} of ${n_fam} families failed (${String.format('%.1f', frac*100)}%)" +
+                   (params.strict ? " -- --strict is set" : ", over the tolerance of ${limit}")
+    }
+    else {
+        log.info "step2 ${workflow.success ? 'completed OK' : 'FAILED'} after ${workflow.duration}; ${n_fail} failed family(ies) within tolerance"
+    }
     if( !workflow.success )
         log.info "List failed tasks:  nextflow log ${workflow.runName} -f name,status,exit,workdir -F \"status=='FAILED'\""
 }
@@ -520,23 +576,13 @@ process GR_watcher {
     errorStrategy {
         errReport(task)
         def max_attempts = 5
-        if( task.exitStatus == 10 ) {
-            log.warn "GeneRax | ${id} | Exit 10 | Family parsing error — ignored"
-            return 'ignore'
-        }
-        else if( task.attempt <= max_attempts ) {
-            if( task.exitStatus == 137 ) {
-                log.warn "GeneRax | ${id} | Exit 137 | Likely OOM — retrying (attempt ${task.attempt}/${max_attempts})"
-            }
-            else {
-                log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retrying (attempt ${task.attempt}/${max_attempts})"
-            }
+        // Exit 10 is not retried -- it was deterministic across all 475 tasks on
+        // 2026-08-14 (a multifurcating species tree) -- but it is now RECORDED, never
+        // labelled: no guessed diagnosis, ever. See recordFailure()/FAILURES above.
+        if( task.attempt <= max_attempts && task.exitStatus != 10 )
             return 'retry'
-        }
-        else {
-            log.warn "GeneRax | ${id} | Exit ${task.exitStatus} | Retries exhausted — ignored"
-            return 'ignore'
-        }
+        recordFailure(task)
+        return params.strict ? 'terminate' : 'ignore'
     }
 
     maxRetries 5
@@ -639,8 +685,9 @@ process GR_watcher {
 // used by the ancestral step), therefore had NO EFFECT ON GENERAX. On 2026-08-14 that
 // silently handed GeneRax the UNRESOLVED tree and all 475 GR_watcher tasks died with
 //     [Error] Cannot parse species tree file (species_tree.newick)
-// which the errorStrategy relabelled "Family parsing error", sending the diagnosis at
-// the family files for four days. GeneRax requires a STRICTLY BINARY species tree.
+// which the errorStrategy back then relabelled with an invented cause, sending the
+// diagnosis at the family files for four days. GeneRax requires a STRICTLY BINARY
+// species tree.
 //
 // Precedence now: --species_tree (or a params-file / YAML key) wins; SPECIES_TREE is
 // honoured only as a legacy fallback via canonical(), and the tree is checked by
