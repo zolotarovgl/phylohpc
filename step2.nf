@@ -88,11 +88,17 @@ printResolvedConfig('step2')
 
 // ── Pre-flight ─────────────────────────────────────────────────────────────────
 // One named-cause check before the DAG is built -- the in-workflow twin of
-// workflow/preflight.sh (kept word-for-word compatible so the same failure reads the
-// same either way). Exists because the 2026-08-14 run staged a multifurcating species
-// tree, GeneRax said only "Cannot parse species tree file", the errorStrategy
-// relabelled that as a family parsing error, and the run reported success with an
-// empty output directory.
+// workflow/preflight.sh. The multifurcating-tree message is NOT hand-duplicated here:
+// both this function and preflight.sh read the SAME template,
+// workflow/messages/species_tree_multifurcating.txt, and substitute __TREE__/__N__ the
+// same way, so the failure reads identically whichever way the pipeline was launched.
+// (Round 2, 2026-08-19: an earlier version of this comment claimed the two messages
+// were "kept word-for-word compatible" while in fact each had its own hand-written
+// copy of the sentence, and they had already drifted -- caught in review, not by any
+// test, which is why tests/test_preflight.sh now diffs the two outputs directly.)
+// Exists because the 2026-08-14 run staged a multifurcating species tree, GeneRax said
+// only "Cannot parse species tree file", the errorStrategy relabelled that as a family
+// parsing error, and the run reported success with an empty output directory.
 def species_tree_file = file(canonical('species_tree', 'SPECIES_TREE', "${projectDir}/data/species_tree.newick"))
 
 def preflightChecks(treeFile) {
@@ -114,8 +120,11 @@ def preflightChecks(treeFile) {
         def _cm = ["python3", "${projectDir}/workflow/count_multifurcations.py", treeFile.toString()].execute()
         _cm.waitFor()
         def bad = _cm.text.trim() as Integer
-        if( bad > 0 )
-            error "species tree ${treeFile} has ${bad} multifurcating node(s); GeneRax needs a strictly binary tree. Resolve it first:  python workflow/check_tree.py <in.newick> <ids> <out.newick> --random-resolve --seed 1   and pass that file with --species_tree. This is exactly what killed the 2026-08-14 run."
+        if( bad > 0 ) {
+            def msgTpl = file("${projectDir}/workflow/messages/species_tree_multifurcating.txt").text
+            def msg = msgTpl.replace('__TREE__', treeFile.toString()).replace('__N__', bad.toString()).trim()
+            error msg
+        }
         log.info "species tree: ${treeFile} -- strictly binary"
     }
 }

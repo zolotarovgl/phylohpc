@@ -1,0 +1,1 @@
+species tree __TREE__ has __N__ multifurcating node(s); GeneRax needs a strictly binary tree. Resolve it first:  python workflow/check_tree.py __TREE__ <ids> <out.newick> --random-resolve --seed 1   then set species_tree to that file (pass it with --species_tree). This is exactly what killed the 2026-08-14 run.

@@ -32,9 +32,14 @@ if [[ "$generax" == "True" || "$generax" == "true" || "$generax" == "1" ]]; then
   if [[ -e "$tree" ]]; then
     n=$(python3 workflow/count_multifurcations.py "$tree")
     if [[ "$n" != "0" ]]; then
-      err "species tree '$tree' has $n multifurcating node(s); GeneRax needs a strictly binary tree.
-  Resolve it:  python workflow/check_tree.py '$tree' <ids> <out.newick> --random-resolve --seed 1
-  then set species_tree to that file. (This is what killed the 2026-08-14 run.)"
+      # ONE message, defined in workflow/messages/species_tree_multifurcating.txt and
+      # substituted here -- step2.nf substitutes the SAME file the SAME way, so the
+      # failure reads identically whichever way the pipeline was launched. Do not
+      # hand-maintain this sentence in two places again (see the 2026-08-19 review that
+      # caught the two copies drifting).
+      msg=$(sed -e "s|__TREE__|$tree|g" -e "s|__N__|$n|g" \
+                "workflow/messages/species_tree_multifurcating.txt")
+      err "$msg"
     else
       say "species tree: $tree (strictly binary)"
     fi
