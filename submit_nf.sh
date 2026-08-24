@@ -14,6 +14,11 @@ trap _term TERM
 
 module load Java
 
+# Pin the engine. The 2026-08-16 run used 25.04.2; nextflow then self-updated to 26.04.6,
+# which changed config validation and put the resume cache for 1455 ALN / 476 PHY / 473
+# PVM_PREV tasks at risk. Override with NXF_VER=... on the command line if you mean to.
+export NXF_VER="${NXF_VER:-25.04.2}"
+
 mkdir -p reports
 
 NF_EXTRA_OPTS=()
