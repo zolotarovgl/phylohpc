@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #SBATCH --no-requeue
-#SBATCH --mem=1GB
+# 1GB was not enough for the driver: the 2026-08-24 run was OOM-killed at 20:02:34 with
+# ~1500 families in flight ("Detected 1 oom_kill event in StepId=27863248.batch"), taking
+# the whole workflow down mid-GeneRax.
+#SBATCH --mem=8GB
 #SBATCH -p genoa64
 #SBATCH --qos=pipelines
 
@@ -18,6 +21,22 @@ module load Java
 # which changed config validation and put the resume cache for 1455 ALN / 476 PHY / 473
 # PVM_PREV tasks at risk. Override with NXF_VER=... on the command line if you mean to.
 export NXF_VER="${NXF_VER:-25.04.2}"
+
+# Keep the JVM inside the cgroup above, so a heap overrun surfaces as a Java OOM we can
+# read rather than a silent SIGKILL of the whole driver.
+export NXF_OPTS="${NXF_OPTS:--Xms1g -Xmx6g}"
+
+# iqtree2 is NOT in the `tfs` conda env (which supplies generax, mpirun and mafft), so every
+# PHY/ALN task in the 2026-08-24 run died instantly with "iqtree2 not found in PATH" -- 1308
+# PHY and 159 ALN failures. No single env has all three; `phylo` carries iqtree2. Appended,
+# not prepended, so tfs keeps priority for everything it does provide.
+_IQTREE_ENV="${IQTREE_ENV:-$HOME/miniconda3/envs/phylo/bin}"
+if [[ -x "$_IQTREE_ENV/iqtree2" ]]; then
+    export PATH="$PATH:$_IQTREE_ENV"
+else
+    echo "WARNING: no iqtree2 at $_IQTREE_ENV -- PHY will fail" >&2
+fi
+command -v iqtree2 >/dev/null || echo "WARNING: iqtree2 still not on PATH" >&2
 
 mkdir -p reports
 
