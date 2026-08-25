@@ -26,17 +26,26 @@ export NXF_VER="${NXF_VER:-25.04.2}"
 # read rather than a silent SIGKILL of the whole driver.
 export NXF_OPTS="${NXF_OPTS:--Xms1g -Xmx6g}"
 
-# iqtree2 is NOT in the `tfs` conda env (which supplies generax, mpirun and mafft), so every
-# PHY/ALN task in the 2026-08-24 run died instantly with "iqtree2 not found in PATH" -- 1308
-# PHY and 159 ALN failures. No single env has all three; `phylo` carries iqtree2. Appended,
-# not prepended, so tfs keeps priority for everything it does provide.
-_IQTREE_ENV="${IQTREE_ENV:-$HOME/miniconda3/envs/phylo/bin}"
-if [[ -x "$_IQTREE_ENV/iqtree2" ]]; then
-    export PATH="$PATH:$_IQTREE_ENV"
-else
-    echo "WARNING: no iqtree2 at $_IQTREE_ENV -- PHY will fail" >&2
+# Pre-flight the environment. The 2026-08-24 run was launched from the `tfs` conda env,
+# which has generax + mpirun but NO iqtree2 -- so 1308 PHY and 159 ALN tasks died within
+# milliseconds on "iqtree2 not found in PATH" while GeneRax ran happily, and the workflow
+# reported nothing wrong. Refuse to start rather than burn a night on that again.
+#
+# The intended environment (workflow/environment.yaml) is:
+#     conda activate phylo     # iqtree2, generax, mafft, hmmer, diamond, mcl, POSSVM deps
+#     module load OpenMPI      # phylo's openmpi record is the conda-forge EXTERNAL stub
+#                              # (0 files) -- mpirun is expected to come from the cluster
+_missing=()
+for _t in iqtree2 mafft generax mpirun; do
+    command -v "$_t" >/dev/null 2>&1 || _missing+=("$_t")
+done
+if (( ${#_missing[@]} )); then
+    echo "ERROR: not on PATH: ${_missing[*]}" >&2
+    echo "       run 'conda activate phylo' and 'module load OpenMPI' before submitting;" >&2
+    echo "       see workflow/environment.yaml. Set SKIP_ENV_CHECK=1 to override." >&2
+    [[ -n "${SKIP_ENV_CHECK:-}" ]] || exit 78
 fi
-command -v iqtree2 >/dev/null || echo "WARNING: iqtree2 still not on PATH" >&2
+echo "env: iqtree2=$(command -v iqtree2) generax=$(command -v generax) mpirun=$(command -v mpirun)"
 
 mkdir -p reports
 
