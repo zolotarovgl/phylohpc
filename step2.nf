@@ -104,6 +104,21 @@ process ALN {
 
     cpus 4
 
+    // ALN had NO memory directive, so it took the profile default of 4 GB and every one of
+    // its 10 retries asked for the same 4 GB -- ten identical OOM kills. Measured 2026-08-25:
+    // mafft L-INS-i on adh.fibronectin.HG9 (153 seqs) died as
+    //   mafft: line 2842: ... tbfast ... Killed
+    // i.e. SIGKILL, not a mafft error. Ladder the memory the way PHY and GR_watcher already
+    // do. Attempt 1 stays at 4 GB so nothing that works today changes; the floor is 4 GB
+    // because resources.tsv's aln_mem is often SMALLER (800 MB - 2.1 GB) and would make
+    // the first attempt worse.
+    memory {
+        def base = res[id]?.aln_mem
+        base = (base && base > 4.GB) ? base : 4.GB
+        def scaled = base * Math.pow(2, task.attempt-1)
+        return scaled > 64.GB ? 64.GB : scaled
+    }
+
     errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
     maxRetries 10
     maxErrors -1
