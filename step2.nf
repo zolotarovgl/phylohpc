@@ -18,6 +18,9 @@ params.refsps        = params.containsKey('refsps')
     ? params.refsps
     : (params.containsKey('REFSPECIES') ? params.REFSPECIES : null)
 params.run_generax   = params.containsKey('run_generax') ? params.run_generax : false
+// Compute SH-aLRT support on the reconciled topology before POSSVM (see process GXSUP).
+// Set --gxsup false to hand POSSVM the raw GeneRax tree, whose "support" is a constant 1.0.
+params.gxsup         = params.containsKey('gxsup') ? params.gxsup : true
 params.OUTDIR        = params.containsKey('OUTDIR')
     ? params.OUTDIR
     : (params.containsKey('outdir') ? params.outdir : "${projectDir}/results")
@@ -403,7 +406,13 @@ process GR_watcher {
           path("${id}.generax.tree"),
           path("${id}.generax.log"),
           path("${id}.progress.tree"),
-          path(aln)
+          path(aln), emit: trees
+    // GeneRax writes a reconciliations/ directory next to the gene tree holding
+    // _orthogroups.txt, _orthogroups_all.txt, _events.newick, _reconciliated.nhx/.xml,
+    // _transfers.txt and the event counts. None of it was declared, so all of it died with
+    // the work directory. Emitted as its own channel, and OPTIONAL because the
+    // "existing result" branch below re-uses a published tree and never re-runs GeneRax.
+    path("${id}.reconciliations", optional: true), emit: recs
 
     script:
 
@@ -474,9 +483,77 @@ process GR_watcher {
             cp ${id}_generax/results/${id}/geneTree.newick ${id}.progress.tree || true
         fi
 
+        # Keep GeneRax's reconciliation products (orthogroups, events, transfers). They are
+        # written whether or not we ask, and were being discarded with the work directory.
+        if [[ -d ${id}_generax/reconciliations ]]; then
+            cp -r ${id}_generax/reconciliations ${id}.reconciliations || true
+        fi
+
         exit \$EXIT_CODE
         """
     }
+}
+
+// -----------------------------
+// Branch support for the reconciled trees
+// -----------------------------
+// GeneRax computes no branch support. Its geneTree.newick carries a constant placeholder
+// (one empty label, one "0", N "1"s -- identical across families of every size), which
+// POSSVM reads as support 1.0, so --min_support_transfer was being compared against a
+// constant and the label-transfer step was silently disabled on every reconciled family.
+//
+// The original UFBoot values cannot be reused: PHY runs `-bb 1000` without --wbtl, so no
+// replicate trees were written, and GeneRax moves a lot of the topology anyway (measured
+// over 15 random families: median 68.7% of splits shared, range 37.5-86.7%).
+//
+// So compute support FOR the reconciled topology instead: fix the GeneRax tree, re-optimise
+// branch lengths on the same alignment under the family's own best-fit model, and run
+// SH-aLRT. Verified 2026-08-27 on 3 families -- with --keep-ident the output topology is
+// identical to GeneRax's (RF 0/88, 0/88, 0/204); without it, IQ-TREE drops and reinserts
+// duplicate sequences and moves up to 5 of 44 splits. ~7 s per family at 2 threads.
+// Median SH-aLRT 62.8-78.3, and 52-69% of nodes clear 50, so the existing threshold works.
+process GXSUP {
+
+    tag "${id}"
+
+    publishDir "${params.OUTDIR}/generax_support", mode: 'copy'
+
+    cpus 2
+    memory { 2.GB * task.attempt }
+    time   { 30.min * task.attempt }
+
+    errorStrategy { task.attempt <= 3 ? 'retry' : 'ignore' }
+    maxRetries 3
+
+    input:
+    tuple val(id), path(gtree), path(aln), path(phylog)
+
+    output:
+    tuple val(id), path("${id}.generax.support.tree"), path(aln)
+
+    script:
+    """
+    set -euo pipefail
+    export PYTHONNOUSERSITE=1
+
+    # Reuse the model PHY selected for this family; they differ per family
+    # (LG+I+G4, WAG+F+G4, JTT+G4, ...), so a single hard-coded model would be wrong.
+    MODEL=\$(sed -n 's/.*Best-fit model: \\([^ ]*\\).*/\\1/p' ${phylog} | head -1)
+    if [[ -z "\$MODEL" ]]; then MODEL="${params.SUBS_MODEL}+G4"; fi
+    echo "${id}: fixed-topology support under \$MODEL"
+
+    iqtree2 -s ${aln} -te ${gtree} -m "\$MODEL" \\
+        --alrt 1000 --keep-ident -nt ${task.cpus} \\
+        -pre ${id}.gxsup --quiet -redo
+
+    # --alrt writes TWO values per node, "<parametric aLRT>/<SH-aLRT>"; POSSVM needs one
+    # float, so keep the second. (Checked against a --alrt 0 run, which emits the
+    # parametric value in the first field.)
+    sed -E 's/\\)([0-9.]*)\\/([0-9.]*):/)\\2:/g' \\
+        ${id}.gxsup.treefile > ${id}.generax.support.tree
+
+    grep -q ';' ${id}.generax.support.tree || { echo "empty support tree" >&2; exit 1; }
+    """
 }
 
 //workflow {
@@ -507,14 +584,29 @@ workflow {
             }
             .combine(species_tree_ch)
 
-        gr_out = gr_input | GR_watcher
+        GR_watcher(gr_input)
+        gr_out = GR_watcher.out.trees
+
+
+        // ---------- Branch support for the reconciled trees ----------
+        // GeneRax emits no support (see the GXSUP comment). Off => PVM reads the raw
+        // GeneRax tree and every orthogroup_support is the placeholder 1.0.
+        gr_trees = gr_out.map { id, generax_tree, log, progress, aln ->
+            tuple(id, generax_tree, aln)
+        }
+
+        if (params.gxsup) {
+            pvm_trees = GXSUP(
+                gr_trees.join( phy_out.map { id, tree, aln, log -> tuple(id, log) } )
+            )
+        }
+        else {
+            pvm_trees = gr_trees
+        }
 
 
         // ---------- PVM on GeneRax trees ----------
-        pvm_out = gr_out
-            .map { id, generax_tree, log, progress, aln ->
-                tuple(id, generax_tree, aln)
-            }
+        pvm_out = pvm_trees
             .combine(refnames_ch)
             | PVM
 
