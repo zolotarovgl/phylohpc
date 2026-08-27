@@ -412,7 +412,7 @@ process GR_watcher {
     // _transfers.txt and the event counts. None of it was declared, so all of it died with
     // the work directory. Emitted as its own channel, and OPTIONAL because the
     // "existing result" branch below re-uses a published tree and never re-runs GeneRax.
-    path("${id}.reconciliations", optional: true), emit: recs
+    path("${id}.reconciliations"), optional: true, emit: recs
 
     script:
 
@@ -516,7 +516,12 @@ process GXSUP {
 
     tag "${id}"
 
-    publishDir "${params.OUTDIR}/generax_support", mode: 'copy'
+    // pattern: the alignment is in the output tuple because PVM needs it downstream, but it
+    // must not be published -- without this every alignment is duplicated into
+    // generax_support/ (~1500 files, ~200 MB of copies). The .iqtree report is kept because
+    // it is the only record of the model and likelihood the support was computed under.
+    publishDir "${params.OUTDIR}/generax_support", mode: 'copy',
+               pattern: "*.{generax.support.tree,gxsup.iqtree}"
 
     cpus 2
     memory { 2.GB * task.attempt }
@@ -529,7 +534,8 @@ process GXSUP {
     tuple val(id), path(gtree), path(aln), path(phylog)
 
     output:
-    tuple val(id), path("${id}.generax.support.tree"), path(aln)
+    tuple val(id), path("${id}.generax.support.tree"), path(aln), emit: trees
+    path("${id}.gxsup.iqtree"), emit: report
 
     script:
     """
@@ -596,9 +602,8 @@ workflow {
         }
 
         if (params.gxsup) {
-            pvm_trees = GXSUP(
-                gr_trees.join( phy_out.map { id, tree, aln, log -> tuple(id, log) } )
-            )
+            GXSUP( gr_trees.join( phy_out.map { id, tree, aln, log -> tuple(id, log) } ) )
+            pvm_trees = GXSUP.out.trees
         }
         else {
             pvm_trees = gr_trees
