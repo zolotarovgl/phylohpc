@@ -88,14 +88,19 @@ if( params.ids && file(params.ids).exists() ) {
         .map { it.trim() }
         .filter { it }
         .map { id -> tuple(id, file("${params.OUTDIR}/clusters/${id}.fasta")) }
-        .filter { id, fasta -> countFastaSeqs(fasta) >= 2 }
+        // nseq is carried so ALN/PHY can size resources by family, in the process body or
+        // from a -c config (conf/resources_bvw.config). countFastaSeqs is called once here
+        // rather than once per directive evaluation.
+        .map { id, fasta -> tuple(id, fasta, countFastaSeqs(fasta)) }
+        .filter { id, fasta, nseq -> nseq >= 2 }
         .set { hg_fastas }
 }
 else {
     Channel
         .fromPath("${params.OUTDIR}/clusters/*.fasta")
         .map { fasta -> tuple(fasta.baseName, fasta) }
-        .filter { id, fasta -> countFastaSeqs(fasta) >= 2 }
+        .map { id, fasta -> tuple(id, fasta, countFastaSeqs(fasta)) }
+        .filter { id, fasta, nseq -> nseq >= 2 }
         .set { hg_fastas }
 }
 
@@ -127,10 +132,10 @@ process ALN {
     maxErrors -1
 
     input:
-    tuple val(id), path(fasta)
+    tuple val(id), path(fasta), val(nseq)
 
     output:
-    tuple val(id), path("${id}.aln.fasta")
+    tuple val(id), path("${id}.aln.fasta"), val(nseq)
 
     script:
     def existing = file("${params.OUTDIR}/align/${id}.aln.fasta")
@@ -182,7 +187,7 @@ process PHY {
     maxErrors -1
 
     input:
-    tuple val(id), path(aln)
+    tuple val(id), path(aln), val(nseq)
 
     output:
     tuple val(id), path("${id}.treefile"), path(aln), path("${id}.log"), emit: trees
