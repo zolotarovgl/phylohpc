@@ -182,8 +182,20 @@ process PHY {
         return base + (task.attempt - 1) * 6.h
     }
 
-    errorStrategy = { task.attempt <= 10 ? 'retry' : 'ignore' }
-    maxRetries 10
+    // --signal=B:USR2@180 asks SLURM to warn the batch shell 3 min before the wall-clock
+    // kill. That window is what lets the checkpoint stash in the script body run; without
+    // it the task is killed outright and the IQ-TREE2 checkpoint dies with the work dir.
+    // nseq is carried on the channel so the qos can follow family size.
+    clusterOptions {
+        def qos = (nseq > 500 || task.attempt > 1) ? '--qos=long' : '--qos=normal'
+        return "${qos} --signal=B:USR2@180"
+    }
+
+    // maxRetries must EXCEED the closure's threshold: if the closure still returns 'retry'
+    // on the attempt where maxRetries is reached, the 'ignore' branch is never evaluated
+    // and the whole run terminates instead of skipping the family. (BvW)
+    errorStrategy { task.attempt <= 10 ? 'retry' : 'ignore' }
+    maxRetries 11
     maxErrors -1
 
     input:
@@ -195,8 +207,8 @@ process PHY {
 
     script:
 
-    def existing     = file("${params.OUTDIR}/gene_trees/${id}.treefile")
-    def existing_ckp = file("${params.OUTDIR}/gene_trees/${id}.ckp.gz")
+    def existing = file("${params.OUTDIR}/gene_trees/${id}.treefile")
+    def ckp_dir  = "${params.OUTDIR}/phy_ckp"
 
     if (existing.exists()) {
         """
@@ -209,30 +221,63 @@ process PHY {
         fi
         """
     }
-    else if (params.TREE_METHOD == "iqtree2" && existing_ckp.exists()) {
+    else {
         """
-        echo "Resuming IQ-TREE2 from checkpoint for ${id}"
-        cp ${existing_ckp} ${id}.ckp.gz
-        python ${projectDir}/phylogeny/main.py phylogeny \
-            -f ${aln} \
-            --outprefix ${id} \
-            -c ${task.cpus} \
-            --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL} > ${id}.log 2>&1
-        """
-    }
-	    else {
-	        """
-	        export PYTHONNOUSERSITE=1
-	        python ${projectDir}/phylogeny/main.py phylogeny \
-	            -f ${aln} \
-	            --outprefix ${id} \
-            -c ${task.cpus} \
-            --method ${params.TREE_METHOD} \
-            --iqtree2_model ${params.IQTREE2_MODEL} > ${id}.log 2>&1
+        export PYTHONNOUSERSITE=1
+
+        CKP_DIR="${ckp_dir}"
+        CKP_STASH="\$CKP_DIR/${id}.ckp.gz"
+        mkdir -p "\$CKP_DIR"
+
+        # A task that times out or OOMs never reaches publishDir, so its IQ-TREE2
+        # checkpoint dies with the work directory and the next attempt redoes
+        # ModelFinder from scratch. Keep it in a stable per-family location instead,
+        # so retries resume where the previous attempt was killed. This is what the
+        # giant TF families needed: exit 140 (128+SIGUSR2) on a 24 h limit currently
+        # throws away every hour of work done so far.
+        for src in "\$CKP_STASH" "${params.OUTDIR}/gene_trees/${id}.ckp.gz"; do
+            if [[ -s "\$src" ]] && gzip -t "\$src" 2>/dev/null; then
+                cp "\$src" ${id}.ckp.gz
+                echo "Resuming ${id} from checkpoint \$src" >> ${id}.log
+                break
+            fi
+        done
+
+        # gzip -t before installing: SLURM's warning signal can arrive while IQ-TREE2
+        # is mid-write, and a truncated checkpoint makes the next attempt fail instantly
+        # rather than resume. A bad copy is discarded and the previous good stash kept.
+        stash_ckp() {
+            if [[ -s ${id}.ckp.gz ]] && gzip -t ${id}.ckp.gz 2>/dev/null; then
+                cp -f ${id}.ckp.gz "\$CKP_STASH.tmp" && mv -f "\$CKP_STASH.tmp" "\$CKP_STASH"
+            fi
+            return 0
+        }
+        trap stash_ckp EXIT
+        trap 'stash_ckp; exit 140' USR2
+        trap 'stash_ckp; exit 143' TERM
+
+        # Background + wait so the shell can service USR2 promptly; a foreground child
+        # would defer the trap until after it exits.
+        set +e
+        python ${projectDir}/phylogeny/main.py phylogeny -f ${aln} --outprefix ${id} -c ${task.cpus} --method ${params.TREE_METHOD} --iqtree2_model ${params.IQTREE2_MODEL} >> ${id}.log 2>&1 &
+        PY_PID=\$!
+        wait "\$PY_PID"
+        RC=\$?
+        set -e
+
+        trap - EXIT USR2 TERM
+        if [[ "\$RC" -eq 0 ]]; then
+            # Succeeded: drop the stash so a later rerun on changed input can never
+            # resume from a stale checkpoint.
+            rm -f "\$CKP_STASH"
+        else
+            stash_ckp
+        fi
+        exit \$RC
         """
     }
 }
+
 process PVM {
 
 	tag "${params.tag_prefix ? params.tag_prefix + '_' : ''}${id}"
