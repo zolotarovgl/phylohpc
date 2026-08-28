@@ -264,9 +264,15 @@ process PVM {
 		script:
 		"""
 		export PYTHONNOUSERSITE=1
+		# --skiproot: this leg reads a GeneRax tree, which the reconciliation ALREADY rooted.
+		# POSSVM roots by default (iterative midpoint), and re-rooting a reconciled tree
+		# collapsed 38 of 146 TF families to one orthogroup spanning the whole tree
+		# (tfs.Forkhead.HG2: 1 group rooted vs 12 with the flag). PVM_PREV deliberately does
+		# NOT get this -- its IQ-TREE trees are genuinely unrooted and need the rooting.
 		python ${projectDir}/phylogeny/main.py possvm \
 		    -t ${tree} \
 		    --refsps ${params.REFSPECIES} \
+		    --skiproot \
 	    -r ${refnames_file} \
 	    -o ${id}.
 	"""
