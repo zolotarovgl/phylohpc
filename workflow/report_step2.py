@@ -937,8 +937,14 @@ def load_possvm_trees(possvm_dir: Path, source: str = "generax", family_info: di
             if stem.endswith(suffix):
                 stem = stem[: -len(suffix)]
                 break
-        # Strip GeneRax-specific suffixes so id == "Family.HG"
-        for suffix in (".generax.tree", ".generax"):
+        # Strip GeneRax-specific suffixes so id == "Family.HG".
+        # LONGEST FIRST: ".generax" is a prefix of the others, so if it came first the
+        # later entries would be unreachable. ".generax.support.tree" is the GXSUP output
+        # (SH-aLRT support added to the reconciled topology); without it every reconciled
+        # family parsed as "Family.HG.generax.support.tree" and failed to pair with its
+        # possvm_prev counterpart -- silently, so the generax-vs-prev comparison was wrong
+        # rather than absent.
+        for suffix in (".generax.support.tree", ".generax.tree", ".generax"):
             if stem.endswith(suffix):
                 stem = stem[: -len(suffix)]
                 break

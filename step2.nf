@@ -394,6 +394,10 @@ process PVM_PREV {
 // -----------------------------
 // Step-2 HTML report
 // -----------------------------
+// The report draws params.SPECIES_TREE -- the tree the run ACTUALLY used (59 taxa,
+// curated, polytomies resolved) -- not params.species_tree, which defaults to the shipped
+// 190-taxon reference. PROVENANCE.md flagged the old behaviour: "the species tree drawn
+// there is not the one the run used". Affects the figure in the HTML only, no result.
 process REPORT {
 
     publishDir "${params.OUTDIR}", mode: 'copy'
@@ -418,7 +422,7 @@ process REPORT {
 		    python ${projectDir}/workflow/report_step2.py \
 		        --results_dir     ${params.OUTDIR} \
 		        --family_info     ${file(params.family_info)} \
-		        --species_tree    ${file(params.species_tree)} \
+		        --species_tree    ${file(params.SPECIES_TREE)} \
 		        --species_info    ${projectDir}/data/species_info.tsv \
 	            ${refArgs} \
 	        --output          report_step2.html
