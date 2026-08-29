@@ -469,7 +469,13 @@ process GR_watcher {
         }
     }
 
-    maxRetries 5
+    // --signal=B:USR2@300 gives the batch shell 5 min of warning before the wall-clock
+    // kill, which is what lets the trap stash GeneRax's latest progress tree. GeneRax has
+    // no checkpoint of its own, so without this a killed attempt discards everything.
+    clusterOptions { '--signal=B:USR2@300' }
+
+    // one above the errorStrategy closure's threshold, or 'ignore' is unreachable
+    maxRetries 6
     maxErrors -1
 
     input:
@@ -513,7 +519,41 @@ process GR_watcher {
         export MKL_NUM_THREADS=${task.cpus}
         export NUMEXPR_NUM_THREADS=${task.cpus}
 
+        GR_STASH_DIR="${params.OUTDIR}/generax_ckp"
+        GR_STASH="\$GR_STASH_DIR/${id}.progress.tree"
+        mkdir -p "\$GR_STASH_DIR"
+
         touch ${id}.progress.tree
+
+        # GeneRax has NO checkpoint of its own: a killed run loses everything and the retry
+        # restarts from the original IQ-TREE topology. Its SPR search improves the tree
+        # iteratively though, and the watcher below already snapshots that. So stash the
+        # snapshot somewhere stable and start the next attempt from it. Measured on the TF
+        # run: the giants were being killed at 16-18 h having discarded every previous hour.
+        #
+        # Validation before use: same tip count as the alignment and a trailing ';'. The
+        # snapshot is a plain cp of a file GeneRax may be mid-write on, so a truncated copy
+        # is expected occasionally and must not be fed back in.
+        GENE_TREE="${tree}"
+        if [[ -s "\$GR_STASH" ]]; then
+            want=\$(grep -c '^>' ${aln})
+            got=\$(tr -cd ',' < "\$GR_STASH" | wc -c)
+            got=\$(( got + 1 ))
+            if [[ "\$got" -eq "\$want" ]] && tail -c 2 "\$GR_STASH" | grep -q ';'; then
+                cp "\$GR_STASH" ${id}.resume.tree
+                GENE_TREE="${id}.resume.tree"
+                echo "Resuming ${id} from stashed progress tree (\$got tips)" >&2
+            else
+                echo "Discarding stashed progress tree for ${id}: \$got/\$want tips, or no terminal ';'" >&2
+            fi
+        fi
+
+        stash_progress() {
+            if [[ -s ${id}.progress.tree ]] && tail -c 2 ${id}.progress.tree | grep -q ';'; then
+                cp -f ${id}.progress.tree "\$GR_STASH.tmp" && mv -f "\$GR_STASH.tmp" "\$GR_STASH"
+            fi
+            return 0
+        }
 
         progress_watcher() {
             while kill -0 \$MAIN_PID 2>/dev/null; do
@@ -528,7 +568,7 @@ process GR_watcher {
         python ${projectDir}/phylogeny/main.py generax \
             --name ${id} \
             --alignment ${aln} \
-            --gene_tree ${tree} \
+            --gene_tree \$GENE_TREE \
             --species_tree ${species_tree} \
             --output_dir ${id}_generax \
             --subs_model ${params.SUBS_MODEL} \
@@ -545,8 +585,10 @@ process GR_watcher {
         cleanup() {
             kill \$WATCH_PID 2>/dev/null || true
             wait \$WATCH_PID 2>/dev/null || true
+            stash_progress
         }
         trap cleanup EXIT INT TERM
+        trap 'cleanup; exit 140' USR2
 
         wait \$MAIN_PID
         EXIT_CODE=\$?
@@ -561,6 +603,12 @@ process GR_watcher {
         # written whether or not we ask, and were being discarded with the work directory.
         if [[ -d ${id}_generax/reconciliations ]]; then
             cp -r ${id}_generax/reconciliations ${id}.reconciliations || true
+        fi
+
+        if [[ "\$EXIT_CODE" -eq 0 ]]; then
+            rm -f "\$GR_STASH"
+        else
+            stash_progress
         fi
 
         exit \$EXIT_CODE
