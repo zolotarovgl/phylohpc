@@ -21,6 +21,15 @@ params.run_generax   = params.containsKey('run_generax') ? params.run_generax : 
 // Compute SH-aLRT support on the reconciled topology before POSSVM (see process GXSUP).
 // Set --gxsup false to hand POSSVM the raw GeneRax tree, whose "support" is a constant 1.0.
 params.gxsup         = params.containsKey('gxsup') ? params.gxsup : true
+// POSSVM -min_support_node: drops orthology/paralogy edges below this support before
+// clustering. Default 0 matches POSSVM's own default (no filtering) -- fully backward
+// compatible until someone opts in. Only wired into PVM (the GeneRax-tree leg); PVM_PREV
+// (raw IQ-TREE trees) is left untouched. helper/functions.py's possvm() rescales the
+// threshold if it exceeds the tree's observed max support (e.g. a fractional 0-1 scale,
+// or --gxsup false handing POSSVM GeneRax's raw placeholder support), and retries once
+// with min_support_node=0 if POSSVM still crashes with "no speciation events" (zero
+// events pass the filter) rather than failing the whole run.
+params.min_support_node = params.containsKey('min_support_node') ? params.min_support_node : 0
 params.OUTDIR        = params.containsKey('OUTDIR')
     ? params.OUTDIR
     : (params.containsKey('outdir') ? params.outdir : "${projectDir}/results")
@@ -323,6 +332,7 @@ process PVM {
 		    -t ${tree} \
 		    --refsps ${params.REFSPECIES} \
 		    --skiproot \
+		    --min_support_node ${params.min_support_node} \
 	    -r ${refnames_file} \
 	    -o ${id}.
 
