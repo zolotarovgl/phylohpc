@@ -26,8 +26,13 @@ workflow {
 
     def genefam_ch = Channel.value(file(params.genefam_info))
     def infasta_ch = Channel.value(file(params.infasta))
+    // Custom HMMs: staged as a path input so an edited .hmm invalidates the cache.
+    // [] is Nextflow's placeholder for an absent optional path input.
+    def hmmdir_ch  = Channel.value(params.hmm_dir
+        ? file(params.hmm_dir, type: 'dir', checkIfExists: true)
+        : [])
 
-    def search = SEARCH(families_ch, genefam_ch, infasta_ch)
+    def search = SEARCH(families_ch, genefam_ch, infasta_ch, hmmdir_ch)
 
     def nonempty = search.main
         .filter { pref, family, fasta -> fasta && fasta.size() > 0 }
@@ -53,6 +58,7 @@ process SEARCH {
   tuple val(pref), val(family)
   path(genefam_info, stageAs: 'genefam.csv')
   path(infasta,      stageAs: 'input.fasta')
+  path(hmm_dir,      stageAs: 'custom_hmms')
 
   output:
   tuple val(pref), val(family),
@@ -79,6 +85,7 @@ process SEARCH {
 		${family} \
 		-o . \
 		--pfam_db ${params.pfam_db} \
+		${params.hmm_dir ? '--hmm_dir custom_hmms' : ''} \
 		--domain_expand ${params.domain_expand} \
 		--ncpu ${task.cpus}
 
