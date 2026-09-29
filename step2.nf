@@ -340,7 +340,7 @@ process PVM {
 		# to test and a root-spanning group gets the root's own default, and ete3 returns 1.0 for
 		# both. Measured over 400 families: 15.4 % singleton, 4.8 % root-MRCA, and 19 groups whose
 		# 1.0 is REAL -- which is why this recomputes the MRCA instead of matching on "1.0".
-		# Drops singleton rows; sets support to -1 where the MRCA is the root.
+		# Drops singleton rows. Unmeasured supports (root / leaf / resolved-polytomy MRCA) arrive as NA from possvm.
 		for f in ${id}.*.ortholog_groups.csv; do
 		    if [ -s "\$f" ]; then python ${projectDir}/workflow/possvm_postprocess.py "\$f"; fi
 		done
@@ -394,7 +394,7 @@ process PVM_PREV {
 		# to test and a root-spanning group gets the root's own default, and ete3 returns 1.0 for
 		# both. Measured over 400 families: 15.4 % singleton, 4.8 % root-MRCA, and 19 groups whose
 		# 1.0 is REAL -- which is why this recomputes the MRCA instead of matching on "1.0".
-		# Drops singleton rows; sets support to -1 where the MRCA is the root.
+		# Drops singleton rows. Unmeasured supports (root / leaf / resolved-polytomy MRCA) arrive as NA from possvm.
 		for f in ${id}.*.ortholog_groups.csv; do
 		    if [ -s "\$f" ]; then python ${projectDir}/workflow/possvm_postprocess.py "\$f"; fi
 		done
